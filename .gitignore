@@ -6,6 +6,7 @@ venv/
 .ruff_cache/
 .pytest_cache/
 migrations/
+.github/
 
 # 数据库文件
 db.sqlite3
