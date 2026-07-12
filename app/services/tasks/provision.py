@@ -1,0 +1,244 @@
+"""
+建站任务执行器 —— 1Panel WordPress 建站全流程
+
+独立的执行器层，不依赖 API 层（site_pipeline.py）。
+
+流程步骤（10 步）：
+  1. create_site        - 创建 WordPress 网站
+  2. apply_ssl          - 申请/绑定 SSL 证书
+  3. restore_db         - 恢复数据库
+  4. restore_files      - 恢复模板文件
+  5. rebuild_after_files- 重建容器
+  6. replace_domain     - 域名替换
+  7. patch_wp_config    - wp-config.php 配置
+  8. rebuild_after_patch- 重建容器
+  9. health_check       - 健康检查
+  10. create_woo_ctx    - WooCommerce Key + CTX 刷新
+"""
+
+import asyncio
+import logging
+from datetime import datetime
+
+from app.models.operation_job import OperationJob
+from app.core.exceptions import ProviderConfigError, WordPressOperationError
+from app.services.onepanel_service import (
+    OnePanelAPI,
+    OnePanelDatabaseRestorer,
+    OnePanelFileManager,
+    OnePanelSiteManager,
+    OnePanelSSLManager,
+    OnePanelWordPressRestorer,
+)
+from app.utils.provider_resolver import ProviderResolver
+from .runner import TaskRunner
+
+_log = logging.getLogger(__name__)
+
+_PROVISION_TIMEOUT_MINUTES = 30
+
+
+class ProvisionTaskRunner(TaskRunner):
+    """1Panel 建站全流程执行器"""
+
+    async def execute(self, site_id: int) -> dict:
+        """建站入口：校验 → 创建任务 → 后台执行"""
+        from app.controllers.site_pipeline import site_controller
+
+        site = await site_controller.get(id=site_id)
+        blocked = await _check_provision_blocked(site_id)
+        if blocked:
+            return {"ok": False, "code": 400, "msg": "该站点已有建站任务执行中，请勿重复触发"}
+
+        job = await self._create_job(site_id, site.domain, "provision", total_steps=10)
+        asyncio.create_task(self._run(job, site))
+        return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 10}
+
+    async def _run(self, job: OperationJob, site):
+        # 优先 pipeline Provider 的 max_concurrent，回退 settings
+        _mc_val = await ProviderResolver.get_config('pipeline', 'max_concurrent', default='')
+        max_cc = int(_mc_val) if _mc_val and _mc_val.isdigit() else 3
+        async with asyncio.Semaphore(max_cc):
+            await self._run_impl(job, site)
+
+    async def _run_impl(self, job: OperationJob, site):
+        self._with_trace(site.id, "provision")
+        try:
+            api = OnePanelAPI()
+            files = OnePanelFileManager(api)
+            site_manager = OnePanelSiteManager(api, file_manager=files)
+            ssl_manager = OnePanelSSLManager(api)
+            db_restorer = OnePanelDatabaseRestorer(api)
+            wp_restorer = OnePanelWordPressRestorer(api, files)
+
+            # Step 1: create_site
+            await self._update_step(job, "create_site")
+            app_info = await self._exec(lambda: site_manager.create_wordpress_website(site))
+
+            app_id = int(app_info.get('app_id') or 0)
+            onepanel_site_id = int(app_info.get('site_id') or 0)
+            service_name = str(app_info.get('service_name') or '')
+            params = app_info.get('params') or {}
+            db_name = str(params.get('PANEL_DB_NAME') or params.get('DB_NAME') or '')
+
+            for field, value in [
+                ('onepanel_site_id', onepanel_site_id),
+                ('onepanel_app_id', app_id),
+                ('onepanel_service_name', service_name),
+                ('db_name', db_name),
+            ]:
+                if hasattr(site, field):
+                    setattr(site, field, value)
+            site.onepanel_status = 'site_created'
+            site.pipeline_status = 'onepanel:site_created'
+            await site.save()
+
+            # Step 2: apply_ssl
+            await self._update_step(job, "apply_ssl")
+            protocol = 'http'
+            if not onepanel_site_id:
+                _log.warning("跳过 SSL 申请：site_id 为空")
+            else:
+                try:
+                    protocol = await self._exec(
+                        lambda: ssl_manager.apply_and_bind(onepanel_site_id, site.domain)
+                    )
+                except Exception as exc:
+                    _log.warning("SSL 申请异常：%s", exc)
+            if protocol not in ('http', 'https'):
+                protocol = 'http'
+
+            # Step 3: restore_db
+            await self._update_step(job, "restore_db")
+            await self._exec(lambda: db_restorer.restore(db_name))
+
+            # Step 4: restore_files
+            await self._update_step(job, "restore_files")
+            await self._exec(lambda: wp_restorer.restore_files(service_name))
+
+            # Step 5: rebuild
+            await self._update_step(job, "rebuild_after_files")
+            await self._exec(lambda: site_manager.rebuild_app(app_id))
+
+            # Step 6: replace_domain
+            await self._update_step(job, "replace_domain")
+            old_domain = (
+                wp_restorer.old_source_domain
+                or ProviderResolver.sync_get_config('onepanel', 'old_source_domain', default='').strip()
+            )
+            if not old_domain:
+                raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
+            replace_token = ''
+            try:
+                replace_token = await self._exec(
+                    lambda: wp_restorer.inject_domain_replace_script(
+                        service_name=service_name, old_domain=old_domain,
+                        new_domain=site.domain, target_protocol=protocol,
+                    )
+                )
+                await self._exec(
+                    lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token)
+                )
+            finally:
+                if replace_token:
+                    await self._exec(
+                        lambda: wp_restorer.remove_domain_replace_script(service_name)
+                    )
+
+            # Step 7: patch_wp_config
+            await self._update_step(job, "patch_wp_config")
+            await self._exec(
+                lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol)
+            )
+
+            # Step 8: rebuild
+            await self._update_step(job, "rebuild_after_patch")
+            await self._exec(lambda: site_manager.rebuild_app(app_id))
+
+            # Step 9: health_check
+            await self._update_step(job, "health_check")
+            health_ok = await self._exec(
+                lambda: wp_restorer.health_check(site.domain, protocol)
+            )
+            if not health_ok:
+                raise WordPressOperationError("health check", domain=site.domain, detail=f"协议={protocol}")
+
+            # Step 10: create_woo_ctx
+            await self._update_step(job, "create_woo_ctx")
+            woo_token = ''
+            woo_ck, woo_cs = '', ''
+            try:
+                woo_token = await self._exec(
+                    lambda: wp_restorer.inject_woo_script(service_name)
+                )
+                woo_ck, woo_cs = await self._exec(
+                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol)
+                )
+            finally:
+                if woo_token:
+                    await self._exec(lambda: wp_restorer.remove_woo_script(service_name))
+
+            ctx_refresh_url = await self._exec(
+                lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol)
+            )
+            feed_link = await self._exec(
+                lambda: wp_restorer.fetch_last_feed_link(ctx_refresh_url)
+            ) or ''
+            login_url = f'{protocol}://{site.domain}/wp-admin'
+
+            site.status = '已创建'
+            site.login_url = login_url
+            site.woo_ck = woo_ck
+            site.woo_cs = woo_cs
+            site.ctx_refresh_url = ctx_refresh_url
+            site.feed_link = feed_link
+            if hasattr(site, 'protocol'):
+                site.protocol = protocol
+            site.onepanel_status = 'provision_success'
+            site.pipeline_status = 'onepanel:success'
+            await site.save()
+
+            await self._complete_job(job, ok=True, result={
+                "service_name": service_name,
+                "site_id": onepanel_site_id,
+                "app_id": app_id,
+                "db_name": db_name,
+                "protocol": protocol,
+                "login_url": login_url,
+                "feeds": feeds,
+                "feed_link": feed_link,
+                "ctx_refresh_url": ctx_refresh_url,
+                "woo_ck": woo_ck,
+                "woo_cs": woo_cs,
+            }, site=site)
+
+        except Exception as exc:
+            _log.exception("建站执行失败: %s", exc)
+            await self._complete_job(job, ok=False, error=str(exc), site=site, exc=exc)
+
+
+async def _check_provision_blocked(site_id: int):
+    """检查站点是否被阻塞的建站任务占用。超时任务自动标记失败。"""
+    for status in ("running", "pending"):
+        job = await OperationJob.filter(
+            resource_type="site",
+            resource_id=site_id,
+            action_type="provision",
+            status=status,
+        ).first()
+        if not job:
+            continue
+        if job.started_at:
+            elapsed = (datetime.now() - job.started_at.replace(tzinfo=None)).total_seconds() / 60
+            if elapsed > _PROVISION_TIMEOUT_MINUTES:
+                job.status = "failed"
+                job.error_message = f"建站超时（{elapsed:.0f}分钟）"
+                job.finished_at = datetime.now()
+                await job.save()
+                _log.warning("自动清理超时建站任务: site_id=%s, job_id=%s", site_id, job.id)
+                return None
+        return job
+    return None
+
+
+provision_task_runner = ProvisionTaskRunner()

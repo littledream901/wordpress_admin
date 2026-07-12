@@ -1,0 +1,31 @@
+__pycache__/
+.idea/
+venv/
+.mypy_cache/
+.vscode
+.ruff_cache/
+.pytest_cache/
+migrations/
+
+# 数据库文件
+db.sqlite3
+db.sqlite3-journal
+db.sqlite3-shm
+db.sqlite3-wal
+
+# 环境变量（生产密钥）
+.env
+
+# Agent 打包产物
+agent_build/build/
+agent_build/dist/
+
+# API 文档导出
+doc.json
+
+# Docker 数据目录
+data/
+logs/
+
+.DS_Store
+._.DS_Store

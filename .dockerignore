@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+*.egg
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+web/node_modules/
+
+# 环境文件（运行时注入）
+.env
+.env.local
+.env.*.local
+
+# 数据库
+*.sqlite3
+*.db
+
+# 文档
+doc.json
+*.md
+!README.md
+
+# 部署（不在镜像内使用）
+deploy/
+
+# 日志
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 测试
+tests/
+test_*.py
+*.test.js
