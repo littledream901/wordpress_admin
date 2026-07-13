@@ -98,7 +98,7 @@ export function injectJsonStyles() {
   style.textContent = `
 .json-key   { color: #89b4fa; cursor: pointer; }
 .json-colon { color: #a6adc8; }
-.json-string { color: #a6e3a1; word-break: break-all; }
+.json-string { color: #a6e3a1; }
 .json-number { color: #fab387; }
 .json-boolean { color: #cba6f7; }
 .json-null  { color: #f38ba8; font-style: italic; }

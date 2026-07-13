@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from app.models.feed_file import FeedFile
 from app.schemas.base import Fail, Success, SuccessExtra
 
-router = APIRouter()
+router = APIRouter(tags=["Feed"])
 feed_download_router = APIRouter()  # 公开下载路由，无需认证
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "feeds")

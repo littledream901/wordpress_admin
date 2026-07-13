@@ -1,4 +1,7 @@
 """Provider Controller"""
+import re
+from urllib.parse import urlparse
+
 from app.core.crud import CRUDBase
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.site_pipeline import Site
@@ -7,6 +10,25 @@ from app.schemas.config_provider import (
     ProviderConfigItemCreate, ProviderConfigItemUpdate,
     ResourceProviderBindingCreate,
 )
+
+# ── 配置值类型校验 ──
+_VALIDATORS = {
+    "int":    (lambda v: v == "" or re.fullmatch(r"-?\d+", v), "必须为整数"),
+    "float":  (lambda v: v == "" or re.fullmatch(r"-?\d+(\.\d+)?", v), "必须为数字"),
+    "bool":   (lambda v: v.lower() in ("true", "false", "1", "0", ""), "必须为 true/false/1/0"),
+    "url":    (lambda v: v == "" or bool(urlparse(v).scheme), "必须为有效 URL"),
+}
+
+
+def _validate_config_value(config_key: str, config_type: str, value: str):
+    """校验配置值格式，不合法抛出 ValueError"""
+    if not config_type or config_type in ("string", "token", "path", "password"):
+        return  # 无格式限制
+    validator = _VALIDATORS.get(config_type)
+    if validator:
+        is_valid, hint = validator
+        if not is_valid(value):
+            raise ValueError(f"配置项 [{config_key}] 类型为 {config_type}，值 '{value}' 不合法：{hint}")
 
 
 class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, ConfigProviderUpdate]):
@@ -98,8 +120,9 @@ class ProviderConfigItemController(CRUDBase[ProviderConfigItem, ProviderConfigIt
         return await self.model.filter(provider_id=provider_id).order_by("sort").all()
 
     async def batch_save(self, provider_id: int, items: list[ProviderConfigItemCreate]):
-        """批量保存配置项：存在则更新值，不存在则新增"""
+        """批量保存配置项：存在则更新值，不存在则新增（含类型校验）"""
         for item in items:
+            _validate_config_value(item.config_key, item.config_type, item.config_value)
             existed = await self.model.filter(provider_id=provider_id, config_key=item.config_key).first()
             if existed:
                 await self.model.filter(id=existed.id).update(

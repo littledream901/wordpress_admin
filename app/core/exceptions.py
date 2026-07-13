@@ -202,9 +202,10 @@ class DomainAlreadyExistsError(BusinessError):
     """域名已被占用"""
     error_code = ErrorCode.DOMAIN_ALREADY_EXISTS
 
-    def __init__(self, domain: str, site_id: int = 0):
+    def __init__(self, domain: str, site_id: int = 0, onepanel_site_id: int = 0):
         self.domain = domain
         self.site_id = site_id
+        self.onepanel_site_id = onepanel_site_id
         super().__init__(f"域名已存在站点: {domain}")
 
 

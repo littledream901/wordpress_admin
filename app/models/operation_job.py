@@ -30,7 +30,7 @@ class OperationJob(BaseModel, TimestampMixin):
         ("hub_create_env", "Hub创建环境"),
         ("hub_create_account", "Hub创建账号"),
         ("hub_update_env", "Hub更新环境"),
-        ("hub_website_control", "Hub网站控制"),
+        ("hub_website_control", "Hub登录WP"),
         ("import_sites", "导入站点"),
         ("import_gmail", "导入Gmail"),
         ("import_shopify_sources", "导入采集源"),
@@ -60,6 +60,7 @@ class OperationJob(BaseModel, TimestampMixin):
     result_json = fields.TextField(default="{}", description="任务结果(JSON)")
     error_message = fields.TextField(default="", description="错误信息")
     worker_name = fields.CharField(max_length=128, default="", description="执行节点")
+    last_heartbeat = fields.DatetimeField(null=True, description="最后心跳时间")
     batch_id = fields.CharField(max_length=64, default="", description="批次ID（批量操作）", index=True)
     retry_count = fields.IntField(default=0, description="已重试次数")
     max_retry = fields.IntField(default=3, description="最大重试次数")

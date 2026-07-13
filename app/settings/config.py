@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_MAX_REQUESTS: int = 100  # 每分钟最大请求数
     RATE_LIMIT_WINDOW_SECONDS: int = 60  # 限流窗口（秒）
 
+    # ── 审计日志 ──
+    AUDIT_EXCLUDE_PATHS: typing.List[str] = []
+    """审计日志排除路径列表，支持前缀匹配（如 /static）和通配符（如 /api/v1/*/download）。
+    留空则使用内置默认值（静态文件、文档、上传接口、流式下载等）"""
+
     # ── Redis（分布式限流 / 缓存，可选）──
     REDIS_URL: str = ""
     """Redis 连接地址，格式: redis://[:password@]host:port/db。

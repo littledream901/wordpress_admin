@@ -50,6 +50,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# 用户上传数据
+app/uploads/
+
 # 测试
 tests/
 test_*.py

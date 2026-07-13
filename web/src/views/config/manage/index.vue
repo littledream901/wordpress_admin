@@ -49,29 +49,14 @@
         </n-space>
       </template>
 
-      <!-- JSON 模式：语法高亮可编辑 -->
+      <!-- JSON 模式 -->
       <div v-if="editMode === 'json'" mb-16>
-        <div class="json-toolbar">
-          <n-text v-if="jsonError" type="error" depth="2" style="font-size: 12px">
-            JSON 解析错误: {{ jsonError }}
-          </n-text>
-          <n-text v-else depth="3" style="font-size: 12px">
-            直接编辑 JSON，点击空白处自动同步到表单
-          </n-text>
-        </div>
-        <div class="json-editor">
-          <pre class="json-highlight" aria-hidden="true" v-html="jsonHighlighted" ref="jsonPre"></pre>
-          <textarea
-            ref="jsonTextarea"
-            v-model="jsonText"
-            :rows="Math.max(12, jsonLineCount)"
-            spellcheck="false"
-            placeholder='{"key": "value", ...}'
-            @input="onJsonInput"
-            @scroll="onJsonScroll"
-            @blur="syncJsonToForm"
-          ></textarea>
-        </div>
+        <JsonEditor
+          v-model="jsonText"
+          hint="直接编辑 JSON，点击空白处自动同步到表单"
+          @blur="syncJsonToForm"
+          @change="syncJsonToForm"
+        />
       </div>
 
       <!-- 表单编辑器 -->
@@ -217,12 +202,10 @@ import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
 import TheIcon from '@/components/icon/TheIcon.vue'
+import JsonEditor from '@/components/editor/JsonEditor.vue'
 import { useCRUD } from '@/composables'
 import api from '@/api/configProvider'
 import accountsApi from '@/api'
-import { syntaxHighlight, injectJsonStyles } from '@/utils/jsonTree'
-
-injectJsonStyles()
 
 defineOptions({ name: '配置中心' })
 
@@ -365,10 +348,6 @@ const saving = ref(false)
 const editMode = ref('form')
 const jsonText = ref('')
 const jsonError = ref('')
-const jsonLineCount = ref(12)
-const jsonHighlighted = ref('')
-const jsonPre = ref(null)
-const jsonTextarea = ref(null)
 
 function selectProvider(row) {
   selectedProvider.value = { ...row }
@@ -414,11 +393,7 @@ async function loadBoundAccounts(providerId) {
 function buildJsonFromItems() {
   const obj = {}
   for (const item of itemList.value) {
-    let val = item.config_value
-    if (item.config_type === 'int') val = parseInt(val) || 0
-    else if (item.config_type === 'float') val = parseFloat(val) || 0
-    else if (item.config_type === 'bool') val = val === 'true' || val === '1'
-    obj[item.config_key] = val
+    obj[item.config_key] = item.config_value
   }
   return JSON.stringify(obj, null, 2)
 }
@@ -426,25 +401,7 @@ function buildJsonFromItems() {
 function syncFormToJson() {
   if (editMode.value === 'json') {
     jsonText.value = buildJsonFromItems()
-    jsonLineCount.value = Math.max(12, jsonText.value.split('\n').length + 2)
     jsonError.value = ''
-    highlightJson()
-  }
-}
-
-function highlightJson() {
-  jsonHighlighted.value = syntaxHighlight(jsonText.value)
-}
-
-function onJsonInput() {
-  highlightJson()
-  jsonLineCount.value = Math.max(12, jsonText.value.split('\n').length + 2)
-}
-
-function onJsonScroll() {
-  if (jsonPre.value && jsonTextarea.value) {
-    jsonPre.value.scrollTop = jsonTextarea.value.scrollTop
-    jsonPre.value.scrollLeft = jsonTextarea.value.scrollLeft
   }
 }
 
@@ -474,9 +431,7 @@ function syncJsonToForm() {
 function toggleEditMode() {
   if (editMode.value === 'form') {
     jsonText.value = buildJsonFromItems()
-    jsonLineCount.value = Math.max(12, jsonText.value.split('\n').length + 2)
     jsonError.value = ''
-    highlightJson()
     editMode.value = 'json'
   } else {
     syncJsonToForm()
@@ -530,73 +485,3 @@ onMounted(async () => {
   $table.value?.handleSearch()
 })
 </script>
-
-<style scoped>
-/* ─── JSON 高亮编辑器 ─── */
-.json-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.json-editor {
-  position: relative;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #1e1e2e;
-  border: 1px solid #313244;
-  margin-bottom: 8px;
-}
-
-.json-highlight,
-.json-editor textarea {
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.7;
-  padding: 14px;
-  margin: 0;
-  border: none;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-  tab-size: 2;
-}
-
-.json-highlight {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.json-editor textarea {
-  position: relative;
-  z-index: 2;
-  color: transparent;
-  caret-color: #e0e0e0;
-  background: transparent;
-  resize: vertical;
-  width: 100%;
-  outline: none;
-}
-
-.json-editor textarea::placeholder {
-  color: #5c5c7a;
-}
-
-.json-editor textarea:focus {
-  box-shadow: 0 0 0 2px rgba(130, 170, 255, 0.35) inset;
-}
-
-@media (max-width: 640px) {
-  .json-highlight,
-  .json-editor textarea {
-    font-size: 12px;
-    padding: 10px;
-  }
-}
-</style>

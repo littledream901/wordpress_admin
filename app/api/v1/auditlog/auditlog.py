@@ -6,7 +6,7 @@ from tortoise.expressions import Q
 from app.controllers.auditlog import auditlog_controller
 from app.schemas import SuccessExtra
 
-router = APIRouter()
+router = APIRouter(tags=["AuditLog"])
 
 
 @router.get("/list", summary="查看操作日志")

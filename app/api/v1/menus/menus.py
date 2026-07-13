@@ -10,7 +10,7 @@ from app.schemas.menus import *
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Menu"])
 
 # ── 路径校验正则 ──
 _PATH_RE = re.compile(r'^[a-zA-Z0-9_\-/.]+$')  # 只允许字母/数字/下划线/连字符/点/斜杠

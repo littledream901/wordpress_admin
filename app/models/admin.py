@@ -3,7 +3,7 @@ from tortoise import fields
 from app.schemas.menus import MenuType
 
 from .base import BaseModel, TimestampMixin
-from .enums import MethodType
+from .enums import DataScope, MethodType
 
 
 class User(BaseModel, TimestampMixin):
@@ -26,8 +26,10 @@ class User(BaseModel, TimestampMixin):
 class Role(BaseModel, TimestampMixin):
     name = fields.CharField(max_length=20, unique=True, description="角色名称", index=True)
     desc = fields.CharField(max_length=500, null=True, description="角色描述")
+    data_scope = fields.IntEnumField(DataScope, default=DataScope.SELF_ONLY, description="数据权限范围", index=True)
     menus = fields.ManyToManyField("models.Menu", related_name="role_menus")
     apis = fields.ManyToManyField("models.Api", related_name="role_apis")
+    custom_depts = fields.ManyToManyField("models.Dept", related_name="role_custom_depts")
 
     class Meta:
         table = "role"
@@ -38,6 +40,7 @@ class Api(BaseModel, TimestampMixin):
     method = fields.CharEnumField(MethodType, description="请求方法", index=True)
     summary = fields.CharField(max_length=500, description="请求简介", index=True)
     tags = fields.CharField(max_length=100, description="API标签", index=True)
+    is_button = fields.BooleanField(default=False, description="是否为按钮权限", index=True)
 
     class Meta:
         table = "api"
@@ -75,6 +78,18 @@ class DeptClosure(BaseModel, TimestampMixin):
     ancestor = fields.IntField(description="父代", index=True)
     descendant = fields.IntField(description="子代", index=True)
     level = fields.IntField(default=0, description="深度", index=True)
+
+
+class RoleDataScope(BaseModel):
+    """角色按业务模块的数据权限配置"""
+    role = fields.ForeignKeyField("models.Role", related_name="data_scopes", description="角色")
+    resource = fields.CharField(max_length=64, description="业务模块标识（如 site/account/gmail）", index=True)
+    data_scope = fields.IntEnumField(DataScope, default=DataScope.SELF_ONLY, description="数据权限范围", index=True)
+    custom_depts = fields.ManyToManyField("models.Dept", related_name="role_data_scope_custom_depts")
+
+    class Meta:
+        table = "role_data_scope"
+        unique_together = [("role_id", "resource")]
 
 
 class AuditLog(BaseModel, TimestampMixin):

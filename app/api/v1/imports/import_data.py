@@ -12,8 +12,8 @@ from app.controllers.import_job import import_job_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.services.import_service import import_service
 
-router = APIRouter(tags=["数据导入"])
-template_router = APIRouter(tags=["导入模板"])  # 无认证，模板下载用
+router = APIRouter(tags=["Import"])
+template_router = APIRouter(tags=["Template"])  # 无认证，模板下载用
 
 
 # 模板表头定义

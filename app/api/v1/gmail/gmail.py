@@ -10,7 +10,7 @@ from app.models.gmail_account import GmailAccount
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.gmail_account import GmailAccountCreate, GmailAccountUpdate, GmailAssign, GmailHealthStatus
 
-router = APIRouter()
+router = APIRouter(tags=["Gmail"])
 
 
 @router.get('/list', summary='Gmail 列表')

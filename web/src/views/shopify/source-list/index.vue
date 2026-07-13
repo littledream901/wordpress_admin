@@ -181,7 +181,7 @@ const batchImportResult = ref('')
 const batchImportResultType = ref('success')
 
 const batchImportPreviewColumns = [
-  { title: '序号', key: 'index', width: 40 },
+  { title: '序号', key: 'index', width: 50 },
   { title: 'URL', key: 'url', ellipsis: { tooltip: true }, width: 300 },
   { title: '类型', key: 'typeLabel', width: 60, render: (r) => h(NTag, { type: r.valid ? 'success' : 'error', size: 'small' }, { default: () => r.typeLabel }) },
   { title: '状态', key: 'valid', width: 50, render: (r) => h(NTag, { type: r.valid ? 'success' : 'error', size: 'small' }, { default: () => r.valid ? '有效' : '无效' }) },
@@ -236,7 +236,7 @@ const columns = [
     multiple: true,
     disabled: () => false,
   },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '来源URL', key: 'source_url', ellipsis: { tooltip: true }, width: 300 },
   { title: '类型', key: 'source_type', width: 100 },
   { title: '状态', key: 'status', width: 120, render: (r) => statusTag(r.status) },

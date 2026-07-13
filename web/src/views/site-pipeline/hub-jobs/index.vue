@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, h } from 'vue'
+import { ref, reactive, h, onMounted } from 'vue'
 import { NButton, NTag, useMessage } from 'naive-ui'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
@@ -114,15 +114,21 @@ async function getData({ page, page_size, job_type, status, domain }) {
   return { data: res?.data ?? [], total: res?.total ?? 0 }
 }
 
+onMounted(() => {
+  crudRef.value?.handleSearch()
+})
+
 // ─── 选项 ───
 const jobTypeOptions = [
   { value: '', label: '全部' },
   { value: 'create_env', label: '创建环境' },
   { value: 'create_account', label: '创建账号' },
   { value: 'update_env', label: '更新环境' },
-  { value: 'website_control', label: '网站控制' },
+  { value: 'website_control', label: '登录WP' },
   { value: 'gmc_check', label: 'GMC检查' },
 ]
+const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]))
+function jobTypeLabel(v) { return jobTypeMap[v] || v }
 
 const statusOptions = [
   { value: '', label: '全部状态' },
@@ -215,9 +221,9 @@ const statusType = (s) => {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', width: 180, ellipsis: { tooltip: true } },
-  { title: '类型', key: 'job_type', width: 100 },
+  { title: '类型', key: 'job_type', width: 100, render: row => jobTypeLabel(row.job_type) },
   {
     title: '状态', key: 'status', width: 80,
     render: row => h(NTag, { type: statusType(row.status), size: 'small' }, { default: () => row.status }),

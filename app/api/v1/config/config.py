@@ -4,7 +4,7 @@ from app.controllers.config import config_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.config import ConfigCreate, ConfigUpdate
 
-router = APIRouter(tags=["配置管理"])
+router = APIRouter(tags=["Config"])
 
 CATEGORY_LABELS = {
     'onepanel': '1Panel',

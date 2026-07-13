@@ -12,7 +12,7 @@ from .tasks import (
     create_env,
     gmc_check,
     update_env,
-    website_control,
+    wp_login,
 )
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -78,7 +78,7 @@ class HubStudioLocalExecutor:
             "create_env": create_env.execute_create_env,
             "create_account": create_account.execute_create_account,
             "update_env": update_env.execute_update_env,
-            "website_control": website_control.execute_website_control,
+            "website_control": wp_login.execute_wp_login,
             "gmc_check": gmc_check.execute_gmc_check,
         }
         handler = _map.get(job_type)
@@ -98,7 +98,7 @@ class HubStudioLocalExecutor:
         return update_env.execute_update_env(self, job, payload)
 
     def execute_website_control(self, job: dict, payload: dict) -> dict:
-        return website_control.execute_website_control(self, job, payload)
+        return wp_login.execute_wp_login(self, job, payload)
 
     def execute_gmc_check(self, job: dict, payload: dict) -> dict:
         return gmc_check.execute_gmc_check(self, job, payload)

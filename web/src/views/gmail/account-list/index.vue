@@ -112,7 +112,7 @@ async function copyText(row, field, label) {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   {
     title: 'Username', key: 'username', width: 280,
     render: (row) => h(NSpace, { size: 'small' }, {

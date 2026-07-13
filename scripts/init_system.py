@@ -12,6 +12,7 @@
 import asyncio
 import sys
 import os
+import traceback
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -26,6 +27,7 @@ async def main():
         print(">>> 系统初始化完成")
     except Exception as e:
         print(f">>> 初始化失败: {e}")
+        traceback.print_exc()
         sys.exit(1)
 
 

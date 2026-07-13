@@ -114,7 +114,7 @@ const defaultDomain = ref('')
 
 // ── 源文件列 ──
 const sourceColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
   {
     title: '检测域名', key: 'source_domain', width: 150, ellipsis: { tooltip: true },
@@ -140,7 +140,7 @@ const sourceColumns = [
 
 // ── 已处理文件列 ──
 const processedColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '原始文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
   {
     title: '新文件名', key: 'processed_name', width: 150, ellipsis: { tooltip: true },

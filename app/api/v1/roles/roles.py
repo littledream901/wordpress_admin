@@ -9,7 +9,7 @@ from app.schemas.base import Success, SuccessExtra
 from app.schemas.roles import *
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(tags=["Role"])
 
 
 @router.get("/list", summary="查看角色列表")
@@ -63,11 +63,33 @@ async def delete_role(
 async def get_role_authorized(id: int = Query(..., description="角色ID")):
     role_obj = await role_controller.get(id=id)
     data = await role_obj.to_dict(m2m=True)
+
+    # 查询按业务模块的数据权限配置
+    from app.models.admin import RoleDataScope
+    data_scopes_list = []
+    scope_objs = await RoleDataScope.filter(role=role_obj).prefetch_related("custom_depts")
+    for scope in scope_objs:
+        depts = await scope.custom_depts.all().values("id", "name")
+        data_scopes_list.append({
+            "id": scope.id,
+            "resource": scope.resource,
+            "data_scope": scope.data_scope,
+            "custom_depts": list(depts),
+        })
+    data["data_scopes"] = data_scopes_list
+
     return Success(data=data)
 
 
 @router.post("/authorized", summary="更新角色权限")
 async def update_role_authorized(role_in: RoleUpdateMenusApis):
     role_obj = await role_controller.get(id=role_in.id)
-    await role_controller.update_roles(role=role_obj, menu_ids=role_in.menu_ids, api_infos=role_in.api_infos)
+    await role_controller.update_roles_full(
+        role=role_obj,
+        menu_ids=role_in.menu_ids,
+        api_infos=role_in.api_infos,
+        data_scope=role_in.data_scope,
+        custom_dept_ids=role_in.custom_dept_ids,
+        data_scopes=[ds.model_dump() for ds in role_in.data_scopes] if role_in.data_scopes else None,
+    )
     return Success(msg="Updated Successfully")

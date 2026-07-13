@@ -9,7 +9,7 @@ from app.schemas.config_provider import (
     ResourceProviderBindingCreate,
 )
 
-router = APIRouter(tags=["配置中心"])
+router = APIRouter(tags=["Provider"])
 
 
 # ── Provider CRUD ──
@@ -77,6 +77,9 @@ async def list_items(provider_id: int = Query(...)):
 
 @router.post('/items/update', summary='更新配置项')
 async def update_item(payload: ProviderConfigItemUpdate):
+    from app.controllers.config_provider import _validate_config_value
+    if payload.config_value is not None and payload.config_type:
+        _validate_config_value(f"id={payload.id}", payload.config_type, payload.config_value)
     await provider_item_controller.update(id=payload.id, obj_in=payload)
     return Success(msg='更新成功')
 

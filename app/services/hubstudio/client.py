@@ -63,9 +63,6 @@ class HubStudioClient:
         return self.post("/api/v1/env/del", {"containerCodes": [int(c) for c in containerCodes]})
 
     # ── 账号管理 ──
-    def create_account(self, **kwargs) -> dict:
-        return self.post("/api/v1/account/create", kwargs)
-
     def add_container_account(self, **kwargs) -> dict:
         return self.post("/api/v1/container/add-account", kwargs)
 

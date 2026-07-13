@@ -17,6 +17,7 @@ export default {
   batchRedirect: (ids = [], targetUrl = '') => request.post('/site-pipeline/site/batch-redirect', { site_ids: ids, target_url: targetUrl }),
   batchHubDispatch: (ids = [], jobType = 'create_env') => request.post('/site-pipeline/site/batch-hub-dispatch', { site_ids: ids, job_type: jobType }),
   batchWooImport: (ids = []) => request.post('/site-pipeline/site/batch-woo-import', ids),
+  batchAssign: (data = {}) => request.post('/site-pipeline/site/batch-assign', data),
 
   // 单条操作
   provisionSite: (siteId) => request.post(`/site-pipeline/site/${siteId}/provision`),
@@ -24,6 +25,7 @@ export default {
   provisionDynadotNs: (siteId) => request.post(`/site-pipeline/site/${siteId}/dynadot-ns`),
   provisionRedirect: (siteId, data = { target_url: '' }) => request.post(`/site-pipeline/site/${siteId}/redirect`, data),
   importWoo: (siteId) => request.post(`/site-pipeline/site/${siteId}/woo-import`),
+  refreshWooCount: (siteId) => request.post(`/site-pipeline/site/${siteId}/refresh-woo-count`),
 
   // HubStudio
   getHubJobList: (params = {}) => request.get('/site-pipeline/hub-job/list', { params }),

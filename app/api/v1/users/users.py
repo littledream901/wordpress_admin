@@ -14,7 +14,7 @@ from app.schemas.users import *
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["User"])
 
 
 @router.get("/list", summary="查看用户列表")

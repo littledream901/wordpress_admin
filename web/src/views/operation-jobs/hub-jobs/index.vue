@@ -172,9 +172,11 @@ const jobTypeOptions = [
   { value: 'create_env', label: '创建环境' },
   { value: 'create_account', label: '创建账号' },
   { value: 'update_env', label: '更新环境' },
-  { value: 'website_control', label: '网站控制' },
+  { value: 'website_control', label: '登录WP' },
   { value: 'gmc_check', label: 'GMC检查' },
 ]
+const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]))
+function jobTypeLabel(v) { return jobTypeMap[v] || v }
 
 const statusOptions = [
   { value: '', label: '全部' },
@@ -197,9 +199,9 @@ const columns = [
     type: 'selection',
     width: 40,
   },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', ellipsis: { tooltip: true }, width: 180 },
-  { title: '类型', key: 'job_type', width: 90 },
+  { title: '类型', key: 'job_type', width: 90, render: row => jobTypeLabel(row.job_type) },
   {
     title: '状态', key: 'status', width: 80,
     render(r) { return h(NTag, { type: statusTypeMap[r.status] || 'default', size: 'small' }, r.status) },

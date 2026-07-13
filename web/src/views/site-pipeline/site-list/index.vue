@@ -2,8 +2,8 @@
   <CommonPage show-header title="站点流水线">
     <template #action>
       <n-space>
-        <n-button type="primary" @click="showAdd = true">新增站点</n-button>
-        <n-button @click="showBatchAdd = true">批量新增</n-button>
+        <n-button v-permission="'post/api/v1/site-pipeline/site/create'" type="primary" @click="showAdd = true">新增站点</n-button>
+        <n-button v-permission="'post/api/v1/site-pipeline/site/batch-create'" @click="showBatchAdd = true">批量新增</n-button>
       </n-space>
     </template>
     <n-space vertical :size="12">
@@ -14,7 +14,27 @@
         :get-data="api.getSiteList"
       >
         <template #queryBar>
-          <n-input v-model:value="queryItems.domain" placeholder="域名搜索" clearable style="width: 240px" @keyup.enter="$table?.handleSearch()" />
+          <n-input v-model:value="queryItems.domain" placeholder="域名搜索" clearable style="width: 200px" @keyup.enter="$table?.handleSearch()" />
+          <n-tree-select
+            v-model:value="queryItems.dept_id"
+            :options="deptOption"
+            key-field="id"
+            label-field="name"
+            placeholder="部门筛选"
+            clearable
+            style="width: 160px"
+            default-expand-all
+          />
+          <n-select
+            v-model:value="queryItems.assign_to"
+            :options="userOption"
+            label-field="label"
+            value-field="value"
+            placeholder="归属人筛选"
+            clearable
+            filterable
+            style="width: 160px"
+          />
         </template>
         <template #queryBarActions>
           <template v-if="checkedRowKeys.length">
@@ -30,7 +50,7 @@
                 </n-button>
               </template>
               <n-button-group vertical size="small" style="text-align: left">
-                <n-button v-for="item in batchActions" :key="item.key" @click="handleBatchActionClick(item.key)" style="justify-content: flex-start">
+                <n-button v-for="item in batchActions" :key="item.key" v-permission="item.permission" @click="handleBatchActionClick(item.key)" style="justify-content: flex-start">
                   <template #icon>
                     <TheIcon :icon="item.icon" :size="18" />
                   </template>
@@ -59,6 +79,14 @@
         <n-form-item v-if="currentBatchAction === 'redirect'" label="目标URL" label-placement="left">
           <n-input v-model:value="batchExtraTargetUrl" placeholder="https://target.com/$1" />
         </n-form-item>
+        <template v-if="currentBatchAction === 'assign'">
+          <n-form-item label="分配至部门" label-placement="left">
+            <n-tree-select v-model:value="batchAssignDeptId" :options="deptOption" key-field="id" label-field="name" placeholder="留空不改变部门" clearable default-expand-all />
+          </n-form-item>
+          <n-form-item label="分配至用户" label-placement="left">
+            <n-select v-model:value="batchAssignTo" :options="batchAssignUserOption" label-field="label" value-field="value" placeholder="留空不改变归属人" clearable filterable />
+          </n-form-item>
+        </template>
       </n-modal>
 
       <!-- 批量新增站点弹窗 -->
@@ -75,7 +103,7 @@
         <template #footer>
           <n-space justify="end">
             <n-button @click="showBatchAdd = false">取消</n-button>
-            <n-button type="primary" @click="doBatchAdd" :loading="batchAddLoading">批量新增</n-button>
+            <n-button v-permission="'post/api/v1/site-pipeline/site/batch-create'" type="primary" @click="doBatchAdd" :loading="batchAddLoading">批量新增</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -108,6 +136,28 @@
           <n-form-item label="服务器IP" path="server_ip">
             <n-input v-model:value="formData.server_ip" placeholder="1.2.3.4" />
           </n-form-item>
+          <n-form-item label="所属部门" path="dept_id">
+            <n-tree-select
+              v-model:value="formData.dept_id"
+              :options="deptOption"
+              key-field="id"
+              label-field="name"
+              placeholder="留空则使用当前用户部门"
+              clearable
+              default-expand-all
+            />
+          </n-form-item>
+          <n-form-item label="分配给" path="assign_to">
+            <n-select
+              v-model:value="formData.assign_to"
+              :options="userFormOption"
+              label-field="label"
+              value-field="value"
+              placeholder="留空则归自己名下"
+              clearable
+              filterable
+            />
+          </n-form-item>
         </n-form>
         <template #footer>
           <n-space justify="end">
@@ -127,7 +177,7 @@
         <template #footer>
           <n-space justify="end">
             <n-button @click="showSingleRedirect = false">取消</n-button>
-            <n-button type="primary" @click="doSingleRedirectConfirm" :loading="singleRedirectLoading">确认</n-button>
+            <n-button v-permission="'post/api/v1/site-pipeline/site/siteId/redirect'" type="primary" @click="doSingleRedirectConfirm" :loading="singleRedirectLoading">确认</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -178,6 +228,8 @@
               <n-descriptions-item label="域名">{{ detail.site.domain }}</n-descriptions-item>
               <n-descriptions-item label="服务器IP">{{ detail.site.server_ip }}</n-descriptions-item>
               <n-descriptions-item label="站点状态">{{ detail.site.status }}</n-descriptions-item>
+              <n-descriptions-item label="所属部门">{{ detail.site.dept_name || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="数据归属人">{{ detail.site.assign_to_name || '-' }}</n-descriptions-item>
               <n-descriptions-item label="Cloudflare">{{ detail.site.cloudflare_status }}</n-descriptions-item>
               <n-descriptions-item label="Dynadot">{{ detail.site.dynadot_status }}</n-descriptions-item>
               <n-descriptions-item label="Hub状态">{{ detail.site.hub_status }}</n-descriptions-item>
@@ -229,14 +281,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, h, onMounted, computed } from 'vue'
+import { ref, reactive, h, onMounted, computed, watch, resolveDirective, withDirectives } from 'vue'
 import { useRouter } from 'vue-router'
-import { NTag, NSpace, NButton, NCheckbox, useMessage, useNotification } from 'naive-ui'
+import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, useMessage, useNotification } from 'naive-ui'
 import api from '@/api/site-pipeline'
+import baseApi from '@/api'
 import gmailApi from '@/api/gmail'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import TheIcon from '@/components/icon/TheIcon.vue'
+
+const vPermission = resolveDirective('permission')
 
 const message = useMessage()
 const router = useRouter()
@@ -244,7 +299,7 @@ const notification = useNotification()
 
 // ─── CrudTable ───
 const $table = ref(null)
-const queryItems = reactive({ domain: '' })
+const queryItems = reactive({ domain: '', dept_id: null, assign_to: null })
 const reload = () => $table.value?.handleSearch()
 
 // ─── 详情弹窗 ───
@@ -271,7 +326,7 @@ const gmailQuery = reactive({ username: '' })
 const assignTargetSiteId = ref(null)
 
 const gmailColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: 'Username', key: 'username' },
   { title: 'Password', key: 'password', width: 180, ellipsis: { tooltip: true } },
   { title: 'Full Name', key: 'full_name', width: 120, ellipsis: { tooltip: true } },
@@ -324,10 +379,44 @@ const showAdd = ref(false)
 const editId = ref(null)
 const saving = ref(false)
 const formRef = ref(null)
-const formData = reactive({ domain: '', server_ip: '' })
+const formData = reactive({ domain: '', server_ip: '', dept_id: null, assign_to: null })
 const formRules = {
   domain: { required: true, message: '域名必填', trigger: 'blur' },
 }
+
+// ─── 部门 & 用户选择 ───
+const deptOption = ref([])
+const rawUserList = ref([])
+const userOption = computed(() => {
+  if (!queryItems.dept_id) return rawUserList.value
+  return rawUserList.value.filter((u) => u.dept?.id === queryItems.dept_id)
+})
+
+// 表单的用户选择器：与所选部门联动
+const userFormOption = computed(() => {
+  if (!formData.dept_id) return rawUserList.value
+  return rawUserList.value.filter((u) => u.dept?.id === formData.dept_id)
+})
+
+// 表单中选了用户后，自动同步其部门
+watch(() => formData.assign_to, (uid) => {
+  if (uid) {
+    const user = rawUserList.value.find((u) => u.value === uid)
+    if (user?.dept?.id) {
+      formData.dept_id = user.dept.id
+    }
+  }
+})
+
+// 部门切换时，若已选的归属人不在该部门，自动清空
+watch(() => queryItems.dept_id, (newDeptId) => {
+  if (newDeptId && queryItems.assign_to) {
+    const validIds = userOption.value.map((u) => u.value)
+    if (!validIds.includes(queryItems.assign_to)) {
+      queryItems.assign_to = null
+    }
+  }
+})
 
 // ─── 表格 ───
 const checkedRowKeys = ref([])
@@ -357,13 +446,25 @@ const columns = [
       },
     }),
   },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
-  { title: '域名', key: 'domain', width: 120, ellipsis: { tooltip: true } },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
+  { title: '域名', key: 'domain', width: 150, ellipsis: { tooltip: true } },
   { title: '服务器IP', key: 'server_ip', width: 110, align: 'center' },
   { title: 'CF 状态', key: 'cloudflare_status', width: 80, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
   { title: 'Dynadot', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已创建' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
-  { title: '产品导入', key: 'woo_import_status', width: 80, render: (r) => statusTag(r.woo_import_status), align: 'center' },
+  { title: '产品数', key: 'woo_product_count', width: 100, align: 'center',
+    render: (row) => {
+      const count = row.woo_product_count || 0
+      return h(NSpace, { size: 4, justify: 'center', align: 'center' }, {
+        default: () => [
+          h('span', { style: 'font-weight:600;min-width:24px' }, count),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: (e) => { e.stopPropagation(); syncWooCount(row.id, row) } },
+            { default: () => h(TheIcon, { icon: 'mdi:sync', size: 14 }) }
+          ),
+        ],
+      })
+    },
+  },
   { title: 'Gmail', key: 'gmail_username', width: 80, render: (r) => r.gmail_username ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
   { title: 'Hub 状态', key: 'hub_status', width: 120, render: (r) => statusTag(r.hub_status), align: 'center' },
   { title: 'GMC', key: 'gmc_status', width: 80, render: (r) => statusTag(r.gmc_status), align: 'center' },
@@ -378,14 +479,14 @@ const columns = [
       return h(NSpace, { size: 'small' }, {
         default: () => [
           h(NButton, { size: 'tiny', onClick: () => goDetail(row.id) }, { default: () => '详情' }),
-          h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'tiny', type: 'info', ghost: !dnsOk, onClick: () => doSingleAction('dns', row.id) }, { default: () => 'DNS+NS' }),
-          h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }),
-          h(NButton, { size: 'tiny', type: 'primary', ghost: !wooOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }),
-          h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }),
+          withDirectives(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' }), [[vPermission, 'post/api/v1/site-pipeline/site/update']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'info', ghost: !dnsOk, onClick: () => doSingleAction('dns', row.id) }, { default: () => 'DNS+NS' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/dns']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/provision']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !wooOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/woo-import']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/redirect']]),
           row.gmail_username
-            ? h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' })
-            : h(NButton, { size: 'tiny', type: 'tertiary', ghost: true, onClick: () => doSingleAction('assign-gmail', row.id) }, { default: () => '分配Gmail' }),
+            ? withDirectives(h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' }), [[vPermission, 'post/api/v1/gmail/unassign']])
+            : withDirectives(h(NButton, { size: 'tiny', type: 'tertiary', ghost: true, onClick: () => doSingleAction('assign-gmail', row.id) }, { default: () => '分配Gmail' }), [[vPermission, 'post/api/v1/gmail/assign']]),
         ],
       })
     },
@@ -423,6 +524,22 @@ const batchResults = ref([])
 const batchSummary = ref('')
 const batchExtraNsList = ref('')
 const batchExtraTargetUrl = ref('')
+const batchAssignDeptId = ref(null)
+const batchAssignTo = ref(null)
+
+// 批量分配弹窗：用户选项与所选部门联动
+const batchAssignUserOption = computed(() => {
+  if (!batchAssignDeptId.value) return rawUserList.value
+  return rawUserList.value.filter((u) => u.dept?.id === batchAssignDeptId.value)
+})
+watch(batchAssignDeptId, (newDeptId) => {
+  if (newDeptId && batchAssignTo.value) {
+    const validIds = batchAssignUserOption.value.map((u) => u.value)
+    if (!validIds.includes(batchAssignTo.value)) {
+      batchAssignTo.value = null
+    }
+  }
+})
 
 const batchSuccessCount = computed(() => batchResults.value.filter(r => r.ok).length)
 const batchFailCount = computed(() => batchResults.value.filter(r => !r.ok).length)
@@ -460,18 +577,20 @@ const batchActionLabelMap = {
   'woo-import': '批量 Woo 导入',
   redirect: '批量重定向',
   'assign-gmail': '批量分配Gmail',
+  assign: '批量分配',
   delete: '批量删除',
 }
 
 const batchActions = [
-  { label: '批量 DNS+NS', key: 'dns', icon: 'mdi:cloud-check' },
-  { label: '批量 Dynadot NS', key: 'dynadot-ns', icon: 'mdi:domain' },
-  { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch' },
-  { label: '批量 Hub 分发', key: 'hub', icon: 'mdi:cube-send' },
-  { label: '批量 Woo 导入', key: 'woo-import', icon: 'mdi:import' },
-  { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision' },
-  { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right' },
-  { label: '批量删除', key: 'delete', icon: 'mdi:delete' },
+  { label: '批量 DNS+NS', key: 'dns', icon: 'mdi:cloud-check', permission: 'post/api/v1/site-pipeline/site/batch-dns' },
+  { label: '批量 Dynadot NS', key: 'dynadot-ns', icon: 'mdi:domain', permission: 'post/api/v1/site-pipeline/site/batch-dynadot-ns' },
+  { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch', permission: 'post/api/v1/site-pipeline/site/batch-provision' },
+  { label: '批量 Hub 分发', key: 'hub', icon: 'mdi:cube-send', permission: 'post/api/v1/site-pipeline/site/batch-hub-dispatch' },
+  { label: '批量 Woo 导入', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
+  { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
+  { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
+  { label: '批量分配', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
+  { label: '批量删除', key: 'delete', icon: 'mdi:delete', permission: 'post/api/v1/site-pipeline/site/batch-delete' },
 ]
 
 function handleBatchActionClick(key) {
@@ -485,11 +604,17 @@ function handleBatchActionSelect(key) {
   currentBatchLabel.value = batchActionLabelMap[key] || key
   batchExtraNsList.value = ''
   batchExtraTargetUrl.value = ''
+  batchAssignDeptId.value = null
+  batchAssignTo.value = null
   showBatchConfirm.value = true
 }
 
 function cancelBatchAction() {
   currentBatchAction.value = ''
+  batchExtraNsList.value = ''
+  batchExtraTargetUrl.value = ''
+  batchAssignDeptId.value = null
+  batchAssignTo.value = null
   showBatchConfirm.value = false
 }
 
@@ -521,12 +646,22 @@ async function executeBatchAction() {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
     } else if (action === 'assign-gmail') {
       res = await gmailApi.batchAutoAssign(ids)
+    } else if (action === 'assign') {
+      res = await api.batchAssign({
+        site_ids: ids,
+        dept_id: batchAssignDeptId.value,
+        assign_to: batchAssignTo.value,
+      })
     } else if (action === 'delete') {
       res = await api.batchDeleteSites(ids)
     }
 
     if (action === 'delete') {
       message.success(`已删除 ${res?.data?.deleted ?? 0} 条`)
+    } else if (action === 'assign') {
+      message.success(`已分配 ${res?.data?.updated ?? 0} / ${res?.data?.total ?? 0} 个站点`)
+      showBatchConfirm.value = false
+      reload()
     } else {
       batchResultActionType.value = action
       batchResults.value = res?.data?.results ?? []
@@ -567,6 +702,8 @@ function openEdit(row) {
   editId.value = row.id
   formData.domain = row.domain
   formData.server_ip = row.server_ip
+  formData.dept_id = row.dept_id ?? null
+  formData.assign_to = row.create_by ?? null
   showAdd.value = true
 }
 
@@ -585,6 +722,8 @@ async function doSave() {
     editId.value = null
     formData.domain = ''
     formData.server_ip = ''
+    formData.dept_id = null
+    formData.assign_to = null
     reload()
   } catch (e) {
     message.error(e?.response?.data?.msg || '操作失败')
@@ -629,30 +768,31 @@ async function doBatchAdd() {
   }
 }
 
-// ─── 建站进度轮询 ───
+// ─── 建站进度轮询（全局共享一个定时器） ───
 const STEP_LABELS = {
   create_site: '创建站点',
+  apply_ssl: '申请SSL',
   restore_db: '恢复数据库',
   restore_files: '恢复文件',
   rebuild_after_files: '重建容器(文件)',
   replace_domain: '域名替换',
   patch_wp_config: '修改WP配置',
-  rebuild_before_scripts: '重建容器(脚本)',
-  create_woo_key: '创建WooCommerce密钥',
-  create_ctx: '创建CTX脚本',
-  fetch_feed: '获取Feed链接',
+  rebuild_after_patch: '重建容器(配置)',
+  health_check: '健康检查',
+  create_woo_ctx: '创建Woo+CTX',
   done: '完成',
 }
 
-const provisionTimers = {}
+const provisionJobs = new Map()          // key → { jobId, domain, n, pending: bool }
+let provisionPoller = null               // 全局 setInterval id
+let provisionPollRound = 0               // 轮询轮次（用于降低 pending 复查频率）
 
 function startProvisionPolling(jobId, domain, siteId) {
-  // 关闭相同 jobId 或 siteId 的旧轮询
-  const existingKey = `${siteId}_${jobId}`
-  if (provisionTimers[existingKey]) {
-    clearInterval(provisionTimers[existingKey])
-    delete provisionTimers[existingKey]
-  }
+  const key = `${siteId}_${jobId}`
+
+  // 清理旧的同 key 记录
+  const old = provisionJobs.get(key)
+  if (old) { old.n.destroy(); provisionJobs.delete(key) }
 
   const n = notification.create({
     title: `建站中: ${domain}`,
@@ -660,47 +800,72 @@ function startProvisionPolling(jobId, domain, siteId) {
     duration: 0,
     closable: true,
     onClose: () => {
-      if (provisionTimers[existingKey]) {
-        clearInterval(provisionTimers[existingKey])
-        delete provisionTimers[existingKey]
+      provisionJobs.delete(key)
+      if (provisionJobs.size === 0 && provisionPoller) {
+        clearInterval(provisionPoller)
+        provisionPoller = null
       }
     },
   })
 
-  const poll = async () => {
+  provisionJobs.set(key, { jobId, domain, n, pending: false })
+
+  // 确保全局轮询已启动
+  if (!provisionPoller) {
+    provisionPoller = setInterval(_pollAllProvision, 5000)
+    _pollAllProvision()
+  }
+}
+
+async function _pollAllProvision() {
+  provisionPollRound++
+  // 每 3 轮（15秒）复查一次 pending 任务是否已启动
+  const recheckPending = provisionPollRound % 3 === 0
+
+  const entries = [...provisionJobs.entries()]
+  for (const [k, v] of entries) {
+    // 已知 pending 的跳过 API 调用，除非轮到复查
+    if (v.pending && !recheckPending) continue
+
     try {
-      const res = await api.getJob({ id: jobId })
+      const res = await api.getJob({ id: v.jobId })
       const job = res?.data
-      if (!job) return
+      if (!job) continue
+
+      if (job.status === 'pending') {
+        v.pending = true
+        v.n.content = '[等待中...]'
+        continue
+      }
+
+      v.pending = false
       const label = STEP_LABELS[job.step] || job.step
       if (job.status === 'success') {
-        n.type = 'success'
-        n.title = `建站完成: ${domain}`
-        n.content = `登录地址: https://${domain}/wp-admin`
-        n.duration = 8000
-        n.closable = true
-        clearInterval(provisionTimers[existingKey])
-        delete provisionTimers[existingKey]
+        v.n.type = 'success'
+        v.n.title = `建站完成: ${v.domain}`
+        v.n.content = `登录地址: https://${v.domain}/wp-admin`
+        v.n.duration = 8000
+        v.n.closable = true
+        provisionJobs.delete(k)
         setTimeout(reload, 1000)
       } else if (job.status === 'failed') {
-        n.type = 'error'
-        n.title = `建站失败: ${domain}`
-        n.content = job.error_message || '未知错误'
-        n.duration = 15000
-        n.closable = true
-        clearInterval(provisionTimers[existingKey])
-        delete provisionTimers[existingKey]
+        v.n.type = 'error'
+        v.n.title = `建站失败: ${v.domain}`
+        v.n.content = job.error_message || '未知错误'
+        v.n.duration = 15000
+        v.n.closable = true
+        provisionJobs.delete(k)
         setTimeout(reload, 1000)
       } else {
-        n.content = `[步骤] ${label}`
+        v.n.content = `[步骤] ${label}`
       }
-    } catch (_) {
-      // 忽略轮询错误，等待下次重试
-    }
+    } catch (_) { /* ignore */ }
   }
-
-  poll()
-  provisionTimers[existingKey] = setInterval(poll, 1500)
+  // 没有任务了，停止全局轮询
+  if (provisionJobs.size === 0 && provisionPoller) {
+    clearInterval(provisionPoller)
+    provisionPoller = null
+  }
 }
 
 // ─── 单条操作 ───
@@ -771,7 +936,24 @@ async function doSingleRedirectConfirm() {
   }
 }
 
+// ─── 同步 Woo 产品数量 ───
+async function syncWooCount(siteId, row) {
+  try {
+    message.loading('正在查询远端产品数量...')
+    const res = await api.refreshWooCount(siteId)
+    const count = res?.data?.woo_product_count ?? 0
+    row.woo_product_count = count
+    message.success(`站点 ${row.domain} 远端产品总数: ${count}`)
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '查询失败')
+  }
+}
+
 onMounted(() => {
   $table.value?.handleSearch()
+  baseApi.getDepts().then((res) => (deptOption.value = res.data))
+  baseApi.getUserList({ page: 1, page_size: 200 }).then((res) => {
+    rawUserList.value = (res.data || []).map((u) => ({ label: `${u.username} (${u.dept?.name || '-'})`, value: u.id, dept: u.dept }))
+  })
 })
 </script>

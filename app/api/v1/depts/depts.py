@@ -4,7 +4,7 @@ from app.controllers.dept import dept_controller
 from app.schemas import Success
 from app.schemas.depts import *
 
-router = APIRouter()
+router = APIRouter(tags=["Dept"])
 
 
 @router.get("/list", summary="查看部门列表")

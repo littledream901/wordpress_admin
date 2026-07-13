@@ -105,8 +105,7 @@ export async function resReject(error) {
     try {
       const userStore = useUserStore()
       userStore.logout()
-    } catch (err) {
-      console.log('resReject error', err)
+    } catch {
       return
     }
     return Promise.reject({ code: 401, message: '登录已过期', error: error.response?.data || error.response })

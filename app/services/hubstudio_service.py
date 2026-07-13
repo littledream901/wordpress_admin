@@ -106,7 +106,7 @@ class HubStudioOrchestrationService:
         if not provider_id:
             provider_id = await self._resolve_provider_id(site_id)
 
-        # update_env / create_account / website_control / gmc_check 必须有 hub_env_id
+        # update_env / create_account / wp_login / gmc_check 必须有 hub_env_id
         if job_type in ("update_env", "create_account", "website_control", "gmc_check") and not site.hub_env_id:
             raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行 create_env")
 
@@ -119,9 +119,9 @@ class HubStudioOrchestrationService:
         if job_type == "create_account":
             payload = await self._enrich_create_account_payload(payload, site)
 
-        # website_control: 注入 Gmail + WordPress 凭证，供 executor 自动登录
+        # wp_login: 注入 Gmail + WordPress 凭证，供 executor 自动登录
         if job_type == "website_control":
-            payload = await self._enrich_website_control_payload(payload, site)
+            payload = await self._enrich_wp_login_payload(payload, site)
 
         job = await self.create_job(
             site_id=site.id,
@@ -288,7 +288,7 @@ class HubStudioOrchestrationService:
             result = await self._execute_job_sync(job, "server-fallback")
             return job, result
 
-        return job, None
+        return job
 
     async def cancel_job(self, job_id: int) -> Optional[HubStudioJob]:
         """取消任务（仅 pending/running 状态可取消）"""
@@ -428,7 +428,7 @@ class HubStudioOrchestrationService:
         job.worker_name = worker_name
         job.started_at = datetime.now()
 
-        # 刷新 payload：create_account/update_env/website_control/gmc_check 依赖 hub_env_id，
+        # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
         if job.job_type in ("create_account", "update_env", "website_control", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
@@ -650,8 +650,8 @@ class HubStudioOrchestrationService:
 
         return payload
 
-    async def _enrich_website_control_payload(self, payload: dict, site: Site) -> dict:
-        """为 website_control 任务注入 WordPress 登录凭证
+    async def _enrich_wp_login_payload(self, payload: dict, site: Site) -> dict:
+        """为 wp_login 任务注入 WordPress 登录凭证
 
         executor 使用这些凭证自动登录对应网站。
         """
@@ -699,7 +699,7 @@ class HubStudioOrchestrationService:
                 "hub_env_id": site.hub_env_id,
             }
         elif job_type == "website_control":
-            return {**base, "hub_env_id": site.hub_env_id, "login_url": site.login_url}
+            return {**base, "hub_env_id": site.hub_env_id, "login_url": site.login_url, "feed_link": site.feed_link}
         elif job_type == "gmc_check":
             return {**base, "hub_env_id": site.hub_env_id}
         return base
@@ -757,7 +757,7 @@ class HubStudioOrchestrationService:
                     gmc_data = result.get("gmc_data")
                     if gmc_data:
                         site.gmc_data = json.dumps(gmc_data, ensure_ascii=False)
-                    logger.info(f"[website_control] GMC 数据已回写: gmc_status={gmc_status}")
+                    logger.info(f"[wp_login] GMC 数据已回写: gmc_status={gmc_status}")
                 elif job.job_type == "gmc_check":
                     gmc_status = result.get("gmc_status", "")
                     if gmc_status:

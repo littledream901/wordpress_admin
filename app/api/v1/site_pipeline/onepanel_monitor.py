@@ -15,7 +15,7 @@ from app.services.onepanel_service import OnePanelAPI
 
 _log = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["Monitor"])
 
 # 简单缓存：{provider_id: (timestamp, data)}
 _cache: Dict[int, tuple] = {}

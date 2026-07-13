@@ -191,7 +191,7 @@ class OnePanelSiteManager:
         existed = self.get_site_id(domain)
         if existed:
             if not self.auto_clean_conflict:
-                raise DomainAlreadyExistsError(domain=domain)
+                raise DomainAlreadyExistsError(domain=domain, onepanel_site_id=existed)
             self.delete_site_by_id(existed, True, True)
         wp_app = self.resolve_wp_app()
         alias = safe_alias(domain)

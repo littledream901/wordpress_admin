@@ -5,7 +5,6 @@ venv/
 .vscode
 .ruff_cache/
 .pytest_cache/
-migrations/
 .github/
 
 # 数据库文件
@@ -27,6 +26,9 @@ doc.json
 # Docker 数据目录
 data/
 logs/
+
+# 用户上传数据（运行时生成，不纳入版本控制）
+app/uploads/
 
 .DS_Store
 ._.DS_Store

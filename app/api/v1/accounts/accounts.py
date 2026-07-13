@@ -5,7 +5,7 @@ from app.controllers.account import account_controller
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.account import AccountCreate, AccountUpdate
 
-router = APIRouter()
+router = APIRouter(tags=["Account"])
 
 
 @router.get("/list", summary="账号列表")

@@ -8,6 +8,8 @@ class Site(BaseModel, TimestampMixin):
     domain = fields.CharField(max_length=255, unique=True, description='域名', index=True)
     server_ip = fields.CharField(max_length=64, default='', description='服务器IP')
     status = fields.CharField(max_length=64, default='待处理', description='站点状态', index=True)
+    create_by = fields.IntField(null=True, description='创建者用户ID', db_index=True)
+    dept_id = fields.IntField(null=True, description='创建者部门ID', db_index=True)
     login_url = fields.CharField(max_length=500, default='', description='登录地址')
     woo_ck = fields.CharField(max_length=255, default='', description='Woo CK')
     woo_cs = fields.CharField(max_length=255, default='', description='Woo CS')
@@ -26,6 +28,7 @@ class Site(BaseModel, TimestampMixin):
     gmc_data = fields.TextField(default='', description='GMC详细数据(JSON)')
     pipeline_status = fields.CharField(max_length=64, default='', description='流水线状态', index=True)
     pipeline_log = fields.TextField(default='', description='流水线日志')
+    woo_product_count = fields.IntField(default=0, description='WooCommerce远端产品总数')
 
     class Meta:
         table = 'site_pipeline_site'

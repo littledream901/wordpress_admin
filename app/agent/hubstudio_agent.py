@@ -251,7 +251,7 @@ class HubStudioAgent:
             try:
                 req = urllib.request.Request(url, data=body, method=method)
                 req.add_header("Content-Type", "application/json")
-                req.add_header("token", self._token)
+                req.add_header("Authorization", f"Bearer {self._token}")
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("code") and data["code"] != 200:

@@ -1,6 +1,6 @@
 <script setup>
 import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
-import { NButton, NForm, NFormItem, NInput, NPopconfirm } from 'naive-ui'
+import { NButton, NForm, NFormItem, NInput, NPopconfirm, NSwitch, NTag } from 'naive-ui'
 
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
@@ -52,6 +52,16 @@ async function handleRefreshApi() {
       $table.value?.handleSearch()
     },
   })
+}
+
+async function toggleButton(row) {
+  try {
+    await api.updateApi({ id: row.id, is_button: !row.is_button, path: row.path, method: row.method, summary: row.summary, tags: row.tags })
+    row.is_button = !row.is_button
+    $message.success(row.is_button ? '已设为按钮权限' : '已取消按钮权限')
+  } catch (_) {
+    $message.error('操作失败')
+  }
 }
 
 const addAPIRules = {
@@ -113,6 +123,22 @@ const columns = [
     width: 'auto',
     align: 'center',
     ellipsis: { tooltip: true },
+  },
+  {
+    title: '按钮权限',
+    key: 'is_button',
+    width: 60,
+    align: 'center',
+    render(row) {
+      return h(
+        NSwitch,
+        {
+          value: row.is_button,
+          size: 'small',
+          onUpdateValue: () => toggleButton(row),
+        }
+      )
+    },
   },
   {
     title: '操作',
@@ -236,6 +262,9 @@ const columns = [
         </NFormItem>
         <NFormItem label="Tags" path="tags">
           <NInput v-model:value="modalForm.tags" clearable placeholder="请输入Tags" />
+        </NFormItem>
+        <NFormItem label="按钮权限" path="is_button">
+          <NSwitch v-model:value="modalForm.is_button" />
         </NFormItem>
       </NForm>
     </CrudModal>

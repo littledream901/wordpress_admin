@@ -91,7 +91,6 @@ const columns = [
               type: 'primary',
               style: 'margin-left: 8px;',
               onClick: () => {
-                console.log('row', row.parent_id)
                 if (row.parent_id === 0) {
                   isDisabled.value = true
                 } else {

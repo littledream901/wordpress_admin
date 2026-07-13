@@ -8,7 +8,8 @@ class SiteBase(BaseModel):
 
 
 class SiteCreate(SiteBase):
-    pass
+    dept_id: Optional[int] = None
+    assign_to: Optional[int] = None  # 分配给指定用户（覆盖 create_by）
 
 
 class SiteBatchCreate(BaseModel):

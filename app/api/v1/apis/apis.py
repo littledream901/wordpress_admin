@@ -5,7 +5,7 @@ from app.controllers.api import api_controller
 from app.schemas import Success, SuccessExtra
 from app.schemas.apis import *
 
-router = APIRouter()
+router = APIRouter(tags=["Api"])
 
 
 @router.get("/list", summary="查看API列表")

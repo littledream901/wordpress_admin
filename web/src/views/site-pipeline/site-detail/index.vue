@@ -168,7 +168,7 @@ const doProvision = async () => {
         } catch (_) {}
       }
       poll()
-      provisionTimer = setInterval(poll, 1500)
+      provisionTimer = setInterval(poll, 5000)
     } else {
       message.success('建站已触发')
       await load()
@@ -192,7 +192,7 @@ const assignGmail = async (gmailId) => {
   await load()
 }
 const gmailColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: 'Username', key: 'username' },
   { title: 'Password', key: 'password' },
   { title: 'Full Name', key: 'full_name' },

@@ -31,7 +31,7 @@ a = Analysis(
         ("../app/services/hubstudio/tasks/create_env.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/create_account.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/update_env.py", "app/services/hubstudio/tasks"),
-        ("../app/services/hubstudio/tasks/website_control.py", "app/services/hubstudio/tasks"),
+        ("../app/services/hubstudio/tasks/wp_login.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/gmc_check.py", "app/services/hubstudio/tasks"),
     ],
     hiddenimports=[
@@ -46,7 +46,7 @@ a = Analysis(
         "idna",
         # 可选依赖（try/except 导入，PyInstaller 不会自动追踪）
         "dotenv",
-        # 浏览器自动化（website_control / gmc_check 任务需要）
+        # 浏览器自动化（wp_login / gmc_check 任务需要）
         *drission_hidden,
     ],
     hookspath=[],

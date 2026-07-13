@@ -13,7 +13,7 @@ from app.schemas.shopify_collect import ShopifyProductUpdate, ShopifySourceCreat
 from app.services.shopify_collect_service import ShopifyCollectService
 from app.services.woo_import_service import WooImportService
 
-router = APIRouter()
+router = APIRouter(tags=["Shopify"])
 shopify_collect_service = ShopifyCollectService()
 woo_import_service = WooImportService()
 

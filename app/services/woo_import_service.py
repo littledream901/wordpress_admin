@@ -38,9 +38,10 @@ class WooRequestLimiter:
     timeout: httpx.Timeout = field(default_factory=lambda: httpx.Timeout(10, read=120))
     pool_maxsize: int = 1
     user_agent: str = "Mozilla/5.0 WooCommerce-Sync/1.0"
+    verify_ssl: bool = True
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _state: RequestLimiterState = field(default_factory=RequestLimiterState, init=False)
-    _session: httpx.Client = field(default_factory=lambda: httpx.Client(http2=True), init=False)
+    _session: httpx.Client = field(init=False)
 
     def __post_init__(self) -> None:
         # 优先从数据库配置读取参数
@@ -54,9 +55,13 @@ class WooRequestLimiter:
                 self.min_interval_seconds = float(cfg.get("min_interval_seconds", self.min_interval_seconds))
                 self.error_cooldown_seconds = float(cfg.get("error_cooldown_seconds", self.error_cooldown_seconds))
                 self.max_error_cooldown_seconds = float(cfg.get("max_error_cooldown_seconds", self.max_error_cooldown_seconds))
+            # 读取 SSL 验证配置（默认不验证，避免 Cloudflare 代理导致握手超时）
+            ssl_val = ProviderResolver.sync_get_config("pipeline", "wp_verify_ssl", "false")
+            self.verify_ssl = ssl_val.lower() != "false"
         except Exception:
             pass
 
+        self._session = httpx.Client(http2=True, verify=self.verify_ssl)
         self._session.headers.update({
             "User-Agent": self.user_agent,
             "Accept": "application/json",
@@ -250,9 +255,11 @@ def extract_brand_from_domain(wc_url: str) -> str:
     return re.sub(r"[^a-z0-9._-]+", "-", ".".join(parts[:-1])).strip(".-_") or parts[0]
 
 
-def apply_brand_to_payload(payload: Dict[str, Any], brand: str) -> Dict[str, Any]:
+def apply_brand_to_payload(payload: Dict[str, Any], brand: str, brand_id: Optional[int] = None) -> Dict[str, Any]:
     if not brand:
         return payload
+    if brand_id:
+        payload["brands"] = [{"id": int(brand_id)}]
     meta_data = payload.get("meta_data") if isinstance(payload.get("meta_data"), list) else []
     if not any(isinstance(item, dict) and item.get("key") == "brand" for item in meta_data):
         meta_data.append({"key": "brand", "value": brand})
@@ -274,6 +281,7 @@ class WooCommerceSyncer:
         self.max_images_per_product = max_images_per_product
         self.check_existing_before_create = check_existing_before_create
         self.brand = extract_brand_from_domain(self.wc_base_url)
+        self.brand_id: Optional[int] = None
         # 每个站点优先使用独立限流器，避免单站点故障拖累全局导入
         if limiter:
             self.limiter = limiter
@@ -295,10 +303,10 @@ class WooCommerceSyncer:
         except (TypeError, ValueError):
             return 0
 
-    def generate_sku(self, handle: str) -> str:
+    def generate_sku(self, handle: str, suffix: str = "") -> str:
         clean_handle = re.sub(r"[^a-zA-Z0-9]", "-", handle or "goods")
         clean_handle = re.sub(r"-+", "-", clean_handle).strip("-")[:12] or "goods"
-        return f"{clean_handle}-{''.join(random.choices('0123456789', k=6))}"
+        return f"{clean_handle}-{suffix}" if suffix else f"{clean_handle}-{''.join(random.choices('0123456789', k=6))}"
 
     def parse_shopify_json(self, json_str: str) -> Optional[Dict[str, Any]]:
         try:
@@ -328,6 +336,7 @@ class WooCommerceSyncer:
 
         # vendor 用域名名称（去掉后缀），原 vendor 放入 meta_data
         vendor = self.brand
+        self.get_or_create_brand_id()
 
         wc_images = []
         if self.enable_images:
@@ -356,7 +365,7 @@ class WooCommerceSyncer:
                     attr_names.append(opt_name)
             all_variants = []
             for var in variants_raw:
-                sku = var.get("sku") or self.generate_sku(handle)
+                sku = self.generate_sku(handle, str(var.get("id", "")))
                 variant_options = {f"option{idx+1}": var.get(f"option{idx+1}") or "" for idx, _ in enumerate(attr_names)}
                 var_img = var.get("image_src", "")
                 all_variants.append({
@@ -383,7 +392,7 @@ class WooCommerceSyncer:
                 "status": "publish",
                 "manage_stock": False,
             }
-            payload = apply_brand_to_payload(payload, self.brand)
+            payload = apply_brand_to_payload(payload, self.brand, self.brand_id)
             return payload
 
         first_var = variants_raw[0]
@@ -396,15 +405,15 @@ class WooCommerceSyncer:
             "vendor": vendor,
             "images": wc_images,
             "regular_price": self.normalize_price(first_var.get("price")),
-            "sku": first_var.get("sku") or self.generate_sku(handle),
+            "sku": self.generate_sku(handle, str(first_var.get("id", ""))),
             "stock_quantity": self.normalize_stock(first_var.get("inventory_quantity", 0)),
             "manage_stock": False,
             "taxable": first_var.get("taxable", True),
             "requires_shipping": first_var.get("requires_shipping", True),
-            "tags": [{"name": tag} for tag in tags if tag],
+            # "tags": [{"name": tag} for tag in tags if tag],
             "status": "publish",
         }
-        payload = apply_brand_to_payload(payload, self.brand)
+        payload = apply_brand_to_payload(payload, self.brand, self.brand_id)
         return payload
 
     def get_product_id_by_sku(self, sku: str) -> Optional[int]:
@@ -420,6 +429,29 @@ class WooCommerceSyncer:
             return None
         except Exception:
             return None
+
+    def get_or_create_brand_id(self) -> Optional[int]:
+        if self.brand_id or not self.brand:
+            return self.brand_id
+        brands_api_url = f"{self.wc_base_url}/wp-json/wc/v3/products/brands"
+        try:
+            resp = self.limiter.request("GET", brands_api_url, auth=self.wc_auth,
+                                        params={"search": self.brand, "per_page": 100})
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data if isinstance(data, list) else []
+                for item in items:
+                    if str(item.get("name", "")).lower() == self.brand.lower() or str(item.get("slug", "")).lower() == self.brand.lower():
+                        self.brand_id = int(item["id"])
+                        return self.brand_id
+            resp = self.limiter.request("POST", brands_api_url, auth=self.wc_auth,
+                                        json={"name": self.brand}, max_retries=0)
+            if resp.status_code in (200, 201):
+                self.brand_id = int(resp.json()["id"])
+                return self.brand_id
+        except Exception as exc:
+            logger.warning("品牌接口不可用，降级写 meta_data：%s", exc)
+        return None
 
     def handle_duplicate_sku_response(self, resp: httpx.Response, sku: str, prod_name: str) -> Optional[Dict[str, Any]]:
         """处理 product_invalid_sku 响应（504后重复创建 或 SKU已存在）"""

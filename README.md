@@ -23,7 +23,7 @@
 - **Feed 管理** — Google Merchant Center Feed 文件管理
 
 ### HubStudio 浏览器自动化
-- **任务调度** — 创建环境、创建账号、更新环境、网站控制
+- **任务调度** — 创建环境、创建账号、更新环境、登录WP
 - **本地 Agent** — 独立后台进程，轮询领取任务，执行浏览器操作
 - **心跳监控** — Agent 在线状态实时追踪
 
@@ -242,49 +242,127 @@ create_site → apply_ssl → restore_db → restore_files → rebuild_after_fil
 
 ## Docker 部署
 
-### 一键部署
+> **部署前必读**: 请先完成 [部署检查清单](docs/deployment.md#部署前检查清单)，确保生产环境配置正确。
+
+### 快速部署（推荐）
 
 ```bash
-# 首次部署
+# 1. 初始化并启动（自动生成安全密钥）
 bash deploy/deploy.sh init
 
-# 更新版本
+# 2. 获取管理员密码
+grep DEFAULT_PASSWORD .env
+
+# 3. 验证服务
+curl http://localhost/api/v1/base/health
+```
+
+### 更新部署
+
+```bash
 bash deploy/deploy.sh update
 ```
 
-### 手动部署
+### 手动部署步骤
 
 ```bash
 # 1. 配置环境变量
 cp .env.example .env
-# 编辑 .env: 设置 SECRET_KEY、DEFAULT_PASSWORD
 
-# 2. 启动
+# 2. 生成安全密钥（务必执行！）
+# Linux / macOS:
+sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$(openssl rand -hex 32)/" .env
+sed -i "s/^DEFAULT_PASSWORD=.*/DEFAULT_PASSWORD=$(openssl rand -base64 12)/" .env
+# Windows PowerShell:
+# (Get-Content .env) -replace '^SECRET_KEY=.*', "SECRET_KEY=$(-join ((48..57)+(65..90)+(97..122) | Get-Random -Count 64 | % {[char]$_}))" | Set-Content .env
+
+# 3. 生产环境必要修改
+# 编辑 .env:
+#   - DEBUG=false（生产模式）
+#   - CORS_ORIGINS=["https://your-domain.com"]（必须指定真实域名）
+#   - DB_ENGINE=mysql  # 生产建议使用 MySQL/PostgreSQL
+
+# 4. 创建数据目录并启动
+mkdir -p data logs
 docker compose up -d --build
 
-# 3. 验证
-curl http://localhost/api/v1/base/health
+# 5. 查看日志
+docker compose logs -f
 ```
 
 ### 容器架构
 
 ```
-Nginx (:80) → /api/*   → uvicorn (:9999) → Python FastAPI
-             → /static/* → 静态文件
-             → /*       → SPA (index.html)
+┌──────────────────────────────────────────┐
+│  Docker Container (vue-fastapi-admin)    │
+│                                          │
+│  Nginx (:80)                             │
+│    ├── /api/*   → uvicorn (:9999)        │
+│    │               Python FastAPI         │
+│    ├── /static/* → 静态文件                │
+│    └── /*       → SPA (index.html)       │
+│                                          │
+│  Volume: ./data → 持久化数据库/日志        │
+└──────────────────────────────────────────┘
 ```
 
-### 外部数据库
+### 环境变量参考
 
-编辑 `.env`：
+| 变量 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `SECRET_KEY` | **是** | - | JWT 签名密钥，`openssl rand -hex 32` 生成 |
+| `DEFAULT_PASSWORD` | **是** | - | 新用户初始密码 |
+| `DEBUG` | 否 | `false` | `true`=开发模式（显示文档/CORS宽松） |
+| `CORS_ORIGINS` | 否 | `["*"]` | 生产必须改为具体域名 |
+| `DB_ENGINE` | 否 | `sqlite` | `sqlite` / `mysql` / `postgres` |
+| `DB_SQLITE_PATH` | 否 | `./data/db.sqlite3` | SQLite 文件路径（Docker 内建议保持默认） |
+| `DB_HOST/PORT/USER/PASSWORD/NAME` | 否 | - | MySQL/PostgreSQL 连接参数 |
+| `REDIS_URL` | 否 | - | Redis 地址，多 Worker 建议配置 |
+| `WORKERS` | 否 | `1` | 生产模式 Worker 数量 |
+| `RATE_LIMIT_MAX_REQUESTS` | 否 | `100` | 每分钟最大请求数 |
+
+### 使用外部数据库（生产推荐）
 
 ```bash
+# 编辑 .env
 DB_ENGINE=mysql
-DB_HOST=192.168.1.100
+DB_HOST=your-db-host
 DB_PORT=3306
 DB_USER=admin
-DB_PASSWORD=your-password
+DB_PASSWORD=your-secure-password
 DB_NAME=vue_fastapi_admin
+```
+
+### 启用 HTTPS（生产必要）
+
+推荐在 Docker 宿主机上使用 Nginx/Caddy 反向代理终止 TLS：
+
+```nginx
+# 宿主机 Nginx 示例
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate     /etc/ssl/certs/your-domain.pem;
+    ssl_certificate_key /etc/ssl/private/your-domain.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:80;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $host;
+    }
+}
+```
+
+### 常用运维命令
+
+```bash
+docker compose up -d --build   # 构建并启动
+docker compose down             # 停止并删除容器
+docker compose logs -f          # 实时日志
+docker compose restart          # 重启
+docker compose exec app curl http://127.0.0.1/api/v1/base/health  # 健康检查
 ```
 
 ---

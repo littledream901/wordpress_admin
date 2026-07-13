@@ -59,10 +59,9 @@
     <!-- JSON 详情弹窗 -->
     <n-modal
       v-model:show="showJsonModal"
-      class="json-modal"
       :title="`产品 JSON - #${currentProductId}`"
       preset="card"
-      style="max-width: 820px; width: calc(100vw - 40px)"
+      style="max-width: 860px; width: calc(100vw - 40px)"
       size="huge"
       :bordered="false"
     >
@@ -75,28 +74,13 @@
         </n-button>
       </template>
 
-      <div v-if="jsonError" class="json-error">
-        <TheIcon icon="mdi:alert-circle" :size="20" />
-        <span>JSON 解析失败: {{ jsonError }}</span>
-        <pre class="json-raw">{{ currentRawJson }}</pre>
-      </div>
-
-      <div v-else-if="jsonTree.length" class="json-viewer" ref="jsonViewer">
-        <template v-for="(node, i) in jsonTree" :key="i">
-          <div class="json-line" :style="{ paddingLeft: (node.depth * 20 + 12) + 'px' }">
-            <span
-              v-if="node.key !== undefined"
-              class="json-key"
-              @dblclick="copyJsonValue(node.key)"
-            >"{{ node.key }}"</span>
-            <span v-if="node.key !== undefined" class="json-colon">: </span>
-            <span v-if="node.value !== undefined" :class="jsonValueClass(node)" @dblclick="copyJsonValue(node.value)">{{ node.value }}</span>
-            <span v-else-if="node.bracket" class="json-bracket">{{ node.bracket }}</span>
-          </div>
-        </template>
-      </div>
-
-      <n-empty v-else description="无 JSON 数据" size="small" />
+      <JsonEditor
+        v-model="currentRawJson"
+        :readonly="true"
+        :show-toolbar="false"
+        :max-height="500"
+        :min-height="200"
+      />
 
       <template #footer>
         <n-space justify="end">
@@ -117,9 +101,7 @@ import {
 import api from '@/api/shopify'
 import siteApi from '@/api/site-pipeline'
 import TheIcon from '@/components/icon/TheIcon.vue'
-import { buildJsonTree, jsonValueClass, injectJsonStyles } from '@/utils/jsonTree'
-
-injectJsonStyles()
+import JsonEditor from '@/components/editor/JsonEditor.vue'
 
 const queryItems = reactive({ title: '' })
 const pagination = reactive({ page: 1, pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50] })
@@ -137,8 +119,6 @@ const showBatchMenu = ref(false)
 const showJsonModal = ref(false)
 const currentProductId = ref(0)
 const currentRawJson = ref('')
-const jsonTree = ref([])
-const jsonError = ref('')
 
 const message = useMessage()
 
@@ -249,39 +229,18 @@ const handleBatchAction = (action) => {
 
 const viewJson = (row) => {
   currentProductId.value = row.id
-  currentRawJson.value = row.prod_info_json || ''
-  jsonError.value = ''
-  jsonTree.value = []
   try {
     const parsed = JSON.parse(row.prod_info_json || '{}')
-    jsonTree.value = buildJsonTree(parsed)
-  } catch (e) {
-    jsonError.value = e.message
+    currentRawJson.value = JSON.stringify(parsed, null, 2)
+  } catch {
+    currentRawJson.value = row.prod_info_json || ''
   }
   showJsonModal.value = true
 }
 
 const copyJson = async () => {
-  const text = jsonError.value ? currentRawJson.value : JSON.stringify(JSON.parse(currentRawJson.value || '{}'), null, 2)
   try {
-    await navigator.clipboard.writeText(text)
-    message.success('已复制')
-  } catch {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.left = '-9999px'
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    message.success('已复制')
-  }
-}
-
-const copyJsonValue = async (val) => {
-  try {
-    await navigator.clipboard.writeText(val)
+    await navigator.clipboard.writeText(currentRawJson.value)
     message.success('已复制')
   } catch {
     message.error('复制失败')
@@ -292,10 +251,10 @@ const copyJsonValue = async (val) => {
 const columns = [
   {
     title: () => h(NCheckbox, { checked: isAllChecked.value, onUpdateChecked: toggleAll }),
-    key: 'select', width: 60,
+    key: 'select', width: 40,
     render: row => h(NCheckbox, { checked: selectedIds.value.includes(row.id), onUpdateChecked: (checked) => toggle(row.id, checked) }),
   },
-  { title: '序号', key: 'index', width: 48, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   {
     title: '来源URL', key: 'source_url', width: 200,
     ellipsis: { tooltip: { width: 'trigger' } },
@@ -342,62 +301,3 @@ const columns = [
   },
 ]
 </script>
-
-<style scoped>
-/* ─── JSON Viewer ─── */
-.json-viewer {
-  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  max-height: 55vh;
-  overflow: auto;
-  background: #1e1e2e;
-  border-radius: 8px;
-  padding: 12px 0;
-}
-
-.json-line {
-  white-space: pre;
-  min-height: 21px;
-  transition: background 0.1s;
-}
-
-.json-line:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-/* ─── Error state ─── */
-.json-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 24px;
-  color: #f38ba8;
-  background: rgba(243, 139, 168, 0.08);
-  border-radius: 8px;
-}
-
-.json-raw {
-  margin: 12px 0 0;
-  padding: 12px;
-  background: #1e1e2e;
-  color: #cdd6f4;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  width: 100%;
-  max-height: 40vh;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* ─── Mobile ─── */
-@media (max-width: 640px) {
-  .json-viewer {
-    font-size: 11px;
-    max-height: 45vh;
-  }
-}
-</style>

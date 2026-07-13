@@ -4,7 +4,7 @@ from .base import BaseModel, TimestampMixin
 
 
 class Config(BaseModel, TimestampMixin):
-    """系统配置键值对表，按 category 分类管理 1Panel / Cloudflare / Dynadot / HubStudio 等配置"""
+    """系统配置键值对表，按 category 分类管理 1Panel、Cloudflare、Dynadot、HubStudio 等配置"""
     CATEGORY_CHOICES = [
         ('onepanel', '1Panel'),
         ('cloudflare', 'Cloudflare'),
