@@ -102,11 +102,11 @@ async def batch_delete_gmail(ids: list[int] = Body(...)):
     count = 0
     for gid in ids:
         try:
-            await gmail_account_controller.remove(id=gid)
+            await gmail_account_controller.soft_remove(id=gid)
             count += 1
         except Exception:
             pass
-    return Success(data={'deleted': count})
+    return Success(data={'deleted': count}, msg='已移入回收站')
 
 
 @router.post('/unassign', summary='取消站点已分配的 Gmail')

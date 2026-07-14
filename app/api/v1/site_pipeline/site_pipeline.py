@@ -15,6 +15,7 @@ from fastapi import APIRouter, Body, Depends, Query
 from pydantic import BaseModel
 from tortoise.expressions import Q
 
+from app.controllers.gmail_account import gmail_account_controller
 from app.controllers.site_pipeline import hubstudio_job_controller, site_controller
 from app.core.data_permission import DataPermissionFilter
 from app.core.dependency import AuthControl
@@ -318,10 +319,12 @@ async def delete_site(site_id: int = Query(...)):
     info = None
     if site:
         info = {"id": site.id, "domain": site.domain, "onepanel_status": site.onepanel_status}
-    await site_controller.remove(id=site_id)
+    await site_controller.soft_remove(id=site_id)
+    # 已分配到此站点的 Gmail 也一并回收
+    await gmail_account_controller.soft_delete_by_site(site_id)
     if info:
         asyncio.create_task(_delete_from_1panel_by_info(info))
-    return Success(msg='Deleted Successfully')
+    return Success(msg='已移入回收站')
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -374,27 +377,35 @@ async def batch_create_sites(payload: SiteBatchCreate, current_user: User = Depe
 @router.post('/site/batch-delete', summary='批量删除站点（异步删除 1Panel 网站并创建追踪任务）')
 async def batch_delete_sites(ids: list[int] = Body(...)):
     count = 0
-    sites_info = []  # 保存站点信息供异步删除使用
+    gmail_deleted = 0
+    db_failed = 0
+    sites_info = []  # 仅保存 DB 软删除成功的站点，供异步 1Panel 清理
     for sid in ids:
         try:
             site = await site_controller.get(id=sid)
-            if site:
-                sites_info.append({"id": site.id, "domain": site.domain, "onepanel_status": site.onepanel_status})
-            await site_controller.remove(id=sid)
+            if not site:
+                _log.warning("站点不存在 id=%s，跳过", sid)
+                continue
+            await site_controller.soft_remove(id=sid)
+            # 已分配到此站点的 Gmail 也一并回收
+            gmail_deleted += await gmail_account_controller.soft_delete_by_site(sid)
             count += 1
+            # DB 删除成功后，记录站点信息供后续 1Panel 清理
+            sites_info.append({"id": site.id, "domain": site.domain, "onepanel_status": site.onepanel_status})
         except Exception as e:
             _log.warning("删除站点失败 id=%s: %s", sid, e)
+            db_failed += 1
 
     if not sites_info:
-        return Success(data={"deleted": count, "pending_1panel_delete": 0})
+        return Success(data={"deleted": count, "db_failed": db_failed, "pending_1panel_delete": 0})
 
     # 创建追踪任务
     job = await _create_job(0, f"batch-delete-{int(time.time())}", "batch_delete",
                             batch_id=f"delete-{int(time.time())}", total_steps=len(sites_info))
-    job.result_json = json.dumps({"deleted_from_db": count, "results": []})
+    job.result_json = json.dumps({"deleted_from_db": count, "db_failed": db_failed, "gmail_deleted": gmail_deleted, "results": []})
     await job.save()
 
-    # 后台异步删除 1Panel 网站
+    # 后台异步删除 1Panel 网站（仅对 DB 已成功删除的站点执行 1Panel 清理）
     async def _bg_delete():
         del_ok = 0
         del_fail = 0
@@ -421,6 +432,8 @@ async def batch_delete_sites(ids: list[int] = Body(...)):
         job.status = "success" if del_fail == 0 else "failed"
         job.result_json = json.dumps({
             "deleted_from_db": count,
+            "db_failed": db_failed,
+            "gmail_deleted": gmail_deleted,
             "1panel_deleted": del_ok,
             "1panel_failed": del_fail,
             "1panel_skipped": del_skip,
@@ -428,12 +441,15 @@ async def batch_delete_sites(ids: list[int] = Body(...)):
         }, ensure_ascii=False)
         job.finished_at = datetime.now()
         await job.save()
-        _log.info("batch_delete 后台任务完成: ok=%s fail=%s skip=%s", del_ok, del_fail, del_skip)
+        _log.info("batch_delete 后台任务完成: db_ok=%s db_fail=%s 1panel_ok=%s 1panel_fail=%s 1panel_skip=%s",
+                  count, db_failed, del_ok, del_fail, del_skip)
 
     asyncio.create_task(_bg_delete())
 
     return Success(data={
         "deleted": count,
+        "db_failed": db_failed,
+        "gmail_deleted": gmail_deleted,
         "pending_1panel_delete": len(sites_info),
         "job_id": job.id
     }, msg=f'已删除 {count} 条记录，1Panel 删除在后台进行，请在任务中心查看进度')

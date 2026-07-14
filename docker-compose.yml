@@ -10,13 +10,13 @@ services:
     ports:
       - "${APP_PORT:-80}:80"
     environment:
-      # 从 .env 文件读取所有变量
       TZ: Asia/Shanghai
     env_file:
       - .env
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      # 持久化 SQLite 数据库（如使用外部 DB 可移除）
-      - ./data:/opt/vue-fastapi-admin/data
       # 日志持久化
       - ./logs:/opt/vue-fastapi-admin/logs
     healthcheck:
@@ -24,9 +24,38 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 30s
     networks:
       - app-network
+
+  db:
+    image: mysql:8.0
+    container_name: vue-fastapi-admin-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-secret-change-me}
+      MYSQL_DATABASE: ${DB_NAME:-vue_fastapi_admin}
+      MYSQL_USER: ${DB_USER:-admin}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-change-me-to-a-strong-password}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root-secret-change-me}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+
+volumes:
+  mysql-data:
+    driver: local
 
 networks:
   app-network:

@@ -51,5 +51,5 @@ async def update_account(payload: AccountUpdate):
 
 @router.delete("/delete", summary="删除账号")
 async def delete_account(id: int = Query(..., description="账号ID")):
-    await account_controller.remove(id=id)
-    return Success(msg="Deleted Successfully")
+    await account_controller.soft_remove(id=id)
+    return Success(msg="已移入回收站")

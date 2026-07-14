@@ -48,12 +48,20 @@ class GmailAccountController(CRUDBase[GmailAccount, GmailAccountCreate, GmailAcc
         site = await Site.filter(id=site_id).first()
         if site:
             site.pipeline_log = (site.pipeline_log or '') + f"\n[gmail] unassigned username={gmail.username}"
-            # 清除 Gmail 相关的流水线状态
             if site.pipeline_status and 'assign_gmail' in site.pipeline_status:
                 site.pipeline_status = site.pipeline_status.replace('assign_gmail:success', '').strip()
             await site.save()
         await gmail.save()
         return gmail
+
+    async def soft_delete_by_site(self, site_id: int) -> int:
+        """软删除分配给指定站点的所有 Gmail 账号（配合站点回收站）"""
+        gmails = await self.model.filter(assigned_site_id=site_id).all()
+        count = 0
+        for g in gmails:
+            await self.soft_remove(id=g.id)
+            count += 1
+        return count
 
 
 gmail_account_controller = GmailAccountController()

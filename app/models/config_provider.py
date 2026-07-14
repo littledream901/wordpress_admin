@@ -1,10 +1,10 @@
 """配置提供者模型 — 管理多账号、多环境、多节点的配置实例"""
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class ConfigProvider(BaseModel, TimestampMixin):
+class ConfigProvider(BaseModel, SoftDeleteMixin, TimestampMixin):
     """配置提供者（一个实例 = 一个账号/节点/环境）
 
     例如：

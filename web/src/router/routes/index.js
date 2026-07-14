@@ -47,6 +47,12 @@ export const basicRoutes = [
     meta: { order: 99 },
   },
   {
+    name: '401',
+    path: '/401',
+    component: () => import('@/views/error-page/401.vue'),
+    isHidden: true,
+  },
+  {
     name: '403',
     path: '/403',
     component: () => import('@/views/error-page/403.vue'),
@@ -56,6 +62,12 @@ export const basicRoutes = [
     name: '404',
     path: '/404',
     component: () => import('@/views/error-page/404.vue'),
+    isHidden: true,
+  },
+  {
+    name: '500',
+    path: '/500',
+    component: () => import('@/views/error-page/500.vue'),
     isHidden: true,
   },
   {

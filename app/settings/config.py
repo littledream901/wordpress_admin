@@ -52,11 +52,11 @@ class Settings(BaseSettings):
     留空则使用内存限流（单实例模式，多 worker 不共享状态）。"""
 
     # ── 数据库 ──
-    DB_ENGINE: str = "sqlite"  # sqlite / mysql / postgres
-    DB_SQLITE_PATH: str = ""  # 为空则使用默认路径
-    DB_HOST: str = "localhost"
+    DB_ENGINE: str = "mysql"  # sqlite / mysql / postgres
+    DB_SQLITE_PATH: str = ""  # SQLite 模式下的数据库文件路径
+    DB_HOST: str = "db"
     DB_PORT: int = 3306
-    DB_USER: str = "root"
+    DB_USER: str = "admin"
     DB_PASSWORD: str = ""
     DB_NAME: str = "vue_fastapi_admin"
 

@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Dict, Generic, List, NewType, Tuple, Type, TypeVar, Union
+import logging
 
 from pydantic import BaseModel
 from tortoise.expressions import Q
 from tortoise.models import Model
 from tortoise.transactions import in_transaction
+
+_log = logging.getLogger(__name__)
 
 Total = NewType("Total", int)
 ModelType = TypeVar("ModelType", bound=Model)
@@ -27,7 +31,18 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def list(self, page: int, page_size: int, search: Q = Q(), order: list = []) -> Tuple[Total, List[ModelType]]:
         query = self.model.filter(search)
-        return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+        _use_soft_delete = hasattr(self.model, 'is_deleted')
+        if _use_soft_delete:
+            # 用 __not=True 代替 =False，修复 Tortoise SQLite 方言 BooleanField 过滤不匹配的 bug
+            query = query.filter(is_deleted__not=True)
+        try:
+            return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+        except Exception as e:
+            if _use_soft_delete:
+                _log.warning("list() 查询异常: %s, 回退无过滤查询", e)
+                query = self.model.filter(search)
+                return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+            raise
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
         if isinstance(obj_in, Dict):
@@ -73,7 +88,16 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def soft_remove(self, id: int) -> None:
         """软删除（模型需有 is_deleted 字段）"""
-        await self.model.filter(id=id).update(is_deleted=True)
+        await self.model.filter(id=id).update(is_deleted=True, deleted_at=datetime.now())
+
+    async def restore(self, id: int) -> None:
+        """恢复软删除"""
+        await self.model.filter(id=id).update(is_deleted=False, deleted_at=None)
+
+    async def list_deleted(self, page: int, page_size: int, search: Q = Q(), order: list = []) -> Tuple[Total, List[ModelType]]:
+        """列出已软删除的记录"""
+        query = self.model.filter(is_deleted=True).filter(search)
+        return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
 
     @asynccontextmanager
     async def transaction(self):

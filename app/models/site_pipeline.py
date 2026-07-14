@@ -1,10 +1,10 @@
 from datetime import datetime
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class Site(BaseModel, TimestampMixin):
+class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     domain = fields.CharField(max_length=255, unique=True, description='域名', index=True)
     server_ip = fields.CharField(max_length=64, default='', description='服务器IP')
     status = fields.CharField(max_length=64, default='待处理', description='站点状态', index=True)

@@ -60,3 +60,8 @@ class UUIDModel:
 class TimestampMixin:
     created_at = fields.DatetimeField(auto_now_add=True, index=True)
     updated_at = fields.DatetimeField(auto_now=True, index=True)
+
+
+class SoftDeleteMixin:
+    is_deleted = fields.BooleanField(default=False, description="软删除标记")
+    deleted_at = fields.DatetimeField(null=True, description="删除时间")

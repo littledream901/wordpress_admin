@@ -1,9 +1,9 @@
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class Account(BaseModel, TimestampMixin):
+class Account(BaseModel, SoftDeleteMixin, TimestampMixin):
     account_type = fields.CharField(max_length=50, description="账号类型", index=True)
     username = fields.CharField(max_length=200, description="账号", index=True)
     password = fields.CharField(max_length=500, description="密码")

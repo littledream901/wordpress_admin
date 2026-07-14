@@ -28,6 +28,7 @@ RUN sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/source
         nginx \
         curl \
         procps \
+        default-mysql-client \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*

@@ -16,6 +16,7 @@ from .gmail import gmail_router
 from .shopify import shopify_router
 from .operation_jobs import operation_job_router
 from .imports import import_router, template_router
+from .recycle_bin import router as recycle_bin_router
 
 v1_router = APIRouter()
 
@@ -43,3 +44,5 @@ v1_router.include_router(operation_job_router, prefix="/operation-jobs", depende
 
 v1_router.include_router(template_router, prefix="/import")  # 模板下载无需认证，须在 import_router 之前注册
 v1_router.include_router(import_router, prefix="/import", dependencies=[DependPermission])
+
+v1_router.include_router(recycle_bin_router, prefix="/recycle-bin", dependencies=[DependPermission])

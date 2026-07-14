@@ -1,9 +1,9 @@
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class GmailAccount(BaseModel, TimestampMixin):
+class GmailAccount(BaseModel, SoftDeleteMixin, TimestampMixin):
     last_name = fields.CharField(max_length=100, default='', description='last name')
     first_name = fields.CharField(max_length=100, default='', description='first name')
     full_name = fields.CharField(max_length=200, default='', description='full name')

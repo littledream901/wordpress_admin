@@ -33,6 +33,9 @@ web/node_modules/
 # 数据库
 *.sqlite3
 *.db
+*.sql
+!migrations/**/*.sql
+data/
 
 # 文档
 doc.json

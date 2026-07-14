@@ -50,8 +50,8 @@ async def update_provider(payload: ConfigProviderUpdate):
 
 @router.post('/provider/delete', summary='删除 Provider')
 async def delete_provider(id: int = Query(...)):
-    await provider_controller.remove(id=id)
-    return Success(msg='删除成功')
+    await provider_controller.soft_remove(id=id)
+    return Success(msg='已移入回收站')
 
 
 @router.post('/provider/set-default', summary='设为默认')

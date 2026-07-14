@@ -129,6 +129,7 @@ MENU_DEFINITIONS = [
     ("配置中心",       "manage",              "/config",    MenuType.MENU,    1,  "carbon:settings-adjust",                         0, "/config/manage", None),
     ("资源绑定",       "bindings",            "/config",    MenuType.MENU,    2,  "carbon:ibm-cloud-pak-manta-automated-data-lineage", 0, "/config/bindings", None),
     ("账号管理",       "accounts",            "/config",    MenuType.MENU,    3,  "carbon:user-identification",                     0, "/config/accounts", None),
+    ("回收站",         "recycle",             "/config",    MenuType.MENU,    4,  "mdi:delete-restore",                              0, "/config/recycle", None),
 
     # 任务中心
     ("任务中心",       "/operation-jobs",     "",           MenuType.CATALOG, 50, "carbon:task",                                     0, "Layout", "/operation-jobs/job-list"),
@@ -144,12 +145,6 @@ MENU_DEFINITIONS = [
     ("部门管理",       "dept",                "/system",    MenuType.MENU,    5,  "mingcute:department-line",                     0, "/system/dept", None),
     ("审计日志",       "auditlog",            "/system",    MenuType.MENU,    6,  "ph:clipboard-text-bold",                        0, "/system/auditlog", None),
 
-    # 错误页面（由数据库驱动，不再硬编码于前端 basicRoutes）
-    ("错误页面",       "/error-page",         "",           MenuType.CATALOG, 99, "mdi:alert-circle-outline",                        0, "Layout", "/error-page/404"),
-    ("401错误",        "401",                 "/error-page", MenuType.MENU,    1,  "material-symbols:authenticator",                  1, "/error-page/401", None),
-    ("403错误",        "403",                 "/error-page", MenuType.MENU,    2,  "solar:forbidden-circle-line-duotone",              1, "/error-page/403", None),
-    ("404错误",        "404",                 "/error-page", MenuType.MENU,    3,  "tabler:error-404",                                 1, "/error-page/404", None),
-    ("500错误",        "500",                 "/error-page", MenuType.MENU,    4,  "clarity:rack-server-outline-alerted",              1, "/error-page/500", None),
 
 
 ]
@@ -579,6 +574,15 @@ async def init_db():
         )""",
         # OperationJob：worker 归属 + 心跳
         "ALTER TABLE operation_job ADD COLUMN last_heartbeat TEXT",
+        # 软删除字段：回收站功能
+        "ALTER TABLE site_pipeline_site ADD COLUMN is_deleted INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_site ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE site_pipeline_gmail_account ADD COLUMN is_deleted INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_gmail_account ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE account ADD COLUMN is_deleted INTEGER DEFAULT 0",
+        "ALTER TABLE account ADD COLUMN deleted_at TEXT",
+        "ALTER TABLE config_provider ADD COLUMN is_deleted INTEGER DEFAULT 0",
+        "ALTER TABLE config_provider ADD COLUMN deleted_at TEXT",
     ]
 
     for sql in patches:
