@@ -294,10 +294,12 @@ async function handleUpload({ file }) {
 }
 
 // 打开创建弹窗
+const LAST_DOMAIN_KEY = 'feed_last_target_domain'
+
 function openCreate(row) {
   createTarget.value = row
   createSourceDomain.value = row.source_domain || ''
-  createTargetDomain.value = defaultDomain.value
+  createTargetDomain.value = localStorage.getItem(LAST_DOMAIN_KEY) || defaultDomain.value
   createResult.value = null
   showCreate.value = true
 }
@@ -312,6 +314,8 @@ async function confirmCreate() {
       createSourceDomain.value,
     )
     createResult.value = res.data
+    // 记住最后输入的域名
+    localStorage.setItem(LAST_DOMAIN_KEY, createTargetDomain.value)
     message.success('新 Feed 创建成功')
     loadSources()
     loadProcessed()
