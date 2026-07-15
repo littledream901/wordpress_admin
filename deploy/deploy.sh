@@ -24,15 +24,65 @@ wait_healthy() {
     local port="${APP_PORT:-18080}"
     # 提取端口号（去掉 IP 绑定前缀）
     port="${port##*:}"
+    local url="http://127.0.0.1:${port}/api/v1/base/health"
+    local last_error=""
+    local status_code=""
+
+    step "等待应用健康检查 (${url})，最多 60 秒..."
+
     for i in $(seq 1 30); do
-        if curl -sf "http://127.0.0.1:${port}/api/v1/base/health" >/dev/null 2>&1; then
-            log "服务已就绪"
+        # 捕获 HTTP 状态码和响应体，区分不同错误情况
+        local resp
+        resp=$(curl -s -w "\n%{http_code}" --connect-timeout 3 "${url}" 2>&1) || true
+        status_code=$(echo "$resp" | tail -1)
+        local body=$(echo "$resp" | sed '$d')
+
+        if [ "$status_code" = "200" ]; then
+            echo ""
+            log "服务已就绪 ✓  (响应: ${body})"
             return 0
         fi
+
+        # 记录不同类型的错误以便最后诊断
+        if [ "$status_code" = "000" ]; then
+            last_error="连接被拒绝或超时（容器可能尚未启动或正在重启）"
+        elif echo "$resp" | grep -qi "could not resolve host" 2>/dev/null; then
+            last_error="DNS 解析失败"
+        else
+            last_error="HTTP ${status_code}: ${body:-无响应体}"
+        fi
+
+        # 每 2 秒打印一个点表示等待中
+        printf "."
         sleep 2
     done
-    warn "服务可能尚未完全启动，请稍后手动验证"
-    return 0
+
+    # ── 健康检查失败，输出详细诊断信息 ──
+    echo ""
+    echo ""
+    err "健康检查失败！请求 ${url}"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  最后错误: ${last_error}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # 容器状态
+    echo ">>> 容器状态:"
+    docker compose ps 2>/dev/null || echo "  (无法获取容器状态)"
+    echo ""
+
+    # 应用容器最近日志
+    echo ">>> App 容器最近 30 行日志:"
+    docker compose logs --tail 30 app 2>/dev/null || echo "  (无法获取日志)"
+    echo ""
+
+    # 手动 curl 一次，用户可直接复制输出
+    echo ">>> 手动验证命令:"
+    echo "    curl -v ${url}"
+    echo ""
+
+    exit 1
 }
 
 # =============================================
