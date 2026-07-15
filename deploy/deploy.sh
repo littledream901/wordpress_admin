@@ -19,6 +19,19 @@ warn() { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 err()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 step() { echo -e "${BLUE}[STEP]${NC}  $1"; }
 
+# 等待应用健康检查通过（最多60秒）
+wait_healthy() {
+    for i in $(seq 1 30); do
+        if curl -sf http://localhost/api/v1/base/health >/dev/null 2>&1; then
+            log "服务已就绪"
+            return 0
+        fi
+        sleep 2
+    done
+    warn "服务可能尚未完全启动，请稍后手动验证"
+    return 0
+}
+
 # =============================================
 # 环境检查
 # =============================================
@@ -118,13 +131,7 @@ init_deploy() {
 
     # 4. 等待服务就绪
     step "等待服务就绪..."
-    for i in $(seq 1 30); do
-        if curl -sf http://localhost/api/v1/base/health >/dev/null 2>&1; then
-            log "服务已就绪"
-            break
-        fi
-        sleep 2
-    done
+    wait_healthy
 
     # 5. 输出部署信息
     echo ""
