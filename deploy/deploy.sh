@@ -21,8 +21,11 @@ step() { echo -e "${BLUE}[STEP]${NC}  $1"; }
 
 # 等待应用健康检查通过（最多60秒）
 wait_healthy() {
+    local port="${APP_PORT:-18080}"
+    # 提取端口号（去掉 IP 绑定前缀）
+    port="${port##*:}"
     for i in $(seq 1 30); do
-        if curl -sf http://localhost/api/v1/base/health >/dev/null 2>&1; then
+        if curl -sf "http://127.0.0.1:${port}/api/v1/base/health" >/dev/null 2>&1; then
             log "服务已就绪"
             return 0
         fi
