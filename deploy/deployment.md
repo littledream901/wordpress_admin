@@ -42,11 +42,9 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 ### 步骤 1：克隆项目
 
 ```bash
-git clone -b dev https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
-cd /opt/wordpres-admin
+git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
+cd /opt/wordpress-admin
 ```
-
-
 
 ### 步骤 2：一键部署
 
@@ -92,7 +90,7 @@ grep DEFAULT_PASSWORD .env
 1. 登录 1Panel 面板，进入 **容器 → 编排 → 创建编排**
 2. 在服务器上克隆项目：
    ```bash
-   git clone https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
+   git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpres-admin
    ```
 3. 在 1Panel 编排界面中填写：
    - **名称**：`wordpres-admin`
@@ -110,7 +108,7 @@ grep DEFAULT_PASSWORD .env
 ### 方式二：命令行部署 + 1Panel 管理
 
 ```bash
-git clone https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
+git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpres-admin
 cd /opt/wordpres-admin
 bash deploy/deploy.sh init
 # 部署完成后，1Panel 容器列表自动可见
