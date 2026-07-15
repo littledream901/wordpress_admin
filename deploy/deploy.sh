@@ -202,19 +202,9 @@ update_deploy() {
     # 7. 清理旧镜像
     docker image prune -f 2>/dev/null || true
 
-    # 6. 等待就绪
-    step "等待服务就绪..."
-    for i in $(seq 1 30); do
-        if curl -sf http://localhost/api/v1/base/health >/dev/null 2>&1; then
-            log "服务已就绪"
-            break
-        fi
-        sleep 2
-    done
-
     echo ""
     echo -e "${GREEN}====== 更新完成 ======${NC}"
-    echo "  健康检查: curl http://localhost/api/v1/base/health"
+    echo "  健康检查: curl http://127.0.0.1:${APP_PORT:-18080}/api/v1/base/health"
     echo "  查看日志: docker compose logs -f"
 }
 
