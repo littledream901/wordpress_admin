@@ -280,7 +280,6 @@ DB_SQLITE_PATH=./data/db.sqlite3
 
 ```bash
 cd /opt/wordpress-admin
-git pull
 bash deploy/deploy.sh update
 ```
 
