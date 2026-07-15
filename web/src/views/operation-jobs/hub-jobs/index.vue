@@ -104,12 +104,12 @@ import {
   NH3, NIcon, NInput, NModal, NSelect, NSpace,
   NTag, NText, useMessage,
 } from 'naive-ui'
-import { WarnFilled } from '@vicons/carbon'
+import { WarningFilled } from '@vicons/carbon'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
 
 const message = useMessage()
-const warningIcon = WarnFilled
+const warningIcon = WarningFilled
 const crudRef = ref(null)
 
 // ─── 查询参数 ───

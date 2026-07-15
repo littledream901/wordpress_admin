@@ -42,9 +42,11 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 ### 步骤 1：克隆项目
 
 ```bash
-git clone https://github.com/your-org/wordpres-admin.git
-cd wordpres-admin
+git clone -b dev https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
+cd /opt/wordpres-admin
 ```
+
+
 
 ### 步骤 2：一键部署
 

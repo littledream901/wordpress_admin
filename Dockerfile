@@ -9,7 +9,7 @@ WORKDIR /opt/wordpres-admin/web
 RUN corepack enable
 
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
+RUN pnpm install --registry=https://registry.npmmirror.com
 
 COPY web/ ./
 RUN pnpm run build
