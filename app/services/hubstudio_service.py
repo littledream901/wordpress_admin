@@ -375,9 +375,45 @@ class HubStudioOrchestrationService:
     async def get_agent_config(self, provider_id: int) -> dict:
         """Agent 启动后拉取 Provider 配置（以 DB 为主，环境变量兜底）。
 
+        provider_id=0 时自动解析默认 hubstudio Provider。
         返回的 key 名与 Agent 端 _load_config() 一致，可直接 merge。
+        额外返回 _resolved_provider_id 告知 Agent 解析后的实际 ID。
         """
         config = {}
+        resolved_id = provider_id
+
+        # provider_id=0：解析默认 hubstudio Provider
+        if not provider_id:
+            # 诊断：先查所有 hubstudio 类型的 provider
+            all_hub = await ConfigProvider.filter(provider_type="hubstudio").all()
+            if not all_hub:
+                logger.warning("Agent 请求默认 Provider，但系统中没有任何 hubstudio 类型的 Provider")
+            else:
+                active_list = [p for p in all_hub if p.status == "active"]
+                default_list = [p for p in active_list if p.is_default]
+                logger.info(
+                    f"hubstudio Provider 统计: 总数={len(all_hub)}, "
+                    f"active={len(active_list)}, is_default={len(default_list)}"
+                )
+                if not active_list:
+                    logger.warning(
+                        f"存在 {len(all_hub)} 个 hubstudio Provider，但全部为非 active 状态: "
+                        f"{', '.join(f'{p.provider_name}({p.status})' for p in all_hub)}"
+                    )
+                elif not default_list:
+                    logger.warning(
+                        f"存在 {len(active_list)} 个 active hubstudio Provider，但未设置默认: "
+                        f"{', '.join(p.provider_name for p in active_list)}"
+                    )
+
+            default = await ConfigProvider.get_default("hubstudio")
+            if default:
+                provider_id = default.id
+                resolved_id = default.id
+                logger.info(f"Agent 请求默认 Provider → 解析为 provider_id={resolved_id} ({default.provider_name})")
+            else:
+                logger.warning("Agent 请求默认 Provider，但系统中无符合条件的 hubstudio Provider（需 status=active 且 is_default=True，或至少有一个 active）")
+
         # 1. 从 DB 读取 provider 配置
         if provider_id:
             db_items = await ProviderConfigItem.get_map(provider_id)
@@ -399,19 +435,21 @@ class HubStudioOrchestrationService:
                 if db_key in db_items:
                     config[agent_key] = db_items[db_key]
 
-        # 2. 环境变量兜底（DB 中没有的 key 才用 env）
-        _env_fallbacks = {
-            "app_id": "HUB_APP_ID",
-            "app_secret": "HUB_APP_SECRET",
-            "group_code": "HUB_GROUP_CODE",
-            "real_kernel_version": "HUB_KERNEL_VER",
-        }
-        for key, env_var in _env_fallbacks.items():
-            if key not in config or not config[key]:
-                val = os.getenv(env_var, "")
-                if val:
-                    config[key] = val
+        # 2. 环境变量兜底（仅 provider_id=0 且无默认 Provider 时生效）
+        if not resolved_id:
+            _env_fallbacks = {
+                "app_id": "HUB_APP_ID",
+                "app_secret": "HUB_APP_SECRET",
+                "group_code": "HUB_GROUP_CODE",
+                "real_kernel_version": "HUB_KERNEL_VER",
+            }
+            for key, env_var in _env_fallbacks.items():
+                if key not in config or not config[key]:
+                    val = os.getenv(env_var, "")
+                    if val:
+                        config[key] = val
 
+        config["_resolved_provider_id"] = resolved_id
         return config
 
     # ── Agent 领取/回传 ──

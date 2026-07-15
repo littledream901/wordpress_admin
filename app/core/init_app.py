@@ -13,22 +13,25 @@ from app.controllers.api import api_controller
 from app.controllers.user import UserCreate, user_controller
 from app.models.config import Config
 from app.models.config_provider import ConfigProvider, ProviderConfigItem
-from app.core.exceptions import (
-    DoesNotExist,
-    DoesNotExistHandle,
+from fastapi.exceptions import (
     HTTPException,
-    HttpExcHandle,
-    IntegrityError,
-    IntegrityHandle,
     RequestValidationError,
-    RequestValidationHandle,
     ResponseValidationError,
-    ResponseValidationHandle,
+)
+from tortoise.exceptions import DoesNotExist, IntegrityError
+from app.core.exceptions import (
     ExternalAPIError,
-    ServiceErrorHandle,
     ResourceBusyError,
-    ResourceBusyHandle,
     ProviderConfigError,
+)
+from app.core.exception_handlers import (
+    DoesNotExistHandle,
+    HttpExcHandle,
+    IntegrityHandle,
+    RequestValidationHandle,
+    ResponseValidationHandle,
+    ServiceErrorHandle,
+    ResourceBusyHandle,
     ProviderConfigErrorHandle,
 )
 from app.log import logger

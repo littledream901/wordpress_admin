@@ -257,6 +257,7 @@ const {
 
 // ─── Provider 表格列 ───
 const providerColumns = computed(() => [
+  { title: 'ID', key: 'id', width: 50, align: 'center' },
   {
     title: '类型', key: 'provider_type', width: 100,
     render(row) {

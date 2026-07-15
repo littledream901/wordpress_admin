@@ -18,6 +18,8 @@ a = Analysis(
     pathex=[".."],
     binaries=[],
     datas=[
+        # 默认 .env 配置（用户可在 EXE 同目录放 .env 覆盖）
+        (".env", "."),
         # Agent 入口模块（通过 importlib 直接加载，绕过 app/__init__.py）
         ("../app/agent/hubstudio_agent.py", "app/agent"),
         # executor 适配层 + 拆分后的子模块
