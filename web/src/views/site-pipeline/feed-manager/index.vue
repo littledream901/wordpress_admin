@@ -139,9 +139,9 @@ function platformTag(platform) {
 // ── 源文件列 ──
 const sourceColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
+  { title: '文件名', key: 'original_name', width: 190, ellipsis: { tooltip: true } },
   {
-    title: '检测域名', key: 'source_domain', width: 150, ellipsis: { tooltip: true },
+    title: '检测域名', key: 'source_domain', width: 180, ellipsis: { tooltip: true },
     render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
   { title: '类型', key: 'file_type', width: 60 },
@@ -153,7 +153,7 @@ const sourceColumns = [
       return kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`
     },
   },
-  { title: '上传时间', key: 'created_at', width: 140 },
+  { title: '上传时间', key: 'created_at', width: 175 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
