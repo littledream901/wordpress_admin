@@ -157,7 +157,7 @@ const sourceColumns = [
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
-      h(NButton, { size: 'tiny', type: 'primary', style: 'width:90px', onClick: () => openCreate(r) }, { default: () => '创建新Feed' }),
+      h(NButton, { size: 'tiny', type: 'primary', style: 'width:72px', onClick: () => openCreate(r) }, { default: () => '创建新Feed' }),
       h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, { default: () => '删除' }),
     ]),
   },
@@ -202,7 +202,7 @@ const processedColumns = [
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
       h(NButton, {
-        size: 'tiny', type: r.is_expired ? undefined : 'success',
+        size: 'tiny', type: r.is_expired ? undefined : 'success', style: 'width:72px',
         disabled: r.is_expired || !r.download_url,
         onClick: () => copyDownloadUrl(r.download_url),
       }, { default: () => r.is_expired ? '已过期' : '复制链接' }),
