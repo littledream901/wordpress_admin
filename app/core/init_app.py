@@ -562,7 +562,7 @@ async def init_db():
         "ALTER TABLE site_pipeline_site ADD COLUMN woo_product_count INTEGER DEFAULT 0",
         # RoleDataScope 表（Tortoise 有时无法通过 safe 模式创建含 FK + UNIQUE 的表）
         """CREATE TABLE IF NOT EXISTS role_data_scope (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id INTEGER PRIMARY KEY AUTO_INCREMENT,
             role_id INTEGER NOT NULL REFERENCES role(id),
             resource VARCHAR(64) NOT NULL,
             data_scope INTEGER NOT NULL DEFAULT 3,
