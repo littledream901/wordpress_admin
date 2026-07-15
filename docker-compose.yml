@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: vue-fastapi-admin
+    container_name: wordpres-admin
     restart: unless-stopped
     ports:
       - "${APP_PORT:-80}:80"
@@ -18,7 +18,7 @@ services:
         condition: service_healthy
     volumes:
       # 日志持久化
-      - ./logs:/opt/vue-fastapi-admin/logs
+      - ./logs:/opt/wordpres-admin/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1/api/v1/base/health"]
       interval: 30s
@@ -30,7 +30,7 @@ services:
 
   db:
     image: mysql:8.0
-    container_name: vue-fastapi-admin-db
+    container_name: wordpres-admin-db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-secret-change-me}

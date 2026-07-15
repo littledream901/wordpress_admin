@@ -1,5 +1,5 @@
 [project]
-name = "vue-fastapi-admin"
+name = "wordpres-admin"
 version = "0.1.0"
 description = "Vue Fastapi admin"
 authors = [

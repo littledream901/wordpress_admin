@@ -1,12 +1,12 @@
 # ==============================================
 # Stage 1: 前端构建
 # ==============================================
-FROM node:18-alpine AS web-builder
+FROM node:20-alpine AS web-builder
 
-WORKDIR /opt/vue-fastapi-admin/web
+WORKDIR /opt/wordpres-admin/web
 
-# 使用 pnpm 构建（与 lockfile 一致）
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# 使用 package.json 中声明的 pnpm 版本
+RUN corepack enable
 
 COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
@@ -19,7 +19,7 @@ RUN pnpm run build
 # ==============================================
 FROM python:3.11-slim-bookworm
 
-WORKDIR /opt/vue-fastapi-admin
+WORKDIR /opt/wordpres-admin
 
 # 系统依赖 & 时区
 RUN sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/sources.list.d/debian.sources \
@@ -44,7 +44,7 @@ COPY run.py ./
 COPY pyproject.toml ./
 
 # 前端产物
-COPY --from=web-builder /opt/vue-fastapi-admin/web/dist /opt/vue-fastapi-admin/web/dist
+COPY --from=web-builder /opt/wordpres-admin/web/dist /opt/wordpres-admin/web/dist
 
 # Nginx 配置
 COPY deploy/web.conf /etc/nginx/sites-available/default
@@ -56,7 +56,7 @@ COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # 数据目录
-RUN mkdir -p /opt/vue-fastapi-admin/data /opt/vue-fastapi-admin/logs
+RUN mkdir -p /opt/wordpres-admin/data /opt/wordpres-admin/logs
 
 ENV LANG=zh_CN.UTF-8 \
     PYTHONUNBUFFERED=1

@@ -6,7 +6,7 @@
 
 ## 项目简介
 
-Vue FastAPI Admin 是一个功能齐全的后台管理系统，基于 FastAPI + Vue 3 + Naive UI 构建。
+Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理系统。
 
 **核心功能模块：**
 
@@ -42,8 +42,8 @@ Vue FastAPI Admin 是一个功能齐全的后台管理系统，基于 FastAPI + 
 ### 步骤 1：克隆项目
 
 ```bash
-git clone https://github.com/your-org/vue-fastapi-admin.git
-cd vue-fastapi-admin
+git clone https://github.com/your-org/wordpres-admin.git
+cd wordpres-admin
 ```
 
 ### 步骤 2：一键部署
@@ -90,15 +90,15 @@ grep DEFAULT_PASSWORD .env
 1. 登录 1Panel 面板，进入 **容器 → 编排 → 创建编排**
 2. 在服务器上克隆项目：
    ```bash
-   git clone https://github.com/your-org/vue-fastapi-admin.git /opt/vue-fastapi-admin
+   git clone https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
    ```
 3. 在 1Panel 编排界面中填写：
-   - **名称**：`vue-fastapi-admin`
-   - **路径**：`/opt/vue-fastapi-admin`
+   - **名称**：`wordpres-admin`
+   - **路径**：`/opt/wordpres-admin`
    - **Compose 文件**：选择项目根目录的 `docker-compose.yml`
 4. 创建 `.env` 文件：
    ```bash
-   cd /opt/vue-fastapi-admin
+   cd /opt/wordpres-admin
    cp .env.example .env
    # 修改所有密码占位符
    nano .env
@@ -108,8 +108,8 @@ grep DEFAULT_PASSWORD .env
 ### 方式二：命令行部署 + 1Panel 管理
 
 ```bash
-git clone https://github.com/your-org/vue-fastapi-admin.git /opt/vue-fastapi-admin
-cd /opt/vue-fastapi-admin
+git clone https://github.com/your-org/wordpres-admin.git /opt/wordpres-admin
+cd /opt/wordpres-admin
 bash deploy/deploy.sh init
 # 部署完成后，1Panel 容器列表自动可见
 ```
@@ -161,7 +161,7 @@ CORS_ORIGINS=["https://admin.your-domain.com"]
 ## 项目目录结构（生产环境关键路径）
 
 ```
-vue-fastapi-admin/
+wordpres-admin/
 ├── app/                    # FastAPI 后端
 │   ├── api/v1/             # API 路由（仅路由注册和参数校验）
 │   ├── controllers/        # 业务逻辑层
@@ -279,7 +279,7 @@ DB_SQLITE_PATH=./data/db.sqlite3
 ## 更新部署
 
 ```bash
-cd vue-fastapi-admin
+cd wordpres-admin
 bash deploy/deploy.sh update
 ```
 
@@ -303,7 +303,7 @@ docker compose exec -T db mysqldump -uadmin -p"$(grep DB_PASSWORD .env | cut -d=
 tar -czf "static_backup_$(date +%Y%m%d_%H%M%S).tar.gz" static/
 
 # 定时备份（crontab，每天凌晨 3 点）
-# 0 3 * * * cd /opt/vue-fastapi-admin && docker compose exec -T db mysqldump -uadmin -p"your-password" vue_fastapi_admin > /backup/db_$(date +\%Y\%m\%d).sql
+# 0 3 * * * cd /opt/wordpres-admin && docker compose exec -T db mysqldump -uadmin -p"your-password" wordpres_admin > /backup/db_$(date +\%Y\%m\%d).sql
 ```
 
 ### MySQL 恢复

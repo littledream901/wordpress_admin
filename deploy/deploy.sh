@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================
-#  Vue FastAPI Admin — 部署/更新/管理脚本
+#  Wordpress Admin — 部署/更新/管理脚本
 # =============================================
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-GIT_REPO="${GIT_REPO:-https://github.com/your-org/vue-fastapi-admin.git}"
+GIT_REPO="${GIT_REPO:-https://github.com/your-org/wordpres-admin.git}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,7 +31,7 @@ check_deps() {
 # clone — 首次克隆项目到服务器
 # =============================================
 clone_project() {
-    local target_dir="${1:-vue-fastapi-admin}"
+    local target_dir="${1:-wordpres-admin}"
     local repo_url="${2:-$GIT_REPO}"
 
     step "克隆项目代码..."
@@ -277,12 +277,12 @@ print_usage() {
     echo ""
     echo "示例:"
     echo "  # 从零开始（服务器上执行）"
-    echo "  git clone https://github.com/your-org/vue-fastapi-admin.git"
-    echo "  cd vue-fastapi-admin"
+    echo "  git clone https://github.com/your-org/wordpres-admin.git"
+    echo "  cd wordpres-admin"
     echo "  bash deploy/deploy.sh init"
     echo ""
     echo "  # 或一键克隆"
-    echo "  bash deploy/deploy.sh clone my-app https://github.com/your-org/vue-fastapi-admin.git"
+    echo "  bash deploy/deploy.sh clone my-app https://github.com/your-org/wordpres-admin.git"
     echo ""
     echo "  # 更新"
     echo "  bash deploy/deploy.sh update"
@@ -290,7 +290,7 @@ print_usage() {
 
 case "${1:-}" in
     clone)
-        clone_project "${2:-vue-fastapi-admin}" "${3:-$GIT_REPO}"
+        clone_project "${2:-wordpres-admin}" "${3:-$GIT_REPO}"
         ;;
     init)
         init_deploy

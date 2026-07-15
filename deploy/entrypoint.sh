@@ -2,7 +2,7 @@
 set -e
 
 echo "========================================="
-echo "  Vue FastAPI Admin - Docker Entrypoint"
+echo "  Wordpress Admin - Docker Entrypoint"
 echo "========================================="
 
 # =============================================
