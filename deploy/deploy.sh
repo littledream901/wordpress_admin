@@ -137,12 +137,14 @@ init_deploy() {
     wait_healthy
 
     # 5. 输出部署信息
+    local _port="${APP_PORT:-127.0.0.1:18080}"
+    _port="${_port##*:}"
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}  部署成功！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo "  访问地址:     http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'YOUR_IP')"
-    echo "  健康检查:     curl http://localhost/api/v1/base/health"
+    echo "  健康检查:     curl http://127.0.0.1:${_port}/api/v1/base/health"
     echo "  管理员密码:   grep DEFAULT_PASSWORD .env"
     echo "  查看日志:     docker compose logs -f"
     echo -e "${GREEN}========================================${NC}"

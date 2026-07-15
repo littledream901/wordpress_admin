@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 后端源码
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY aerich.ini ./
 COPY run.py ./
 COPY pyproject.toml ./
 

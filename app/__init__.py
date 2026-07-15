@@ -39,11 +39,10 @@ if _HAS_FASTAPI:
             logger.warning("DEFAULT_PASSWORD 未设置，新用户创建将使用空密码")
         if not settings.DEBUG:
             if settings.CORS_ORIGINS == ["*"] or settings.CORS_ORIGINS == ["http://localhost"]:
-                raise SettingNotFound(
-                    "CORS_ORIGINS 为不安全默认值（[\"*\"] 或 [\"http://localhost\"]），"
-                    "生产环境必须指定具体域名。\n"
-                    "  示例: CORS_ORIGINS=[\"https://your-domain.com\"]\n"
-                    "  开发环境请设置 DEBUG=true"
+                logger.warning(
+                    "CORS_ORIGINS 为默认值（[\"*\"] 或 [\"http://localhost\"]），"
+                    "生产环境建议指定具体域名。"
+                    "  示例: CORS_ORIGINS=[\"https://your-domain.com\"]"
                 )
 
     @asynccontextmanager

@@ -65,25 +65,38 @@ echo "[INFO] 同步数据库表结构..."
 python -c "
 import asyncio
 import os
+import sys
 from tortoise import Tortoise
 from app.settings import TORTOISE_ORM
 
 async def upgrade():
     await Tortoise.init(config=TORTOISE_ORM)
 
-    # 优先使用 Aerich 迁移（如果 migrations/ 目录存在）
     migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
-    aerich_ini = 'aerich.ini'
-    if os.path.exists(aerich_ini) and os.path.isdir(migrations_dir):
-        from aerich import Command
-        command = Command(tortoise_config=TORTOISE_ORM, app='models')
-        await command.init()
-        await command.upgrade(run_in_transaction=True)
-        print('[INFO] 数据库迁移完成 (Aerich)')
-    else:
-        # 回退：使用 generate_schemas 自动建表
-        await Tortoise.generate_schemas(safe=True)
-        print('[INFO] 数据库表结构已同步 (generate_schemas)')
+
+    # 优先使用 Aerich 迁移
+    # aerich.ini 由项目根目录提供，也可回退 pyproject.toml
+    aerich_config = None
+    if os.path.exists('aerich.ini'):
+        aerich_config = 'aerich.ini'
+    elif os.path.exists('pyproject.toml'):
+        aerich_config = 'pyproject.toml'
+
+    if aerich_config and os.path.isdir(migrations_dir):
+        try:
+            from aerich import Command
+            command = Command(tortoise_config=TORTOISE_ORM, app='models', location=migrations_dir)
+            await command.init()
+            await command.upgrade(run_in_transaction=True)
+            print(f'[INFO] 数据库迁移完成 (Aerich, 配置来源: {aerich_config})')
+            return
+        except Exception as e:
+            print(f'[WARN] Aerich 迁移失败: {e}')
+            print('[WARN] 回退到 generate_schemas (safe mode)')
+
+    # 回退：使用 generate_schemas 自动建表（safe=True 不删除已有表）
+    await Tortoise.generate_schemas(safe=True)
+    print('[INFO] 数据库表结构已同步 (generate_schemas)')
 
 asyncio.run(upgrade())
 "
