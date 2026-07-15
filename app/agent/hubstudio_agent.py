@@ -356,7 +356,7 @@ class HubStudioAgent:
         # 服务端可能返回了实际解析的 provider_id
         resolved_id = server_config.pop("_resolved_provider_id", self.provider_id)
         if resolved_id and resolved_id != self.provider_id:
-            self.logger.info(f"Provider ID 从 {self.provider_id} 解析为 [{resolved_id}]（默认 Provider）")
+            self.logger.info(f"未指定 Provider，服务端自动解析为默认 HubStudio Provider（DB 记录 ID={resolved_id}）")
             self.provider_id = resolved_id
 
         # 从 0 切换到 DB 模式：清空 .env 兜底的敏感密钥，强制从 DB 获取
