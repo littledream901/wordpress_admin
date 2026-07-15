@@ -1,5 +1,5 @@
 [project]
-name = "wordpres-admin"
+name = "wordpress-admin"
 version = "0.1.0"
 description = "Vue Fastapi admin"
 authors = [

@@ -3,7 +3,7 @@
 # ==============================================
 FROM node:20-alpine AS web-builder
 
-WORKDIR /opt/wordpres-admin/web
+WORKDIR /opt/wordpress-admin/web
 
 # 使用 package.json 中声明的 pnpm 版本
 RUN corepack enable
@@ -19,7 +19,7 @@ RUN pnpm run build
 # ==============================================
 FROM python:3.11-slim-bookworm
 
-WORKDIR /opt/wordpres-admin
+WORKDIR /opt/wordpress-admin
 
 # 系统依赖 & 时区
 RUN sed -i "s@http://.*.debian.org@http://mirrors.ustc.edu.cn@g" /etc/apt/sources.list.d/debian.sources \
@@ -44,7 +44,7 @@ COPY run.py ./
 COPY pyproject.toml ./
 
 # 前端产物
-COPY --from=web-builder /opt/wordpres-admin/web/dist /opt/wordpres-admin/web/dist
+COPY --from=web-builder /opt/wordpress-admin/web/dist /opt/wordpress-admin/web/dist
 
 # Nginx 配置
 COPY deploy/web.conf /etc/nginx/sites-available/default
@@ -56,7 +56,7 @@ COPY deploy/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # 数据目录
-RUN mkdir -p /opt/wordpres-admin/data /opt/wordpres-admin/logs
+RUN mkdir -p /opt/wordpress-admin/data /opt/wordpress-admin/logs
 
 ENV LANG=zh_CN.UTF-8 \
     PYTHONUNBUFFERED=1

@@ -73,7 +73,7 @@ git push origin dev
 ```bash
 # 克隆项目
 git clone <your-repo-url>
-cd wordpres-admin
+cd wordpress-admin
 
 # 复制环境配置
 cp .env.example .env
@@ -301,7 +301,7 @@ docker compose logs -f
 
 ```
 ┌──────────────────────────────────────────┐
-│  Docker Container (wordpres-admin)    │
+│  Docker Container (wordpress-admin)    │
 │                                          │
 │  Nginx (:80)                             │
 │    ├── /api/*   → uvicorn (:9999)        │

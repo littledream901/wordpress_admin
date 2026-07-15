@@ -48,7 +48,7 @@ check_deps() {
 # clone — 首次克隆项目到服务器
 # =============================================
 clone_project() {
-    local target_dir="${1:-wordpres-admin}"
+    local target_dir="${1:-wordpress-admin}"
     local repo_url="${2:-$GIT_REPO}"
 
     step "克隆项目代码..."
@@ -292,7 +292,7 @@ print_usage() {
     echo "  bash deploy/deploy.sh init"
     echo ""
     echo "  # 或一键克隆"
-    echo "  bash deploy/deploy.sh clone wordpres-admin"
+    echo "  bash deploy/deploy.sh clone wordpress-admin"
     echo ""
     echo "  # 更新"
     echo "  bash deploy/deploy.sh update"
@@ -300,7 +300,7 @@ print_usage() {
 
 case "${1:-}" in
     clone)
-        clone_project "${2:-wordpres-admin}" "${3:-$GIT_REPO}"
+        clone_project "${2:-wordpress-admin}" "${3:-$GIT_REPO}"
         ;;
     init)
         init_deploy
