@@ -61,6 +61,13 @@
 - Node.js >= 18
 - [uv](https://docs.astral.sh/uv/) 或 pip
 
+
+###
+```bash
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+git push origin dev
+```
 ### 1. 初始化
 
 ```bash
