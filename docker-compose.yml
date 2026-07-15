@@ -20,6 +20,8 @@ services:
     volumes:
       # 日志持久化
       - ./logs:/opt/wordpres-admin/logs
+      # Feed 上传文件持久化
+      - ./uploads/feeds:/opt/wordpres-admin/uploads/feeds
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1/api/v1/base/health"]
       interval: 30s
