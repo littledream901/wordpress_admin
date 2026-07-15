@@ -126,7 +126,7 @@ init_deploy() {
     fi
 
     # 2. 创建持久化目录
-    mkdir -p data logs static/avatars
+    mkdir -p data logs static/avatars uploads/feeds
 
     # 3. 构建并启动
     step "构建镜像并启动容器..."

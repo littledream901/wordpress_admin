@@ -25,7 +25,9 @@ from app.schemas.base import Fail, Success, SuccessExtra
 router = APIRouter(tags=["Feed"])
 feed_download_router = APIRouter()  # 公开下载路由，无需认证
 
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "feeds")
+# feed.py → app/api/v1/site_pipeline/ → 5层到项目根目录
+_UPLOAD_BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+UPLOAD_DIR = os.path.join(_UPLOAD_BASE, "uploads", "feeds")
 CHUNK_DIR = os.path.join(UPLOAD_DIR, "chunks")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHUNK_DIR, exist_ok=True)
