@@ -67,9 +67,15 @@
             />
           </n-form-item>
           <n-alert v-if="createResult" type="success" title="创建成功">
-            <n-space vertical :size="4">
+            <n-space vertical :size="8">
               <n-text>共替换 {{ createResult.replace_count }} 处</n-text>
               <n-text>{{ createResult.source_domain }} → {{ createResult.target_domain }}</n-text>
+              <n-space v-if="createResult.download_url" :size="6" align="center">
+                <n-text depth="3" style="font-size:13px">{{ createResult.download_url }}</n-text>
+                <n-button size="tiny" type="success" @click="copyDownloadUrl(createResult.download_url)">
+                  复制链接
+                </n-button>
+              </n-space>
             </n-space>
           </n-alert>
         </n-space>
@@ -191,8 +197,8 @@ const processedColumns = [
   },
   { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
 
-  { title: '替换次数', key: 'replace_count', width: 55, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
-  { title: '过期时间', key: 'expires_at', width: 100,
+  { title: '替换次数', key: 'replace_count', width: 75, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
+  { title: '过期时间', key: 'expires_at', width: 80,
     render: (r) => {
       const info = expiresInfo(r)
       return h(NTag, { type: expiresType(r), size: 'small' }, { default: () => info })
