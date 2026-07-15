@@ -362,7 +362,20 @@ async def download_feed(filename: str):
     if feed and feed.is_expired:
         return Fail(msg="文件已过期，无法下载")
 
-    return FileResponse(path=target, filename=filename, media_type="application/octet-stream")
+    # 基于文件 mtime + size 生成 ETag，防止浏览器/代理缓存旧版本
+    stat = os.stat(target)
+    etag = f'"{stat.st_mtime}_{stat.st_size}"'
+
+    return FileResponse(
+        path=target,
+        filename=filename,
+        media_type="application/octet-stream",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "ETag": etag,
+        },
+    )
 
 
 @router.delete("/{feed_id}", summary="删除文件")
