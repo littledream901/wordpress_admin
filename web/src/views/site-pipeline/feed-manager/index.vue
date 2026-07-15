@@ -139,13 +139,13 @@ function platformTag(platform) {
 // ── 源文件列 ──
 const sourceColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '文件名', key: 'original_name', width: 190, ellipsis: { tooltip: true } },
+  { title: '文件名', key: 'original_name', width: 195, ellipsis: { tooltip: true } },
   {
-    title: '检测域名', key: 'source_domain', width: 180, ellipsis: { tooltip: true },
+    title: '检测域名', key: 'source_domain', width: 170, ellipsis: { tooltip: true },
     render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
-  { title: '类型', key: 'file_type', width: 60 },
-  { title: '平台', key: 'platform', width: 90, render: (r) => platformTag(r.platform) },
+  { title: '类型', key: 'file_type', width: 55 },
+  { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
   {
     title: '大小', key: 'file_size', width: 60,
     render: (r) => {
@@ -153,7 +153,7 @@ const sourceColumns = [
       return kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`
     },
   },
-  { title: '上传时间', key: 'created_at', width: 175 },
+  { title: '上传时间', key: 'created_at', width: 190 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
@@ -180,14 +180,14 @@ function expiresType(r) {
 
 const processedColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '原始文件名', key: 'original_name', width: 130, ellipsis: { tooltip: true } },
+  { title: '原始文件名', key: 'original_name', width: 140, ellipsis: { tooltip: true } },
   {
-    title: '新文件名', key: 'processed_name', width: 120, ellipsis: { tooltip: true },
+    title: '新文件名', key: 'processed_name', width: 110, ellipsis: { tooltip: true },
     render: (r) => r.processed_name || '-',
   },
-  { title: '平台', key: 'platform', width: 90, render: (r) => platformTag(r.platform) },
+  { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
   {
-    title: '域名变更', key: 'domains', width: 140, ellipsis: { tooltip: true },
+    title: '域名变更', key: 'domains', width: 170, ellipsis: { tooltip: true },
     render: (r) => h(NText, { depth: 2 }, { default: () => `${r.source_domain || '?'} → ${r.target_domain || '?'}` }),
   },
   { title: '替换次数', key: 'replace_count', width: 55, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
@@ -197,7 +197,7 @@ const processedColumns = [
       return h(NTag, { type: expiresType(r), size: 'small' }, { default: () => info })
     },
   },
-  { title: '创建时间', key: 'created_at', width: 120 },
+  { title: '创建时间', key: 'created_at', width: 95 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
