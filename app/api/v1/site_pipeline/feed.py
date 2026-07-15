@@ -78,8 +78,8 @@ def _count_and_replace_domain(file_path: str, source_domain: str, target_domain:
     escaped = re.escape(source_domain)
 
     if file_type == "xml":
-        # 仅替换 <link> 和 <g:link> 标签内的域名
-        # 使用反向引用确保开闭标签配对
+        # 仅替换 <link> / <canonical_link> 标签内的域名（含 g: 前缀）
+        # 使用反向引用确保开闭标签配对，长标签放前面避免短标签误匹配
         def _replace_in_link_tag(m):
             nonlocal count
             tag_text = m.group(0)
@@ -88,7 +88,7 @@ def _count_and_replace_domain(file_path: str, source_domain: str, target_domain:
             return new_text
 
         content = re.sub(
-            r'<(g:link|link)([\s>]).*?</\1>',
+            r'<(g:canonical_link|canonical_link|g:link|link)([\s>]).*?</\1>',
             _replace_in_link_tag,
             content,
             flags=re.DOTALL,
