@@ -2,14 +2,25 @@
   <CommonPage show-header title="Feed 文件管理">
     <template #action>
       <div style="margin-left: auto;">
-        <n-upload :show-file-list="false" accept=".csv,.xml,.txt" :custom-request="handleUpload" :disabled="uploading">
-          <n-button type="primary" :loading="uploading">
-            <span style="display:inline-flex;align-items:center;gap:6px">
-              <span class="i-mdi:cloud-upload-outline" />
-              上传 Feed 文件
-            </span>
-          </n-button>
-        </n-upload>
+        <div style="display:flex;align-items:center;gap:8px">
+          <n-upload :show-file-list="false" accept=".csv,.xml,.txt" :custom-request="handleUpload" :disabled="uploading">
+            <n-button type="primary" :loading="uploading">
+              <span style="display:inline-flex;align-items:center;gap:6px">
+                <span class="i-mdi:cloud-upload-outline" />
+                上传 Feed 文件
+              </span>
+            </n-button>
+          </n-upload>
+          <n-progress
+            v-if="uploading && uploadPercent > 0"
+            type="line"
+            :percentage="uploadPercent"
+            :indicator-placement="'inside'"
+            style="width:160px"
+            :height="28"
+            :border-radius="6"
+          />
+        </div>
       </div>
     </template>
 
@@ -85,7 +96,7 @@
 import { h, ref, reactive, onMounted } from 'vue'
 import {
   NAlert, NButton, NCard, NDataTable, NFormItem, NInput, NModal,
-  NSpace, NTag, NText, NUpload, useMessage,
+  NSpace, NTag, NText, NUpload, NProgress, useMessage,
 } from 'naive-ui'
 import { useClipboard } from '@vueuse/core'
 import api from '@/api/site-pipeline'
@@ -216,22 +227,54 @@ async function loadDefaultDomain() {
   } catch (_) {}
 }
 
-// 上传
+// 上传（分片上传，支持大文件）
+const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 const uploading = ref(false)
+const uploadPercent = ref(0)
 
 async function handleUpload({ file }) {
   if (!file.file) return
+  const f = file.file
+  const totalChunks = Math.ceil(f.size / CHUNK_SIZE)
+
   uploading.value = true
+  uploadPercent.value = 0
+
   try {
-    const formData = new FormData()
-    formData.append('file', file.file)
-    await api.uploadFeed(formData)
+    // 1. 初始化上传会话
+    const initRes = await api.initChunkUpload({
+      filename: f.name,
+      total_size: f.size,
+      total_chunks: totalChunks,
+    })
+    const uploadId = initRes.data.upload_id
+
+    // 2. 逐片上传
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE
+      const end = Math.min(start + CHUNK_SIZE, f.size)
+      const blob = f.slice(start, end)
+
+      const formData = new FormData()
+      formData.append('upload_id', uploadId)
+      formData.append('chunk_index', i)
+      formData.append('chunk', blob, `chunk_${i}`)
+
+      await api.uploadChunk(formData)
+      uploadPercent.value = Math.round(((i + 1) / totalChunks) * 90) // 90% for upload
+    }
+
+    // 3. 通知服务端合并分片
+    uploadPercent.value = 95
+    await api.completeChunkUpload({ upload_id: uploadId })
+    uploadPercent.value = 100
     message.success('上传成功')
     loadSources()
-  } catch (_) {
+  } catch (e) {
     message.error('上传失败')
   } finally {
     uploading.value = false
+    setTimeout(() => { uploadPercent.value = 0 }, 1500)
   }
 }
 

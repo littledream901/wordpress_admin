@@ -26,7 +26,10 @@ router = APIRouter(tags=["Feed"])
 feed_download_router = APIRouter()  # 公开下载路由，无需认证
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "feeds")
+CHUNK_DIR = os.path.join(UPLOAD_DIR, "chunks")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(CHUNK_DIR, exist_ok=True)
+CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
 
 DEFAULT_TARGET_DOMAIN = os.getenv("FEED_DEFAULT_TARGET_DOMAIN", "")
 # feed_expire_days 优先读 provider 配置，回退到环境变量
@@ -293,3 +296,129 @@ async def cleanup_expired():
 
     _log.info(f"[feed] 清理过期文件: {deleted_count} 个")
     return Success(data={"deleted": deleted_count}, msg=f"已清理 {deleted_count} 个过期文件")
+
+
+# ═══════════════════════  分片上传  ═══════════════════════
+
+import json as _json
+
+
+def _session_path(upload_id: str) -> str:
+    return os.path.join(CHUNK_DIR, upload_id)
+
+
+def _meta_path(upload_id: str) -> str:
+    return os.path.join(_session_path(upload_id), "meta.json")
+
+
+@router.post("/chunk/init", summary="初始化分片上传")
+async def chunk_init(
+    filename: str = Body(...),
+    total_size: int = Body(...),
+    total_chunks: int = Body(...),
+):
+    """初始化分片上传会话，返回 upload_id"""
+    ext = (os.path.splitext(filename)[1] or "").lower()
+    if ext not in (".csv", ".xml", ".txt"):
+        return Fail(msg=f"不支持的文件类型: {ext}，仅支持 CSV/XML/TXT")
+
+    upload_id = uuid.uuid4().hex
+    session_dir = _session_path(upload_id)
+    os.makedirs(session_dir, exist_ok=True)
+
+    meta = {
+        "filename": filename,
+        "total_size": total_size,
+        "total_chunks": total_chunks,
+        "uploaded_chunks": [],
+    }
+    with open(_meta_path(upload_id), "w") as f:
+        _json.dump(meta, f)
+
+    _log.info(f"[feed] 分片上传初始化: id={upload_id}, file={filename}, chunks={total_chunks}")
+    return Success(data={"upload_id": upload_id})
+
+
+@router.post("/chunk/upload", summary="上传分片")
+async def chunk_upload(
+    upload_id: str = Body(...),
+    chunk_index: int = Body(...),
+    chunk: UploadFile = File(...),
+):
+    """上传单个分片"""
+    session_dir = _session_path(upload_id)
+    if not os.path.exists(session_dir):
+        return Fail(msg="上传会话不存在或已过期")
+
+    chunk_path = os.path.join(session_dir, str(chunk_index))
+    content = await chunk.read()
+    with open(chunk_path, "wb") as f:
+        f.write(content)
+
+    # 更新元数据
+    meta_file = _meta_path(upload_id)
+    if os.path.exists(meta_file):
+        with open(meta_file, "r") as f:
+            meta = _json.load(f)
+        if chunk_index not in meta["uploaded_chunks"]:
+            meta["uploaded_chunks"].append(chunk_index)
+        with open(meta_file, "w") as f:
+            _json.dump(meta, f)
+
+    return Success(data={"chunk_index": chunk_index, "uploaded": len(meta.get("uploaded_chunks", []))})
+
+
+@router.post("/chunk/complete", summary="合并分片完成上传")
+async def chunk_complete(upload_id: str = Body(...)):
+    """合并所有分片，创建 FeedFile 记录"""
+    session_dir = _session_path(upload_id)
+    meta_file = _meta_path(upload_id)
+
+    if not os.path.exists(meta_file):
+        return Fail(msg="上传会话不存在或已过期")
+
+    with open(meta_file, "r") as f:
+        meta = _json.load(f)
+
+    total_chunks = meta["total_chunks"]
+    uploaded = meta["uploaded_chunks"]
+    if len(uploaded) < total_chunks:
+        missing = [i for i in range(total_chunks) if i not in uploaded]
+        return Fail(msg=f"分片不完整，缺少 {len(missing)} 个分片: {missing[:5]}...")
+
+    filename = meta["filename"]
+    ext = (os.path.splitext(filename)[1] or "").lower()
+
+    # 创建 FeedFile 记录
+    feed = await FeedFile.create(
+        original_name=filename,
+        file_type=ext.lstrip("."),
+        file_size=0,
+        status="uploaded",
+    )
+
+    # 合并分片
+    safe_name = _safe_filename(filename)
+    dest_path = os.path.join(UPLOAD_DIR, safe_name)
+    total_bytes = 0
+    with open(dest_path, "wb") as out:
+        for i in range(total_chunks):
+            chunk_path = os.path.join(session_dir, str(i))
+            with open(chunk_path, "rb") as cin:
+                total_bytes += out.write(cin.read())
+
+    feed.source_file = dest_path
+    feed.file_size = total_bytes
+
+    # 检测域名
+    detected = _detect_domain_from_file(dest_path, ext.lstrip("."))
+    if detected:
+        feed.source_domain = detected
+
+    await feed.save()
+
+    # 清理分片临时目录
+    shutil.rmtree(session_dir, ignore_errors=True)
+
+    _log.info(f"[feed] 分片上传完成: id={feed.id}, file={filename}, size={total_bytes}, domain={detected}")
+    return Success(data=await _feed_row(feed), msg="上传成功")

@@ -55,6 +55,11 @@ export default {
   getFeedSourceList: (params = {}) => request.get('/site-pipeline/feed/source-list', { params }),
   getFeedProcessedList: (params = {}) => request.get('/site-pipeline/feed/processed-list', { params }),
   uploadFeed: (formData) => request.post('/site-pipeline/feed/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }),
+
+  // 分片上传
+  initChunkUpload: (data) => request.post('/site-pipeline/feed/chunk/init', data),
+  uploadChunk: (formData) => request.post('/site-pipeline/feed/chunk/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }),
+  completeChunkUpload: (data) => request.post('/site-pipeline/feed/chunk/complete', data),
   createFeed: (id, targetDomain, sourceDomain = '') => request.post(`/site-pipeline/feed/${id}/create-feed`, { target_domain: targetDomain, source_domain: sourceDomain }),
   deleteFeed: (id) => request.delete(`/site-pipeline/feed/${id}`),
   getFeedDefaultDomain: () => request.get('/site-pipeline/feed/config/default-domain'),
