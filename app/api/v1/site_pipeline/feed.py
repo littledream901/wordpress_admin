@@ -223,6 +223,16 @@ async def _feed_row(feed) -> dict:
     if feed.processed_file and os.path.exists(feed.processed_file):
         d["download_url"] = _make_download_url(os.path.basename(feed.processed_file))
         d["processed_name"] = os.path.basename(feed.processed_file)
+    # 检测平台类型
+    fpath = feed.source_file or feed.processed_file or ""
+    if fpath and os.path.exists(fpath):
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                d["platform"] = _detect_platform(f.read(500000))
+        except Exception:
+            d["platform"] = ""
+    else:
+        d["platform"] = ""
     return d
 
 

@@ -123,6 +123,19 @@ const createTargetDomain = ref('')
 const createResult = ref(null)
 const defaultDomain = ref('')
 
+// ── 平台标签 ──
+const platformConfig = {
+  wordpress: { type: 'info', label: 'WordPress' },
+  shopify: { type: 'success', label: 'Shopify' },
+  shopoem: { type: 'warning', label: 'ShopOem' },
+  generic: { type: 'default', label: '通用' },
+}
+function platformTag(platform) {
+  const cfg = platformConfig[platform]
+  if (!cfg) return h(NText, { depth: 3 }, { default: () => '-' })
+  return h(NTag, { type: cfg.type, size: 'tiny', bordered: false }, { default: () => cfg.label })
+}
+
 // ── 源文件列 ──
 const sourceColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
@@ -131,7 +144,8 @@ const sourceColumns = [
     title: '检测域名', key: 'source_domain', width: 150, ellipsis: { tooltip: true },
     render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
-  { title: '类型', key: 'file_type', width: 160 },
+  { title: '类型', key: 'file_type', width: 60 },
+  { title: '平台', key: 'platform', width: 90, render: (r) => platformTag(r.platform) },
   {
     title: '大小', key: 'file_size', width: 60,
     render: (r) => {
@@ -171,6 +185,7 @@ const processedColumns = [
     title: '新文件名', key: 'processed_name', width: 120, ellipsis: { tooltip: true },
     render: (r) => r.processed_name || '-',
   },
+  { title: '平台', key: 'platform', width: 90, render: (r) => platformTag(r.platform) },
   {
     title: '域名变更', key: 'domains', width: 140, ellipsis: { tooltip: true },
     render: (r) => h(NText, { depth: 2 }, { default: () => `${r.source_domain || '?'} → ${r.target_domain || '?'}` }),
