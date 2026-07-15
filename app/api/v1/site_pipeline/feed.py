@@ -66,9 +66,59 @@ def _make_processed_name(target_domain: str, ext: str) -> str:
     return f"{safe_domain}_{_random_suffix(8)}{ext}"
 
 
+def _detect_platform(content: str) -> str:
+    """识别 Feed 来源平台类型，用于决定域名替换策略。
+    - wordpress: 产品图在同域名下（/wp-content/uploads/），需一起替换
+    - shopify:   图片在 CDN（cdn.shopify.com），不替换
+    - shopoem:   图片在外部 CDN（moncontentcache 等），不替换
+    - generic:   无法识别，保守策略只替换产品链接
+    """
+    # 取前 500KB 分析，避免大文件性能问题
+    sample = content[:500000]
+
+    # Shopify: /products/ 路径 + cdn.shopify.com 图片
+    if re.search(r'/products/', sample) and re.search(r'cdn\.shopify\.com', sample):
+        return "shopify"
+
+    # WordPress/WooCommerce: /product/ 路径 + wp-content/uploads 图片路径
+    if re.search(r'/product/', sample) and re.search(r'/wp-content/uploads/', sample):
+        return "wordpress"
+
+    # ShopOem: /products/ 路径 + moncontentcache 或其他 CDN 图片
+    if re.search(r'/products/', sample) and re.search(r'moncontentcache', sample):
+        return "shopoem"
+
+    # 通用判别的二级特征
+    if re.search(r'/wp-content/', sample):
+        return "wordpress"
+
+    if re.search(r'cdn\.shopify\.com|myshopify\.com', sample):
+        return "shopify"
+
+    if re.search(r'moncontentcache|cdn\d*\.', sample):
+        return "shopoem"
+
+    return "generic"
+
+
+# 各平台的替换标签规则（正则中的捕获组名，长标签在前）
+_PLATFORM_TAG_PATTERNS = {
+    # WordPress: 图片在同域名，需要一起替换
+    "wordpress": r'<(g:canonical_link|canonical_link|g:additional_image_link|additional_image_link|g:image_link|image_link|g:link|link)([\s>]).*?</\1>',
+
+    # Shopify / ShopOem: 图片在 CDN，不替换图片标签
+    "shopify":  r'<(g:canonical_link|canonical_link|g:link|link)([\s>]).*?</\1>',
+    "shopoem":  r'<(g:canonical_link|canonical_link|g:link|link)([\s>]).*?</\1>',
+
+    # Generic: 保守策略
+    "generic":  r'<(g:canonical_link|canonical_link|g:link|link)([\s>]).*?</\1>',
+}
+
+
 def _count_and_replace_domain(file_path: str, source_domain: str, target_domain: str, file_type: str = "xml") -> int:
     """替换 Feed 文件中的域名。
-    - XML: 仅替换 <link> / <g:link> 标签中的域名，跳过 image_link / description
+    先识别平台，再根据平台策略替换不同标签。
+    - XML: 按平台标签策略替换
     - CSV: 全局替换
     """
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
@@ -78,9 +128,10 @@ def _count_and_replace_domain(file_path: str, source_domain: str, target_domain:
     escaped = re.escape(source_domain)
 
     if file_type == "xml":
-        # 仅替换 <link> / <canonical_link> 标签内的域名（含 g: 前缀）
-        # 使用反向引用确保开闭标签配对，长标签放前面避免短标签误匹配
-        def _replace_in_link_tag(m):
+        platform = _detect_platform(content)
+        tag_pattern = _PLATFORM_TAG_PATTERNS.get(platform, _PLATFORM_TAG_PATTERNS["generic"])
+
+        def _replace_in_tag(m):
             nonlocal count
             tag_text = m.group(0)
             new_text, n = re.subn(escaped, target_domain, tag_text)
@@ -88,15 +139,17 @@ def _count_and_replace_domain(file_path: str, source_domain: str, target_domain:
             return new_text
 
         content = re.sub(
-            r'<(g:canonical_link|canonical_link|g:link|link)([\s>]).*?</\1>',
-            _replace_in_link_tag,
+            tag_pattern,
+            _replace_in_tag,
             content,
             flags=re.DOTALL,
         )
+        _log.info(f"[feed] 平台={platform}, 替换域名 {source_domain} -> {target_domain}, {count} 处")
     else:
         # CSV: 全局替换
         new_content, count = re.subn(escaped, target_domain, content)
         content = new_content
+        _log.info(f"[feed] CSV 全局替换域名 {source_domain} -> {target_domain}, {count} 处")
 
     if count > 0:
         with open(file_path, "w", encoding="utf-8") as f:
