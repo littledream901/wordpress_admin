@@ -725,13 +725,13 @@ async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> b
 
     # 清理过期锁
     await conn.execute_query(
-        "DELETE FROM system_init_lock WHERE lock_key = ? AND expires_at < ?",
+        "DELETE FROM system_init_lock WHERE lock_key = %s AND expires_at < %s",
         [lock_key, now.isoformat()]
     )
     # 尝试插入
     try:
         await conn.execute_query(
-            "INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES (%s, %s, %s, %s)",
             [lock_key, _INSTANCE_ID, now.isoformat(), expires.isoformat()]
         )
         logger.info(f"[InitLock] 获取初始化锁成功: {lock_key}, instance={_INSTANCE_ID}")
