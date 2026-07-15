@@ -5,7 +5,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-GIT_REPO="${GIT_REPO:-https://github.com/your-org/wordpres-admin.git}"
+GIT_REPO="${GIT_REPO:-https://github.com/littledream901/wordpress_admin.git}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
