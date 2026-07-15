@@ -66,19 +66,59 @@ def _make_processed_name(target_domain: str, ext: str) -> str:
     return f"{safe_domain}_{_random_suffix(8)}{ext}"
 
 
-def _count_and_replace_domain(file_path: str, source_domain: str, target_domain: str) -> int:
+def _count_and_replace_domain(file_path: str, source_domain: str, target_domain: str, file_type: str = "xml") -> int:
+    """替换 Feed 文件中的域名。
+    - XML: 仅替换 <link> / <g:link> 标签中的域名，跳过 image_link / description
+    - CSV: 全局替换
+    """
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         content = f.read()
+
+    count = 0
     escaped = re.escape(source_domain)
-    new_content, count = re.subn(escaped, target_domain, content)
+
+    if file_type == "xml":
+        # 仅替换 <link> 和 <g:link> 标签内的域名
+        # 使用反向引用确保开闭标签配对
+        def _replace_in_link_tag(m):
+            nonlocal count
+            tag_text = m.group(0)
+            new_text, n = re.subn(escaped, target_domain, tag_text)
+            count += n
+            return new_text
+
+        content = re.sub(
+            r'<(g:link|link)([\s>]).*?</\1>',
+            _replace_in_link_tag,
+            content,
+            flags=re.DOTALL,
+        )
+    else:
+        # CSV: 全局替换
+        new_content, count = re.subn(escaped, target_domain, content)
+        content = new_content
+
     if count > 0:
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
+            f.write(content)
     return count
 
 
+# 已知 CDN 域名特征，检测时排除
+_CDN_PATTERNS = [re.compile(p) for p in [
+    r'^cdn\d*\.',           # cdn.xxx  /  cdn1.xxx
+    r'\.cloudfront\.net$',
+    r'\.cdn\d*\.',
+    r'moncontentcache\.',   # 用户 feed 中的 CDN
+]]
+
+
+def _is_cdn_domain(domain: str) -> bool:
+    return any(p.search(domain) for p in _CDN_PATTERNS)
+
+
 def _detect_domain_from_file(file_path: str, file_type: str) -> Optional[str]:
-    """自动检测 Feed 文件中的主要域名"""
+    """自动检测 Feed 文件中的主要域名（排除 CDN）"""
     try:
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -88,18 +128,20 @@ def _detect_domain_from_file(file_path: str, file_type: str) -> Optional[str]:
     from collections import Counter
     found = []
 
-    # 1. XML 标签内域名
+    # 1. <link> / <g:link> 标签中的域名（产品链接，最可靠）
     for pattern in [
         r'<(?:g:)?link[^>]*>\s*https?://((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})',
-        r'<(?:g:)?image_link[^>]*>\s*https?://((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})',
     ]:
         found.extend(re.findall(pattern, content))
 
-    # 2. 全局 URL
-    found.extend(re.findall(
-        r'https?://((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})',
-        content,
-    ))
+    # 2. 如果用 link 标签没找到，再匹配全局 URL（排除 image_link 中的）
+    if not found:
+        # 先去掉 image_link 标签内容，只从非图片链接中检测
+        no_images = re.sub(r'<(?:g:)?image_link[^>]*>.*?</(?:g:)?image_link>', '', content, flags=re.DOTALL)
+        found.extend(re.findall(
+            r'https?://((?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,})',
+            no_images,
+        ))
 
     # 3. CSV 裸域名兜底
     if not found and file_type == "csv":
@@ -108,6 +150,9 @@ def _detect_domain_from_file(file_path: str, file_type: str) -> Optional[str]:
             content,
         )
         found.extend([d for d in bare if len(d) > 8])
+
+    # 排除 CDN 域名
+    found = [d for d in found if not _is_cdn_domain(d)]
 
     return Counter(found).most_common(1)[0][0] if found else None
 
@@ -208,7 +253,7 @@ async def create_feed(
     output_path = os.path.join(UPLOAD_DIR, processed_name)
     shutil.copy2(source.source_file, output_path)
 
-    count = _count_and_replace_domain(output_path, source_domain, target_domain)
+    count = _count_and_replace_domain(output_path, source_domain, target_domain, source.file_type)
 
     new_feed.processed_file = output_path
     new_feed.replace_count = count
