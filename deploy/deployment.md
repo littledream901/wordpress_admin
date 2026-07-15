@@ -279,7 +279,8 @@ DB_SQLITE_PATH=./data/db.sqlite3
 ## 更新部署
 
 ```bash
-cd wordpres-admin
+cd /opt/wordpress-admin
+git pull
 bash deploy/deploy.sh update
 ```
 
@@ -287,8 +288,10 @@ bash deploy/deploy.sh update
 1. 备份 MySQL 数据库（mysqldump → `data/backup_*.sql`）
 2. 备份 `.env` 配置
 3. 拉取最新代码
-4. 重新构建并启动容器
-5. 清理旧 Docker 镜像
+4. 构建新镜像（老容器继续运行，用户不中断）
+5. 优雅停止旧容器 → 启动新容器（中断仅 3-5 秒）
+6. 等待健康检查通过
+7. 清理旧 Docker 镜像
 
 ---
 
