@@ -150,10 +150,10 @@ const sourceColumns = [
     title: '检测域名', key: 'source_domain', width: 170, ellipsis: { tooltip: true },
     render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
-  { title: '类型', key: 'file_type', width: 170 },
+  { title: '类型', key: 'file_type', width: 190},
   { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
   {
-    title: '大小', key: 'file_size', width: 155,
+    title: '大小', key: 'file_size', width: 135,
     render: (r) => {
       const kb = r.file_size / 1024
       return kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`
@@ -192,13 +192,13 @@ const processedColumns = [
     render: (r) => r.processed_name || '-',
   },
   {
-    title: '域名变更', key: 'domains', width: 170, ellipsis: { tooltip: true },
+    title: '域名变更', key: 'domains', width: 190, ellipsis: { tooltip: true },
     render: (r) => `${r.source_domain || '?'} → ${r.target_domain || '?'}`,
   },
   { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
 
-  { title: '替换次数', key: 'replace_count', width: 75, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
-  { title: '过期时间', key: 'expires_at', width: 80,
+  { title: '替换次数', key: 'replace_count', width: 65, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
+  { title: '过期时间', key: 'expires_at', width: 70,
     render: (r) => {
       const info = expiresInfo(r)
       return h(NTag, { type: expiresType(r), size: 'small' }, { default: () => info })
