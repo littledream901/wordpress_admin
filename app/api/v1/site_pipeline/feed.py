@@ -369,7 +369,7 @@ async def chunk_upload(
 
 
 @router.post("/chunk/complete", summary="合并分片完成上传")
-async def chunk_complete(upload_id: str = Body(...)):
+async def chunk_complete(upload_id: str = Body(..., embed=True)):
     """合并所有分片，创建 FeedFile 记录"""
     session_dir = _session_path(upload_id)
     meta_file = _meta_path(upload_id)
