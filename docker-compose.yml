@@ -7,6 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: wordpres-admin
     restart: unless-stopped
+    stop_grace_period: 30s
     ports:
       - "${APP_PORT:-127.0.0.1:18080}:80"
     environment:

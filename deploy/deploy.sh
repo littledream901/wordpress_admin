@@ -176,11 +176,20 @@ update_deploy() {
         rm -f .env.bak
     fi
 
-    # 4. 重建
-    step "重新构建并启动..."
-    docker compose up -d --build
+    # 4. 构建新镜像（旧容器保持运行，用户不中断）
+    step "构建新镜像（老服务继续运行）..."
+    docker compose build app || { err "构建失败"; exit 1; }
 
-    # 5. 清理
+    # 5. 滚动更新：优雅停止旧容器 → 立即启动新容器
+    step "滚动重启（优雅停止 → 启动新容器，中断约3-5秒）..."
+    docker compose stop -t 30 app
+    docker compose up -d --no-deps app
+
+    # 6. 等待新服务健康检查通过
+    step "等待服务就绪..."
+    wait_healthy
+
+    # 7. 清理旧镜像
     docker image prune -f 2>/dev/null || true
 
     # 6. 等待就绪
