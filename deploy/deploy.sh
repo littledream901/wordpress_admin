@@ -6,6 +6,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 GIT_REPO="${GIT_REPO:-https://github.com/littledream901/wordpress_admin.git}"
+GIT_BRANCH="${GIT_BRANCH:-dev}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,7 +41,7 @@ clone_project() {
         warn "目录 $target_dir 已存在，跳过克隆"
         cd "$target_dir"
     else
-        git clone "$repo_url" "$target_dir" || err "克隆失败，请检查仓库地址和网络"
+        git clone -b "$GIT_BRANCH" "$repo_url" "$target_dir" || err "克隆失败，请检查仓库地址和网络"
         cd "$target_dir"
         log "项目已克隆到 $(pwd)"
     fi
@@ -277,12 +278,12 @@ print_usage() {
     echo ""
     echo "示例:"
     echo "  # 从零开始（服务器上执行）"
-    echo "  git clone https://github.com/your-org/wordpres-admin.git"
-    echo "  cd wordpres-admin"
+    echo "  git clone -b dev https://github.com/littledream901/wordpress_admin.git"
+    echo "  cd wordpress_admin"
     echo "  bash deploy/deploy.sh init"
     echo ""
     echo "  # 或一键克隆"
-    echo "  bash deploy/deploy.sh clone my-app https://github.com/your-org/wordpres-admin.git"
+    echo "  bash deploy/deploy.sh clone wordpres-admin"
     echo ""
     echo "  # 更新"
     echo "  bash deploy/deploy.sh update"
