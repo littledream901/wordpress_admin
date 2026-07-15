@@ -149,7 +149,7 @@ update_deploy() {
 
     # 1. 备份当前状态
     log "备份当前数据库和静态文件..."
-    if [ "${DB_ENGINE:-mysql}" = "mysql" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
+    if [ "${DB_ENGINE:-mysql}" = "mysql" ] && [ -n "${MYSQL_ROOT_PASSWORD:-}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
         docker compose exec -T db mysqldump -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" "${DB_NAME:-vue_fastapi_admin}" \
             > "data/backup_$(date +%Y%m%d_%H%M%S).sql" 2>/dev/null && log "MySQL 已备份到 data/" || warn "MySQL 备份失败"
     elif [ -f "data/db.sqlite3" ]; then
