@@ -193,7 +193,7 @@ const processedColumns = [
   },
   {
     title: '域名变更', key: 'domains', width: 170, ellipsis: { tooltip: true },
-    render: (r) => h(NText, { depth: 2 }, { default: () => `${r.source_domain || '?'} → ${r.target_domain || '?'}` }),
+    render: (r) => `${r.source_domain || '?'} → ${r.target_domain || '?'}`,
   },
   { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
 
