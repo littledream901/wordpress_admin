@@ -459,6 +459,7 @@ async def init_providers():
             ("op_verify_ssl", "true", "1Panel API TLS 证书验证（自签名设为 false）", "bool", False, False),
             ("wp_verify_ssl", "true", "WordPress 站点 TLS 证书验证（内网/自签名设为 false）", "bool", False, False),
             ("max_concurrent", "3", "最大同时建站数", "int", False, False),
+            ("feed_expire_days", "3", "Feed 文件下载有效期（天），过期后不可下载", "int", False, False),
         ]),
     ]
 
@@ -583,6 +584,8 @@ async def init_db():
         "ALTER TABLE account ADD COLUMN deleted_at TEXT",
         "ALTER TABLE config_provider ADD COLUMN is_deleted INTEGER DEFAULT 0",
         "ALTER TABLE config_provider ADD COLUMN deleted_at TEXT",
+        # Feed 文件过期机制
+        "ALTER TABLE site_pipeline_feed_file ADD COLUMN expires_at TEXT",
     ]
 
     for sql in patches:
@@ -777,6 +780,15 @@ async def init_essential():
         finally:
             await _release_init_lock("init_menus_roles")
     steps.append(("菜单/角色同步", time.perf_counter() - t))
+
+    # 增量同步 Provider 配置项（新增配置自动写入数据库）
+    t = time.perf_counter()
+    if await _try_acquire_init_lock("init_providers", timeout_seconds=300):
+        try:
+            await init_providers()
+        finally:
+            await _release_init_lock("init_providers")
+    steps.append(("Provider 同步", time.perf_counter() - t))
 
     total = time.perf_counter() - t0
     detail = " | ".join(f"{name}: {elapsed:.2f}s" for name, elapsed in steps)

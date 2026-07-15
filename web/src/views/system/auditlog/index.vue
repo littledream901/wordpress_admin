@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { h, onMounted, reactive, ref } from 'vue'
 import { NInput, NSelect, NDatePicker, NPopover } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
 
@@ -11,7 +11,7 @@ import api from '@/api'
 defineOptions({ name: '审计日志' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 
 onMounted(() => {
   $table.value?.handleSearch()
@@ -49,17 +49,17 @@ function getEndOfDayTimestamp() {
 const startOfDayTimestamp = getStartOfDayTimestamp()
 const endOfDayTimestamp = getEndOfDayTimestamp()
 
-queryItems.value.start_time = formatTimestamp(startOfDayTimestamp)
-queryItems.value.end_time = formatTimestamp(endOfDayTimestamp)
+queryItems.start_time = formatTimestamp(startOfDayTimestamp)
+queryItems.end_time = formatTimestamp(endOfDayTimestamp)
 
 const datetimeRange = ref([startOfDayTimestamp, endOfDayTimestamp])
 const handleDateRangeChange = (value) => {
   if (value == null) {
-    queryItems.value.start_time = null
-    queryItems.value.end_time = null
+    queryItems.start_time = null
+    queryItems.end_time = null
   } else {
-    queryItems.value.start_time = formatTimestamp(value[0])
-    queryItems.value.end_time = formatTimestamp(value[1])
+    queryItems.start_time = formatTimestamp(value[0])
+    queryItems.end_time = formatTimestamp(value[1])
   }
 }
 

@@ -11,7 +11,10 @@ function getComponent(componentPath) {
   const key = `/src/views${componentPath}/index.vue`
   const mod = vueModules[key]
   if (mod) return mod
-  // Fallback: 组件未在 vueModules 中（新增页面未重启前端），使用空组件占位
+  // Fallback: 尝试扁平文件路径（例如 error-page/401.vue）
+  const flatKey = `/src/views${componentPath}.vue`
+  const flatMod = vueModules[flatKey]
+  if (flatMod) return flatMod
   console.warn(`[Permission] Component not found in vueModules: ${key}`)
   return { render: () => h('div', { style: 'padding:40px;text-align:center;color:#999' }, `组件 ${componentPath} 未加载`) }
 }

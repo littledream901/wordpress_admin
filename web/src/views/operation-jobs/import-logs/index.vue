@@ -27,21 +27,21 @@
 </template>
 
 <script setup>
-import { ref, h, computed } from 'vue'
+import { ref, reactive, h, computed } from 'vue'
 import { NButton, NInput, NModal, NSelect, NTag, NUpload, useMessage } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
-import API from '~/src/api/importJob'
+import api from '@/api/importJob'
 
 const message = useMessage()
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const uploadType = ref('sites')
 const showErrors = ref(false)
 const errorDetail = ref('')
 
 async function fetchLogs(params) {
-  const r = await API.getList({ page: params.page, page_size: params.page_size, ...params })
+  const r = await api.getList({ page: params.page, page_size: params.page_size, ...params })
   return { data: r.data || [], total: r.total || 0 }
 }
 
@@ -58,7 +58,7 @@ const statusMap = { pending: 'default', processing: 'info', success: 'success', 
 const columns = [
   { title: '类型', key: 'import_type', width: 100 },
   { title: '文件名', key: 'file_name', ellipsis: { tooltip: true }, width: 200 },
-  { title: '状态', key: 'status', width: 80, render(r) { return h(NTag, { type: statusMap[r.status] || 'default', size: 'small' }, r.status) } },
+  { title: '状态', key: 'status', width: 80, render(r) { return h(NTag, { type: statusMap[r.status] || 'default', size: 'small' }, { default: () => r.status }) } },
   { title: '成功', key: 'success_count', width: 60 },
   { title: '失败', key: 'fail_count', width: 60 },
   { title: '时间', key: 'created_at', width: 150 },
@@ -66,7 +66,7 @@ const columns = [
     title: '错误', key: 'error_report', width: 80,
     render(r) {
       if (!r.error_report || r.error_report === '[]') return ''
-      return h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => { errorDetail.value = formatJson(r.error_report); showErrors.value = true } }, '查看')
+      return h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => { errorDetail.value = formatJson(r.error_report); showErrors.value = true } }, { default: () => '查看' })
     }
   },
 ]
@@ -77,7 +77,7 @@ function formatJson(s) {
 
 function downloadTemplate() {
   if (!uploadType.value) { message.warning('请先选择导入类型'); return }
-  API.downloadTemplate(uploadType.value)
+  api.downloadTemplate(uploadType.value)
 }
 
 async function handleUpload({ file }) {
@@ -88,7 +88,7 @@ async function handleUpload({ file }) {
   const formData = new FormData()
   formData.append('file', file.file)
   try {
-    const r = await API.upload(uploadType.value, formData)
+    const r = await api.upload(uploadType.value, formData)
     message.success(`导入完成: 成功 ${r.success} 条, 失败 ${r.fail} 条`)
     $table.value?.handleSearch()
   } catch (e) {

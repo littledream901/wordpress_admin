@@ -72,21 +72,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted, h, computed } from 'vue'
+import { ref, reactive, h, computed } from 'vue'
 import { NButton, NCollapse, NCollapseItem, NDataTable, NDescriptions, NDescriptionsItem, NInput, NModal, NSelect, NSpace, NSpin, NTag } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
-import API from '~/src/api/operationJob'
+import api from '@/api/operationJob'
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const showDetail = ref(false)
 const detail = ref(null)
 
-onMounted(() => $table.value?.handleSearch())
 
 async function fetchJobs(params) {
-  const r = await API.getList({ page: params.page, page_size: params.page_size, ...params })
+  const r = await api.getList({ page: params.page, page_size: params.page_size, ...params })
   return { data: r.data || [], total: r.total || 0 }
 }
 

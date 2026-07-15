@@ -42,6 +42,11 @@ else
 fi
 
 # =============================================
+# 创建持久化目录
+# =============================================
+mkdir -p logs static/avatars
+
+# =============================================
 # 数据库迁移
 # =============================================
 if [ "$DB_ENGINE" = "mysql" ]; then
@@ -59,13 +64,26 @@ fi
 echo "[INFO] 同步数据库表结构..."
 python -c "
 import asyncio
+import os
 from tortoise import Tortoise
 from app.settings import TORTOISE_ORM
 
 async def upgrade():
     await Tortoise.init(config=TORTOISE_ORM)
-    await Tortoise.generate_schemas(safe=True)
-    print('[INFO] 数据库表结构已同步')
+
+    # 优先使用 Aerich 迁移（如果 migrations/ 目录存在）
+    migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
+    aerich_ini = 'aerich.ini'
+    if os.path.exists(aerich_ini) and os.path.isdir(migrations_dir):
+        from aerich import Command
+        command = Command(tortoise_config=TORTOISE_ORM, app='models')
+        await command.init()
+        await command.upgrade(run_in_transaction=True)
+        print('[INFO] 数据库迁移完成 (Aerich)')
+    else:
+        # 回退：使用 generate_schemas 自动建表
+        await Tortoise.generate_schemas(safe=True)
+        print('[INFO] 数据库表结构已同步 (generate_schemas)')
 
 asyncio.run(upgrade())
 "

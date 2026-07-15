@@ -31,7 +31,7 @@
       :query-items="queryItems"
       :get-data="getData"
       :page-size="20"
-      @onChecked="onCheckedChange"
+      @on-checked="onCheckedChange"
       @update:query-items="onUpdateQueryItems"
     >
       <template #queryBar>
@@ -54,7 +54,7 @@
           placeholder="域名搜索"
           clearable
           style="width: 200px"
-          @keyup.enter="crudRef.handleQuery()"
+          @keyup.enter="crudRef.handleSearch()"
         />
       </template>
       <template #queryBarActions>
@@ -106,7 +106,7 @@ import {
 } from 'naive-ui'
 import { WarnFilled } from '@vicons/carbon'
 import CrudTable from '@/components/table/CrudTable.vue'
-import API from '~/src/api/site-pipeline'
+import api from '@/api/site-pipeline'
 
 const message = useMessage()
 const warningIcon = WarnFilled
@@ -148,7 +148,7 @@ async function getData({ page, page_size, job_type, status, domain }) {
   if (job_type) params.job_type = job_type
   if (status) params.status = status
   if (domain) params.domain = domain
-  const r = await API.getHubJobList(params)
+  const r = await api.getHubJobList(params)
   return { data: r.data || [], total: r.total || 0 }
 }
 
@@ -158,7 +158,7 @@ onMounted(() => {
 
 async function loadAgentStatus() {
   try {
-    const r = await API.getAgentStatus()
+    const r = await api.getAgentStatus()
     agents.value = r.data?.agents || []
     pendingJobs.value = r.data?.pending_jobs || 0
   } catch (e) {
@@ -204,7 +204,7 @@ const columns = [
   { title: '类型', key: 'job_type', width: 90, render: row => jobTypeLabel(row.job_type) },
   {
     title: '状态', key: 'status', width: 80,
-    render(r) { return h(NTag, { type: statusTypeMap[r.status] || 'default', size: 'small' }, r.status) },
+    render(r) { return h(NTag, { type: statusTypeMap[r.status] || 'default', size: 'small' }, { default: () => r.status }) },
   },
   { title: '节点', key: 'worker_name', width: 100, render(r) { return r.worker_name || '-' } },
   { title: '重试', key: 'retry_count', width: 50 },
@@ -212,15 +212,15 @@ const columns = [
     title: '操作', key: 'actions', width: 180,
     render(r) {
       const btns = []
-      btns.push(h(NButton, { size: 'small', quaternary: true, onClick: () => { detail.value = r; showDetail.value = true } }, '详情'))
-      if (r.status === 'failed' || r.status === 'pending') {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => retryJob(r.id, false) }, '重试'))
+      btns.push(h(NButton, { size: 'small', quaternary: true, onClick: () => { detail.value = r; showDetail.value = true } }, { default: () => '详情' }))
+      if (['failed', 'timeout'].includes(r.status)) {
+        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => retryJob(r.id, false) }, { default: () => '重试' }))
       }
-      if (r.status === 'pending' && agents.value.filter(a => a.online).length === 0) {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => retryJob(r.id, true) }, '同步执行'))
+      if (['failed', 'timeout', 'pending'].includes(r.status)) {
+        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => retryJob(r.id, true) }, { default: () => '同步执行' }))
       }
-      if (r.status === 'pending' || r.status === 'running') {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => cancelJob(r.id) }, '取消'))
+      if (['pending', 'running'].includes(r.status)) {
+        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => cancelJob(r.id) }, { default: () => '取消' }))
       }
       return h(NSpace, { size: 4 }, btns)
     },
@@ -233,9 +233,9 @@ const columns = [
 // ─── 操作函数 ───
 async function retryJob(jobId, executeNow) {
   try {
-    await API.retryHubJob(jobId, executeNow)
+    await api.retryHubJob(jobId, executeNow)
     message.success(executeNow ? '已同步重试执行' : '已重置为待执行')
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
     loadAgentStatus()
   } catch (e) {
     message.error(`重试失败: ${e}`)
@@ -249,18 +249,18 @@ async function batchRetry() {
     return
   }
   for (const r of selected) {
-    try { await API.retryHubJob(r.id) } catch (e) { /* continue */ }
+    try { await api.retryHubJob(r.id) } catch (e) { /* continue */ }
   }
   message.success(`已重置 ${selected.length} 个任务为 pending`)
-  crudRef.value.handleQuery()
+  crudRef.value.handleSearch()
   loadAgentStatus()
 }
 
 async function cancelJob(jobId) {
   try {
-    await API.cancelHubJob(jobId)
+    await api.cancelHubJob(jobId)
     message.success('任务已取消')
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
     loadAgentStatus()
   } catch (e) {
     message.error(`取消失败: ${e}`)
@@ -274,10 +274,10 @@ async function batchCancel() {
   }
   try {
     const ids = canBatchCancel.value.map(r => r.id)
-    const r = await API.batchCancelHubJobs(ids)
+    const r = await api.batchCancelHubJobs(ids)
     message.success(`批量取消完成: 成功 ${r.data?.success || ids.length}`)
     checkedRowKeysRef.value = []
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
     loadAgentStatus()
   } catch (e) {
     message.error(`批量取消失败: ${e}`)

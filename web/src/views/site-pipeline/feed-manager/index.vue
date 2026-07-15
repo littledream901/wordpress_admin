@@ -118,7 +118,7 @@ const sourceColumns = [
   { title: '文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
   {
     title: '检测域名', key: 'source_domain', width: 150, ellipsis: { tooltip: true },
-    render: (r) => r.source_domain || h(NText, { depth: 3 }, '未检测到'),
+    render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
   { title: '类型', key: 'file_type', width: 160 },
   {
@@ -132,38 +132,55 @@ const sourceColumns = [
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
-      h(NButton, { size: 'tiny', type: 'primary', style: 'width:90px', onClick: () => openCreate(r) }, '创建新Feed'),
-      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, '删除'),
+      h(NButton, { size: 'tiny', type: 'primary', style: 'width:90px', onClick: () => openCreate(r) }, { default: () => '创建新Feed' }),
+      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, { default: () => '删除' }),
     ]),
   },
 ]
 
 // ── 已处理文件列 ──
+function expiresInfo(r) {
+  if (r.is_expired) return '已过期'
+  const m = r.expires_in_minutes || 0
+  if (m < 60) return `${m}分钟后过期`
+  if (m < 1440) return `${Math.floor(m / 60)}小时后过期`
+  return `${Math.floor(m / 1440)}天后过期`
+}
+function expiresType(r) {
+  if (r.is_expired) return 'error'
+  const m = r.expires_in_minutes || 0
+  if (m < 60) return 'warning'
+  return 'default'
+}
+
 const processedColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '原始文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
+  { title: '原始文件名', key: 'original_name', width: 130, ellipsis: { tooltip: true } },
   {
-    title: '新文件名', key: 'processed_name', width: 150, ellipsis: { tooltip: true },
+    title: '新文件名', key: 'processed_name', width: 120, ellipsis: { tooltip: true },
     render: (r) => r.processed_name || '-',
   },
   {
-    title: '域名变更', key: 'domains', width: 160, ellipsis: { tooltip: true },
-    render: (r) => h(NText, { depth: 2 }, `${r.source_domain || '?'} → ${r.target_domain || '?'}`),
+    title: '域名变更', key: 'domains', width: 140, ellipsis: { tooltip: true },
+    render: (r) => h(NText, { depth: 2 }, { default: () => `${r.source_domain || '?'} → ${r.target_domain || '?'}` }),
   },
-  {
-    title: '替换次数', key: 'replace_count', width: 60,
-    render: (r) => r.replace_count > 0 ? r.replace_count : '-',
+  { title: '替换次数', key: 'replace_count', width: 55, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
+  { title: '过期时间', key: 'expires_at', width: 100,
+    render: (r) => {
+      const info = expiresInfo(r)
+      return h(NTag, { type: expiresType(r), size: 'small' }, { default: () => info })
+    },
   },
-  { title: '创建时间', key: 'created_at', width: 140 },
+  { title: '创建时间', key: 'created_at', width: 120 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
       h(NButton, {
-        size: 'tiny', type: 'success', style: 'width:90px',
-        disabled: !r.download_url,
+        size: 'tiny', type: r.is_expired ? undefined : 'success',
+        disabled: r.is_expired || !r.download_url,
         onClick: () => copyDownloadUrl(r.download_url),
-      }, '复制链接'),
-      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, '删除'),
+      }, { default: () => r.is_expired ? '已过期' : '复制链接' }),
+      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, { default: () => '删除' }),
     ]),
   },
 ]

@@ -180,20 +180,20 @@ async function handleRestore(row) {
   try {
     await api.restore({ type: currentType.value, id: row.id })
     message.success('已恢复')
-    tableRef.value?.handleRefresh()
   } catch {
     message.error('恢复失败')
   }
+  tableRef.value?.handleSearch()
 }
 
 async function handlePermanentDelete(row) {
   try {
     await api.permanentDelete({ type: currentType.value, id: row.id })
     message.success('已彻底删除')
-    tableRef.value?.handleRefresh()
   } catch {
     message.error('删除失败')
   }
+  tableRef.value?.handleSearch()
 }
 
 function handleEmpty() {
@@ -207,10 +207,10 @@ function handleEmpty() {
       try {
         const r = await api.empty({ type: currentType.value })
         message.success(r.msg || '已清空')
-        tableRef.value?.handleRefresh()
       } catch {
         message.error('清空失败')
       }
+      tableRef.value?.handleSearch()
     },
   })
 }

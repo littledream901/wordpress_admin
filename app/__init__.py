@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -42,11 +43,37 @@ def _validate_settings():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用启动：仅执行 DB 迁移 + 僵尸任务清理。
+    """应用启动：DB 迁移 + 定时清理 + 僵尸任务清理。
     
     完整初始化请运行: python scripts/init_system.py
     """
     await init_essential()
+
+    # 后台任务：每小时清理过期的 Feed 文件
+    async def _cleanup_loop():
+        while True:
+            await asyncio.sleep(3600)
+            try:
+                from app.models.feed_file import FeedFile
+                import os
+                from datetime import datetime
+                expired = await FeedFile.filter(
+                    status="replaced",
+                    expires_at__isnull=False,
+                    expires_at__lt=datetime.now(),
+                ).all()
+                for feed in expired:
+                    for fpath in (feed.processed_file,):
+                        if fpath and os.path.exists(fpath):
+                            os.remove(fpath)
+                    await feed.delete()
+                if expired:
+                    logger.info(f"[feed] 定时清理: 已删除 {len(expired)} 个过期文件")
+            except Exception:
+                pass  # 静默忽略，避免阻塞主流程
+
+    asyncio.create_task(_cleanup_loop())
+
     yield
     await Tortoise.close_connections()
 

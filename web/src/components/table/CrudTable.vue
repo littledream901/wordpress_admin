@@ -33,7 +33,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, nextTick } from 'vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
 import TheIcon from '@/components/icon/TheIcon.vue'
 
 const props = defineProps({
@@ -88,6 +88,10 @@ const props = defineProps({
     type: Number,
     default: 10,
   },
+  showSizePicker: {
+    type: Boolean,
+    default: true,
+  },
   /**
    * ! 约定接口入参出参
    * * 分页模式需约定分页接口入参
@@ -111,7 +115,7 @@ const pagination = reactive({
   page: 1,
   page_size: props.pageSize,
   pageSizes: [10, 20, 50, 100],
-  showSizePicker: true,
+  showSizePicker: props.showSizePicker,
   prefix({ itemCount }) {
     return `共 ${itemCount} 条`
   },
@@ -179,8 +183,13 @@ function onChecked(rowKeys) {
   }
 }
 
+onMounted(() => {
+  nextTick(() => handleSearch())
+})
+
 defineExpose({
   handleSearch,
+  handleRefresh,
   handleReset,
   tableData,
 })

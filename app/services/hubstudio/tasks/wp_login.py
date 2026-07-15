@@ -48,7 +48,18 @@ def execute_wp_login(executor, job: dict, payload: dict) -> dict:
             result["actions"]["browser"] = "started (no automation)"
             return result
 
-        browser = Chromium(addr_or_opts=f"http://127.0.0.1:{debug_port}")
+        browser = None
+        for i in range(10):
+            try:
+                browser = Chromium(addr_or_opts=f"http://127.0.0.1:{debug_port}")
+                executor.logger.info(f"[wp_login] DrissionPage 连接成功 (尝试 {i + 1} 次)")
+                break
+            except Exception:
+                if i < 9:
+                    executor.logger.info(f"[wp_login] 端口 {debug_port} 未就绪，2s 后重试...")
+                    time.sleep(2)
+                else:
+                    raise
 
         try:
             # ── WordPress 后台自动登录 ──

@@ -63,5 +63,24 @@ class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
                     if dept_obj:
                         await scope_obj.custom_depts.add(dept_obj)
 
+    async def get_authorized_data(self, role_id: int) -> dict:
+        """获取角色完整授权数据（菜单/API/数据权限配置）"""
+        role_obj = await self.get(id=role_id)
+        data = await role_obj.to_dict(m2m=True)
+
+        # 查询按业务模块的数据权限配置
+        data_scopes_list = []
+        scope_objs = await RoleDataScope.filter(role=role_obj).prefetch_related("custom_depts")
+        for scope in scope_objs:
+            depts = await scope.custom_depts.all().values("id", "name")
+            data_scopes_list.append({
+                "id": scope.id,
+                "resource": scope.resource,
+                "data_scope": scope.data_scope,
+                "custom_depts": list(depts),
+            })
+        data["data_scopes"] = data_scopes_list
+        return data
+
 
 role_controller = RoleController()

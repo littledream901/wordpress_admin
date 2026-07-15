@@ -2,6 +2,7 @@
 - 上传 Feed 源文件
 - 创建新 Feed（域名替换）
 - 下载替换后的文件（按文件名路由，无需 feed_id）
+- 处理后的文件默认 3 天后过期自动删除
 """
 import logging
 import os
@@ -10,6 +11,7 @@ import re
 import shutil
 import string
 import uuid
+from datetime import datetime, timedelta
 from typing import Optional
 
 _log = logging.getLogger(__name__)
@@ -27,12 +29,26 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.pat
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 DEFAULT_TARGET_DOMAIN = os.getenv("FEED_DEFAULT_TARGET_DOMAIN", "")
+# feed_expire_days 优先读 provider 配置，回退到环境变量
+FEED_EXPIRE_DAYS_DEFAULT = int(os.getenv("FEED_EXPIRE_DAYS", "3"))
+
+
+async def _get_feed_expire_days() -> int:
+    """从 pipeline provider 配置读取有效期，回退到环境变量"""
+    try:
+        from app.utils.provider_resolver import ProviderResolver
+        val = ProviderResolver.sync_get_config("pipeline", "feed_expire_days")
+        if val is not None:
+            return int(val)
+    except Exception:
+        pass
+    return FEED_EXPIRE_DAYS_DEFAULT
 
 
 # ═══════════════════════  工具函数  ═══════════════════════
 
 def _random_suffix(length: int = 6) -> str:
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+    return ''.join(random.choices(string.digits, k=length))
 
 
 def _safe_filename(original: str) -> str:
@@ -41,10 +57,10 @@ def _safe_filename(original: str) -> str:
 
 
 def _make_processed_name(target_domain: str, ext: str) -> str:
-    """生成处理后的文件名：替换后域名_随机码.扩展名（域名中的 . 改为 _）"""
+    """生成处理后的文件名：替换后域名_随机数字码.扩展名（域名中的 . 改为 _）"""
     safe_domain = re.sub(r'[^a-zA-Z0-9.\-]', '_', target_domain).strip('._')
     safe_domain = safe_domain.replace('.', '_')
-    return f"{safe_domain}_{_random_suffix(6)}{ext}"
+    return f"{safe_domain}_{_random_suffix(8)}{ext}"
 
 
 def _count_and_replace_domain(file_path: str, source_domain: str, target_domain: str) -> int:
@@ -101,6 +117,8 @@ def _make_download_url(filename: str) -> str:
 
 async def _feed_row(feed) -> dict:
     d = await feed.to_dict()
+    d["is_expired"] = feed.is_expired
+    d["expires_in_minutes"] = feed.expires_in_minutes
     if feed.processed_file and os.path.exists(feed.processed_file):
         d["download_url"] = _make_download_url(os.path.basename(feed.processed_file))
         d["processed_name"] = os.path.basename(feed.processed_file)
@@ -169,7 +187,8 @@ async def create_feed(
     if not source_domain:
         return Fail(msg="无法自动检测旧域名，请手动指定")
 
-    # 创建新记录
+    # 创建新记录（设置过期时间）
+    expire_days = await _get_feed_expire_days()
     new_feed = await FeedFile.create(
         original_name=source.original_name,
         file_type=source.file_type,
@@ -177,6 +196,7 @@ async def create_feed(
         source_domain=source_domain,
         target_domain=target_domain,
         status="replaced",
+        expires_at=datetime.now() + timedelta(days=expire_days),
     )
 
     # 平铺存储，文件名 = 新域名_随机码.扩展名
@@ -219,10 +239,15 @@ async def list_processed(page: int = Query(1), page_size: int = Query(20)):
 
 @feed_download_router.get("/download/{filename}", summary="下载文件")
 async def download_feed(filename: str):
-    """按文件名下载，无需 feed_id"""
+    """按文件名下载，校验过期时间"""
     target = os.path.join(UPLOAD_DIR, filename)
     if not os.path.exists(target):
         return Fail(msg="文件不存在")
+
+    # 查 FeedFile 记录校验过期
+    feed = await FeedFile.filter(processed_file=target).first()
+    if feed and feed.is_expired:
+        return Fail(msg="文件已过期，无法下载")
 
     return FileResponse(path=target, filename=filename, media_type="application/octet-stream")
 
@@ -247,3 +272,24 @@ async def delete_feed(feed_id: int):
 @router.get("/config/default-domain", summary="获取默认替换域名")
 async def get_default_domain():
     return Success(data={"domain": DEFAULT_TARGET_DOMAIN})
+
+
+@router.post("/cleanup", summary="清理过期文件")
+async def cleanup_expired():
+    """清理已过期的处理文件及其记录"""
+    expired = await FeedFile.filter(
+        status="replaced",
+        expires_at__isnull=False,
+        expires_at__lt=datetime.now(),
+    ).all()
+
+    deleted_count = 0
+    for feed in expired:
+        for fpath in (feed.processed_file,):
+            if fpath and os.path.exists(fpath):
+                os.remove(fpath)
+        await feed.delete()
+        deleted_count += 1
+
+    _log.info(f"[feed] 清理过期文件: {deleted_count} 个")
+    return Success(data={"deleted": deleted_count}, msg=f"已清理 {deleted_count} 个过期文件")

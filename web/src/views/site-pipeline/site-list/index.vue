@@ -448,7 +448,7 @@ const columns = [
   },
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', width: 150, ellipsis: { tooltip: true } },
-  { title: '服务器IP', key: 'server_ip', width: 110, align: 'center' },
+  { title: '服务器IP', key: 'server_ip', width: 140, align: 'center' },
   { title: 'CF 状态', key: 'cloudflare_status', width: 80, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
   { title: 'Dynadot', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已创建' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },

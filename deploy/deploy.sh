@@ -109,7 +109,7 @@ init_deploy() {
     fi
 
     # 2. 创建持久化目录
-    mkdir -p data logs
+    mkdir -p data logs static/avatars
 
     # 3. 构建并启动
     step "构建镜像并启动容器..."
@@ -147,13 +147,16 @@ update_deploy() {
     cd "$PROJECT_DIR"
 
     # 1. 备份当前状态
-    log "备份当前数据库..."
+    log "备份当前数据库和静态文件..."
     if [ "${DB_ENGINE:-mysql}" = "mysql" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
         docker compose exec -T db mysqldump -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" "${DB_NAME:-vue_fastapi_admin}" \
             > "data/backup_$(date +%Y%m%d_%H%M%S).sql" 2>/dev/null && log "MySQL 已备份到 data/" || warn "MySQL 备份失败"
     elif [ -f "data/db.sqlite3" ]; then
         cp data/db.sqlite3 "data/db.sqlite3.bak.$(date +%Y%m%d_%H%M%S)"
         log "SQLite 数据库已备份"
+    fi
+    if [ -d "static" ]; then
+        tar -czf "data/static_backup_$(date +%Y%m%d_%H%M%S).tar.gz" static/ 2>/dev/null && log "static/ 已备份" || true
     fi
 
     if [ -f ".env" ]; then

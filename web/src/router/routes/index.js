@@ -101,6 +101,9 @@ Object.keys(modules).forEach((key) => {
 })
 
 // 加载 views 下每个模块的 index.vue 文件
-const vueModules = import.meta.glob('@/views/**/index.vue')
+const vueModules = {
+  ...import.meta.glob('@/views/**/index.vue'),
+  ...import.meta.glob('@/views/error-page/*.vue'),
+}
 
 export { asyncRoutes, vueModules }

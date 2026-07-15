@@ -14,7 +14,7 @@
       :query-items="queryItems"
       :get-data="getData"
       :page-size="20"
-      @onChecked="(keys) => checkedRowKeys = keys"
+      @on-checked="(keys) => checkedRowKeys = keys"
       @update:query-items="onUpdateQueryItems"
     >
       <template #queryBar>
@@ -142,12 +142,12 @@ const columns = [
     title: 'Hub状态', key: 'hub_status', width: 120,
     render: (r) => {
       const label = r.hub_status || '未创建'
-      return h(NTag, { type: statusType(r.hub_status), size: 'small' }, label)
+      return h(NTag, { type: statusType(r.hub_status), size: 'small' }, { default: () => label })
     },
   },
   {
     title: '流水线状态', key: 'pipeline_status', width: 120,
-    render: (r) => h(NTag, { type: 'default', size: 'small' }, r.pipeline_status || '-'),
+    render: (r) => h(NTag, { type: 'default', size: 'small' }, { default: () => r.pipeline_status || '-' }),
   },
   {
     title: 'GMC状态', key: 'gmc_status', width: 100,
@@ -161,7 +161,7 @@ const columns = [
         query_failed: 'error',
         unknown: 'default',
       }
-      return h(NTag, { type: typeMap[r.gmc_status] || 'default', size: 'small' }, label)
+      return h(NTag, { type: typeMap[r.gmc_status] || 'default', size: 'small' }, { default: () => label })
     },
   },
   {
@@ -180,7 +180,7 @@ const columns = [
           type: btn.type,
           ghost: btn.ghost,
           onClick: () => dispatchSingle(r, btn.action),
-        }, btn.label)
+        }, { default: () => btn.label })
       ))
     },
   },
@@ -271,7 +271,18 @@ async function batchDispatch() {
     } else {
       const res = await api.batchHubDispatch(checkedRowKeys.value, batchJobType.value)
       const r = res.data || res
-      message.success(`批量派发完成: 成功 ${r.success || 0}, 失败 ${r.fail || 0}`)
+      const success = r.success || 0
+      const fail = r.fail || 0
+      if (fail > 0 && r.results) {
+        // 显示具体失败原因
+        const errors = r.results
+          .filter(item => !item.ok)
+          .map(item => `${item.domain || item.site_id}: ${item.error}`)
+          .join('；')
+        message.warning(`批量派发: 成功 ${success}, 失败 ${fail}。${errors}`, { duration: 8000 })
+      } else {
+        message.success(`批量派发完成: 成功 ${success}, 失败 ${fail}`)
+      }
     }
     checkedRowKeys.value = []
     reload()

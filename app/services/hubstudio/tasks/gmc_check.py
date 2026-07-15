@@ -1,5 +1,6 @@
 """GMC 状态检查 (gmc_check)"""
 
+import re
 import time
 
 from app.core.exceptions import HubStudioError
@@ -43,7 +44,19 @@ def execute_gmc_check(executor, job: dict, payload: dict) -> dict:
             result["actions"]["browser"] = "started (no automation)"
             return result
 
-        browser = Chromium(addr_or_opts=f"http://127.0.0.1:{debug_port}")
+        browser = None
+        for i in range(10):
+            try:
+                browser = Chromium(addr_or_opts=f"http://127.0.0.1:{debug_port}")
+                browser.set.auto_handle_alert()
+                executor.logger.info(f"[gmc_check] DrissionPage 连接成功 (尝试 {i + 1} 次)")
+                break
+            except Exception:
+                if i < 9:
+                    executor.logger.info(f"[gmc_check] 端口 {debug_port} 未就绪，2s 后重试...")
+                    time.sleep(2)
+                else:
+                    raise
         try:
             # ── GMC 状态查询 ──
             executor.logger.info(f"[gmc_check] 打开 GMC: https://merchants.google.com/")
@@ -58,14 +71,48 @@ def execute_gmc_check(executor, job: dict, payload: dict) -> dict:
                 executor.logger.error(f"[gmc_check] GMC 查询异常: {e}")
 
             result["url"] = "https://merchants.google.com/"
-            executor.logger.info(f"[gmc_check] 完成: {result['actions']}")
+            executor.logger.info(f"[gmc_check] 完成: gmc_status={result.get('gmc_status')}")
             return result
+        
         finally:
             browser.quit()
 
     except Exception as e:
         executor.logger.error(f"[gmc_check] 失败: {e}")
         return {"status": "failed", "error": str(e), "domain": domain}
+
+
+def _parse_count(raw: str) -> int:
+    """解析数字字符串: "3280" / "3.28K" / "1,234" / "1.5M" → int"""
+    num = raw.replace(",", "").strip()
+    mul = 1
+    if num.upper().endswith("K"):
+        num, mul = num[:-1], 1000
+    elif num.upper().endswith("M"):
+        num, mul = num[:-1], 1000000
+    try:
+        return int(float(num) * mul)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _extract_chart_count(chart_text: str, label: str, key: str, result: dict, executor) -> bool:
+    """从 chart 文本中提取某个状态的数量
+
+    匹配格式: "Approved\n0 Approved" / "Not approved\n3.28K Not approved"
+    大小写不敏感，支持 K/M 后缀。
+    """
+    # 用标签首尾包裹，兼容 re.escape 处理空格
+    escaped = re.escape(label)
+    # 匹配: 标签行 → 换行 → 数字+标签行
+    pattern = escaped + r"\s*\n\s*([\d,]+(?:\.\d+)?[KMkm]?)\s+" + escaped
+    m = re.search(pattern, chart_text, re.IGNORECASE)
+    if not m:
+        return False
+    count = _parse_count(m.group(1))
+    result[key] = count
+    executor.logger.info(f"[GMC] {label}: {count} (raw: {m.group(1)})")
+    return True
 
 
 def _query_gmc_status(browser, executor) -> dict:
@@ -83,7 +130,6 @@ def _query_gmc_status(browser, executor) -> dict:
         "not_approved": 0,
         "limited": 0,
         "under_review": 0,
-        "issues": [],
     }
 
     gmc_url = "https://merchants.google.com/"
@@ -94,8 +140,10 @@ def _query_gmc_status(browser, executor) -> dict:
             try:
                 url = t.url or ""
                 if "merchants.google.com" in url:
+                    # 复用已有 tab，刷新页面确保数据最新
                     tab_gmc = t
-                    executor.logger.info(f"[GMC] 复用已有 tab: {url[:80]}")
+                    tab_gmc.refresh()
+                    executor.logger.info(f"[GMC] 复用已有 tab 并刷新: {url[:80]}")
                     break
             except Exception:
                 pass
@@ -106,53 +154,65 @@ def _query_gmc_status(browser, executor) -> dict:
         tab_gmc = browser.new_tab(gmc_url)
         executor.logger.info(f"[GMC] 新建 tab: {gmc_url}")
 
-    time.sleep(5)
+    # ── 等待 Angular 渲染完成（DrissionPage 原生等待，基础超时 10s） ──
+    try:
+        tab_gmc.wait.ele_displayed("tag:tab-scorecard", timeout=90)
+        executor.logger.info("[GMC] tab-scorecard 已渲染")
+    except Exception:
+        try:
+            tab_gmc.wait.ele_displayed("tag:product-status-chart", timeout=20)
+            executor.logger.info("[GMC] product-status-chart 已渲染")
+        except Exception:
+            executor.logger.warning("[GMC] 关键元素未在超时内出现，继续尝试解析")
+    # Angular 数据绑定需要额外等待
+    time.sleep(1)
 
     # ── 1. 解析 Total products ──
+    # aria-label 格式多种: "Total products 21998 +22K" / "Total clicks 65 Up from 0" 等
     try:
-        scorecard = tab_gmc.ele("tag:tab-scorecard", timeout=3)
+        scorecard = tab_gmc.ele("tag:tab-scorecard", timeout=10)
         if scorecard:
             aria_label = scorecard.attr("aria-label") or ""
             executor.logger.info(f"[GMC] scorecard aria-label: {aria_label}")
-            # "Total products 21998 +22K" → 提取数字
-            import re as _re
-            m = _re.search(r"Total products\s+([\d,]+)", aria_label)
-            if m:
-                result["product_count"] = int(m.group(1).replace(",", ""))
+            # 优先级: Total products > Total 任意指标 > 首个大数字
+            for pat in (r"Total products\s+([\d,]+(?:\.\d+)?[KM]?)",
+                         r"Total\s+\w+\s+([\d,]+(?:\.\d+)?[KM]?)",
+                         r"\b([\d,]{4,}(?:\.\d+)?[KM]?)\b"):
+                m = re.search(pat, aria_label, re.IGNORECASE)
+                if m:
+                    count = _parse_count(m.group(1))
+                    if count > 0:
+                        result["product_count"] = count
+                        executor.logger.info(f"[GMC] product_count 提取成功: {count}")
+                        break
     except Exception as e:
         executor.logger.warning(f"[GMC] 解析 Total products 失败: {e}")
 
     # ── 2. 解析 product-status-chart 各行 ──
-    # DrissionPage 选择器在 Angular 自定义元素内部不稳定，改用文本解析
-    # 模式: "Approved\n0 Approved\n+0 Approved from 7 days ago\nLimited\n..."
+    # 文本格式: "Approved\n0 Approved\n+0 Approved from 7 days ago\nLimited\n..."
+    # 兼容 Not approved / Disapproved 等多种表述，大小写不敏感，K/M 后缀
     status_key_map = {
         "Approved":      "approved",
         "Limited":       "limited",
-        "Not approved":  "not_approved",
         "Under review":  "under_review",
     }
+    # "Not approved" 可能显示为 "Disapproved"、"Not Approved" 等，用备选列表
+    not_approved_labels = ("Not approved", "Disapproved", "Not Approved")
     try:
-        chart = tab_gmc.ele("tag:product-status-chart", timeout=5)
+        chart = tab_gmc.ele("tag:product-status-chart", timeout=10)
         if chart:
             executor.logger.info("[GMC] 找到 product-status-chart，文本解析...")
-            import re as _re
             chart_text = chart.text or ""
             executor.logger.info(f"[GMC] chart text ({len(chart_text)} chars): {chart_text[:500]}")
+            # 先处理标准状态
             for label_text, count_key in status_key_map.items():
-                # 匹配: label\n数字 label   (如 "Approved\n0 Approved")
-                pattern = _re.escape(label_text) + r"\s*\n\s*([\d,]+K?)\s+" + _re.escape(label_text)
-                m = _re.search(pattern, chart_text)
-                if m:
-                    num_text = m.group(1)
-                    cleaned = num_text.replace("K", "").replace("M", "").replace(",", "")
-                    if cleaned.isdigit():
-                        count = int(num_text.replace("K", "000").replace("M", "000000").replace(",", ""))
-                        result[count_key] = count
-                        executor.logger.info(f"[GMC] {label_text}: {count} (raw: {num_text})")
-                    else:
-                        executor.logger.warning(f"[GMC] {label_text} 无法解析数字: {num_text}")
-                else:
-                    executor.logger.warning(f"[GMC] {label_text} 文本模式未匹配")
+                _extract_chart_count(chart_text, label_text, count_key, result, executor)
+            # 再处理 Not approved（多种表述）
+            for label in not_approved_labels:
+                if _extract_chart_count(chart_text, label, "not_approved", result, executor):
+                    break
+            else:
+                executor.logger.warning("[GMC] Not approved / Disapproved 文本模式未匹配")
         else:
             executor.logger.warning("[GMC] 未找到 product-status-chart 元素")
     except Exception as e:

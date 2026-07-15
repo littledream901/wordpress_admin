@@ -1,5 +1,5 @@
 <script setup>
-import { h, computed, onMounted, ref, resolveDirective, watch, withDirectives } from 'vue'
+import { h, computed, onMounted, reactive, ref, resolveDirective, watch, withDirectives } from 'vue'
 import {
   NButton,
   NForm,
@@ -31,7 +31,7 @@ import TheIcon from '@/components/icon/TheIcon.vue'
 defineOptions({ name: '角色管理' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const vPermission = resolveDirective('permission')
 
 const {

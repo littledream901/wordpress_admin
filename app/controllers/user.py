@@ -1,9 +1,14 @@
+import logging
+import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
+from fastapi import UploadFile
 from fastapi.exceptions import HTTPException
 
 from app.core.crud import CRUDBase
+from app.core.ctx import CTX_USER_ID
 from app.models.admin import User
 from app.settings.config import settings
 from app.schemas.login import CredentialsSchema
@@ -11,6 +16,12 @@ from app.schemas.users import UserCreate, UserUpdate
 from app.utils.password import get_password_hash, verify_password
 
 from .role import role_controller
+
+_log = logging.getLogger(__name__)
+
+AVATAR_DIR = Path("static/avatars")
+AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
 class UserController(CRUDBase[User, UserCreate, UserUpdate]):
@@ -56,6 +67,39 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
             raise HTTPException(status_code=403, detail="不允许重置超级管理员密码")
         user_obj.password = get_password_hash(password=settings.DEFAULT_PASSWORD)
         await user_obj.save()
+
+    async def upload_avatar(self, file: UploadFile) -> dict:
+        """处理头像文件上传，保存到磁盘并更新用户记录。返回 {"avatar": url}"""
+        user_id = CTX_USER_ID.get()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="请先登录")
+        ext = Path(file.filename).suffix.lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = AVATAR_DIR / filename
+        content = await file.read()
+        filepath.write_bytes(content)
+        avatar_url = f"/static/avatars/{filename}"
+
+        user_obj = await self.get(id=user_id)
+        user_obj.avatar = avatar_url
+        await user_obj.save()
+        return {"avatar": avatar_url}
+
+    async def set_avatar_url(self, url: str) -> dict:
+        """设置用户头像 URL。返回 {"avatar": url}"""
+        user_id = CTX_USER_ID.get()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="请先登录")
+        avatar_url = url.strip()
+        if not avatar_url:
+            raise HTTPException(status_code=400, detail="URL 不能为空")
+
+        user_obj = await self.get(id=user_id)
+        user_obj.avatar = avatar_url
+        await user_obj.save()
+        return {"avatar": avatar_url}
 
 
 user_controller = UserController()

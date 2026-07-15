@@ -4,6 +4,28 @@
 
 ---
 
+## 项目简介
+
+Vue FastAPI Admin 是一个功能齐全的后台管理系统，基于 FastAPI + Vue 3 + Naive UI 构建。
+
+**核心功能模块：**
+
+| 模块 | 说明 |
+|------|------|
+| 用户/角色/菜单/部门 | 完善的 RBAC 权限体系 |
+| 审计日志 | 自动记录用户操作/IP/内容 |
+| 站点流水线 | 自动化建站、DNS、NS、301重定向 |
+| Shopify 采集 | 集合/单品采集，产品管理，批量分配 |
+| WooCommerce 导入 | 产品批量导入到 WordPress 站点 |
+| HubStudio 任务分发 | 环境创建/账号创建/GMC检查共4种任务类型 |
+| Dynadot NS 管理 | 域名 NS 修改、批量操作 |
+| Cloudflare DNS | DNS 解析、批量操作 |
+| 1Panel 集成 | 站点创建/删除/状态同步 |
+| Gmail 账号管理 | 站点分配、状态监控 |
+| 配置文件管理 | Feed Manager、RSS Feed 替换 |
+
+---
+
 ## 环境要求
 
 | 依赖 | 最低版本 | 说明 |
@@ -37,11 +59,12 @@ bash deploy/deploy.sh init
    - `DEFAULT_PASSWORD` — 管理员初始密码
    - `DB_PASSWORD` — MySQL 业务用户密码
    - `MYSQL_ROOT_PASSWORD` — MySQL root 密码
-3. 创建 `logs/` 持久化目录
+3. 创建 `logs/`、`static/avatars/` 持久化目录
 4. 启动 MySQL 容器并等待就绪
 5. 构建应用镜像并启动容器
-6. 自动执行数据库迁移和默认数据初始化
-7. 等待服务就绪后输出访问信息
+6. 自动执行数据库迁移（优先 Aerich，回退 generate_schemas）
+7. 初始化默认数据（菜单/角色/管理员）
+8. 等待服务就绪后输出访问信息
 
 ### 步骤 3：验证
 
@@ -116,6 +139,49 @@ MYSQL_ROOT_PASSWORD=<自动生成>
 # ========== 必填：运行模式 ==========
 DEBUG=false             # 生产环境必须为 false
 CORS_ORIGINS=["https://admin.your-domain.com"]
+```
+
+---
+
+## 第三方服务配置
+
+部分模块依赖第三方服务，部署后需在 **系统管理 → 提供商管理** 中配置：
+
+| 服务 | 所需配置键 | 用途 |
+|------|-----------|------|
+| Cloudflare | CF_API_TOKEN, CF_ACCOUNT_ID | DNS 解析、域名管理 |
+| Dynadot | DYNADOT_API_KEY | 域名 NS 修改 |
+| 1Panel | OP_URL, OP_API_KEY | 自动建站、站点管理 |
+| HubStudio | HS_API_KEY, HS_BASE_URL | 浏览器环境自动化 |
+| Shopify | SHOPIFY_API_KEY | 产品采集 |
+| WooCommerce | WP_URL, consumer_key, consumer_secret | 产品导入 |
+
+---
+
+## 项目目录结构（生产环境关键路径）
+
+```
+vue-fastapi-admin/
+├── app/                    # FastAPI 后端
+│   ├── api/v1/             # API 路由（仅路由注册和参数校验）
+│   ├── controllers/        # 业务逻辑层
+│   ├── models/             # 数据表模型
+│   ├── schemas/            # Pydantic 请求/响应模型
+│   ├── services/           # 第三方服务封装
+│   ├── core/               # 全局基础能力（认证/RBAC/CRUD/中间件）
+│   ├── utils/              # 通用工具函数
+│   └── settings/           # 全局配置
+├── web/                    # Vue 3 前端
+│   ├── src/
+│   │   ├── api/            # axios 请求封装（按模块拆分）
+│   │   ├── components/     # 公共组件
+│   │   ├── views/          # 页面视图
+│   │   ├── router/         # 动态路由
+│   │   └── store/          # Pinia 全局状态
+│   └── dist/               # 构建产物
+├── deploy/                 # 部署配置文件
+├── static/avatars/         # 用户头像上传目录
+└── migrations/             # Aerich 数据库迁移
 ```
 
 ---
@@ -231,9 +297,10 @@ bash deploy/deploy.sh update
 ### MySQL 备份
 
 ```bash
-# 手动备份
+# 手动备份（含 static/avatars/ 目录）
 docker compose exec -T db mysqldump -uadmin -p"$(grep DB_PASSWORD .env | cut -d= -f2)" vue_fastapi_admin \
   > "backup_$(date +%Y%m%d_%H%M%S).sql"
+tar -czf "static_backup_$(date +%Y%m%d_%H%M%S).tar.gz" static/
 
 # 定时备份（crontab，每天凌晨 3 点）
 # 0 3 * * * cd /opt/vue-fastapi-admin && docker compose exec -T db mysqldump -uadmin -p"your-password" vue_fastapi_admin > /backup/db_$(date +\%Y\%m\%d).sql
@@ -247,6 +314,9 @@ docker compose stop app
 
 # 导入备份
 docker compose exec -T db mysql -uadmin -p"$(grep DB_PASSWORD .env | cut -d= -f2)" vue_fastapi_admin < backup_20260714.sql
+
+# 恢复头像
+tar -xzf static_backup_20260714.tar.gz
 
 # 重启
 docker compose up -d
@@ -375,6 +445,20 @@ print('管理员密码已重置为 .env 中 DEFAULT_PASSWORD 的值')
 "
 ```
 
+### Q: 头像上传后不显示
+
+确认 Nginx 中 `/static/` 路径已配置，且 `static/avatars/` 目录存在：
+
+```bash
+docker compose exec app ls -la static/avatars/
+```
+
+### Q: 建站/DNS/采集任务失败
+
+1. 在 **系统管理 → 提供商管理** 中检查对应服务是否已配置并激活
+2. 在 **任务中心** 查看具体错误日志
+3. 检查网络连通性：`docker compose exec app ping api.cloudflare.com`
+
 ### Q: 从 SQLite 迁移到 MySQL
 
 1. 导出现有数据（SQLite → JSON）
@@ -388,6 +472,7 @@ print('管理员密码已重置为 .env 中 DEFAULT_PASSWORD 的值')
 1. **密钥管理**：所有密码使用 `deploy.sh init` 自动生成的随机值
 2. **防火墙**：仅开放 80/443 端口，3306（MySQL）不对外暴露
 3. **CORS 限制**：生产环境设为具体域名，不使用 `["*"]`
-4. **定期备份**：设置 crontab 定时备份 MySQL
+4. **定期备份**：设置 crontab 定时备份 MySQL 和 `static/avatars/`
 5. **日志归档**：定期清理 `logs/` 目录
 6. **镜像更新**：定期 `docker compose build --no-cache --pull` 更新基础镜像
+7. **RBAC 审计**：所有关键操作自动记录到审计日志表，定期审查

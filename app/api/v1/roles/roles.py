@@ -61,23 +61,7 @@ async def delete_role(
 
 @router.get("/authorized", summary="查看角色权限")
 async def get_role_authorized(id: int = Query(..., description="角色ID")):
-    role_obj = await role_controller.get(id=id)
-    data = await role_obj.to_dict(m2m=True)
-
-    # 查询按业务模块的数据权限配置
-    from app.models.admin import RoleDataScope
-    data_scopes_list = []
-    scope_objs = await RoleDataScope.filter(role=role_obj).prefetch_related("custom_depts")
-    for scope in scope_objs:
-        depts = await scope.custom_depts.all().values("id", "name")
-        data_scopes_list.append({
-            "id": scope.id,
-            "resource": scope.resource,
-            "data_scope": scope.data_scope,
-            "custom_depts": list(depts),
-        })
-    data["data_scopes"] = data_scopes_list
-
+    data = await role_controller.get_authorized_data(role_id=id)
     return Success(data=data)
 
 

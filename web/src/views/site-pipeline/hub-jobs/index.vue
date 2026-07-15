@@ -5,7 +5,7 @@
       :columns="columns"
       :query-items="queryItems"
       :get-data="getData"
-      @onChecked="onCheckedChange"
+      @on-checked="onCheckedChange"
       @update:query-items="onUpdateQueryItems"
     >
       <template #queryBar>
@@ -28,7 +28,7 @@
           placeholder="域名搜索"
           clearable
           style="width: 200px"
-          @keyup.enter="crudRef.handleQuery()"
+          @keyup.enter="crudRef.handleSearch()"
         />
       </template>
       <template #queryBarActions>
@@ -160,7 +160,7 @@ function copyText(text) {
 async function retryJob(row) {
   await api.dispatchHubJob(row.site_id, { job_type: row.job_type, execute_now: true })
   message.success('已重新触发任务')
-  crudRef.value.handleQuery()
+  crudRef.value.handleSearch()
 }
 
 async function retryCurrent() {
@@ -172,7 +172,7 @@ async function cancelJob(row) {
   try {
     await api.cancelHubJob(row.id)
     message.success('任务已取消')
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
   } catch (e) {
     message.error(`取消失败: ${e}`)
   }
@@ -192,7 +192,7 @@ async function batchRetry() {
   }
   message.success(`已重置 ${selected.length} 个任务为 pending`)
   checkedRowKeys.value = []
-  crudRef.value.handleQuery()
+  crudRef.value.handleSearch()
 }
 
 async function batchCancel() {
@@ -205,7 +205,7 @@ async function batchCancel() {
     const r = await api.batchCancelHubJobs(ids)
     message.success(`批量取消完成: 成功 ${r?.data?.success ?? ids.length}`)
     checkedRowKeys.value = []
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
   } catch (e) {
     message.error(`批量取消失败: ${e}`)
   }

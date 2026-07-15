@@ -59,4 +59,5 @@ export default {
   deleteFeed: (id) => request.delete(`/site-pipeline/feed/${id}`),
   getFeedDefaultDomain: () => request.get('/site-pipeline/feed/config/default-domain'),
   getFeedDownloadUrl: (filename) => `/site-pipeline/feed/download/${encodeURIComponent(filename)}`,
+  cleanupFeed: () => request.post('/site-pipeline/feed/cleanup'),
 }

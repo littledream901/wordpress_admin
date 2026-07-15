@@ -15,6 +15,8 @@ export default {
   batchSaveItems(data) { return request.post('/config-provider/items/batch-save', data) },
   // Bindings
   getBindings(params) { return request.get('/config-provider/bindings/list', { params }) },
+  getBindingSites(params) { return request.get('/config-provider/bindings/sites', { params }) },
+  getBindingIps() { return request.get('/config-provider/bindings/ips') },
   createBinding(data) { return request.post('/config-provider/bindings/create', data) },
   deleteBinding(params) { return request.post('/config-provider/bindings/delete', null, { params }) },
   batchCreateBindings(data) { return request.post('/config-provider/bindings/batch-create', data) },

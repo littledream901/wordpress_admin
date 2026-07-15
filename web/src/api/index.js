@@ -1,52 +1,49 @@
 import { request } from '@/utils'
 
-export default {
-  login: (data) => request.post('/base/access_token', data, { noNeedToken: true }),
-  refreshToken: (data) => request.post('/base/refresh_token', data, { noNeedToken: true }),
-  getUserInfo: () => request.get('/base/userinfo'),
-  getUserMenu: () => request.get('/base/usermenu'),
-  getUserApi: () => request.get('/base/userapi'),
-  // profile
-  updatePassword: (data = {}) => request.post('/base/update_password', data),
-  // users
-  getUserList: (params = {}) => request.get('/user/list', { params }),
-  getUserById: (params = {}) => request.get('/user/get', { params }),
-  createUser: (data = {}) => request.post('/user/create', data),
-  updateUser: (data = {}) => request.post('/user/update', data),
-  deleteUser: (params = {}) => request.delete(`/user/delete`, { params }),
-  resetPassword: (data = {}) => request.post(`/user/reset_password`, data),
-  // role
-  getRoleList: (params = {}) => request.get('/role/list', { params }),
-  createRole: (data = {}) => request.post('/role/create', data),
-  updateRole: (data = {}) => request.post('/role/update', data),
-  deleteRole: (params = {}) => request.delete('/role/delete', { params }),
-  updateRoleAuthorized: (data = {}) => request.post('/role/authorized', data),
-  getRoleAuthorized: (params = {}) => request.get('/role/authorized', { params }),
-  // menus
-  getMenus: (params = {}) => request.get('/menu/list', { params }),
-  createMenu: (data = {}) => request.post('/menu/create', data),
-  updateMenu: (data = {}) => request.post('/menu/update', data),
-  deleteMenu: (params = {}) => request.delete('/menu/delete', { params }),
-  deleteMenuCascade: (params = {}) => request.delete('/menu/delete', { params: { ...params, cascade: true } }),
-  // apis
-  getApis: (params = {}) => request.get('/api/list', { params }),
-  createApi: (data = {}) => request.post('/api/create', data),
-  updateApi: (data = {}) => request.post('/api/update', data),
-  deleteApi: (params = {}) => request.delete('/api/delete', { params }),
-  refreshApi: (data = {}) => request.post('/api/refresh', data),
-  // depts
-  getDepts: (params = {}) => request.get('/dept/list', { params }),
-  createDept: (data = {}) => request.post('/dept/create', data),
-  updateDept: (data = {}) => request.post('/dept/update', data),
-  deleteDept: (params = {}) => request.delete('/dept/delete', { params }),
-  // auditlog
+// 按后端模块拆分，导入各模块再聚合
+import authApi from './auth'
+import userApi from './user'
+import roleApi_ from './role'
+import menuApi_ from './menu'
+import apiApi_ from './api'
+import deptApi_ from './dept'
+
+// auditlog / accounts 保持内联（调用量小）
+const auditlogApi = {
   getAuditLogList: (params = {}) => request.get('/auditlog/list', { params }),
-  // accounts
+}
+
+const accountsApi = {
   getAccountList: (params = {}) => request.get('/account/list', { params }),
   createAccount: (data = {}) => request.post('/account/create', data),
   updateAccount: (data = {}) => request.post('/account/update', data),
   deleteAccount: (params = {}) => request.delete('/account/delete', { params }),
-  // avatar
-  uploadAvatar: (formData) => request.post('/user/avatar/upload', formData),
-  setAvatarUrl: (data) => request.post('/user/avatar/url', data),
 }
+
+// 聚合导出：保持 import api from '@/api' 兼容所有旧代码
+export default {
+  ...authApi,
+  ...userApi,
+  ...roleApi_,
+  ...menuApi_,
+  ...apiApi_,
+  ...deptApi_,
+  ...auditlogApi,
+  ...accountsApi,
+}
+
+// 按模块命名导出（推荐新代码使用）
+export { default as authApi } from './auth'
+export { default as userApi } from './user'
+export { default as roleApi } from './role'
+export { default as menuApi } from './menu'
+export { default as apiApi } from './api'
+export { default as deptApi } from './dept'
+export { default as shopifyApi } from './shopify'
+export { default as sitePipelineApi } from './site-pipeline'
+export { default as gmailApi } from './gmail'
+export { default as configProviderApi } from './configProvider'
+export { default as importJobApi } from './importJob'
+export { default as operationJobApi } from './operationJob'
+export { default as onepanelMonitorApi } from './onepanel-monitor'
+export { default as recycleBinApi } from './recycleBin'
