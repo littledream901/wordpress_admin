@@ -42,8 +42,9 @@ doc.json
 *.md
 !README.md
 
-# 部署（不在镜像内使用）
-deploy/
+# 部署脚本（仅排除 deploy.sh 和 deployment.md）
+deploy/deploy.sh
+deploy/deployment.md
 
 # 日志
 logs/
