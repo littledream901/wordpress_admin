@@ -92,12 +92,15 @@
       <!-- 批量新增站点弹窗 -->
       <n-modal v-model:show="showBatchAdd" preset="card" title="批量新增站点" style="max-width: 600px">
         <n-space vertical :size="8">
-          <n-text depth="3">每行一个站点，格式：域名,服务器IP（用逗号或 Tab 分隔，IP 可省略）</n-text>
+          <n-form-item label="平台" label-placement="left" label-width="60">
+            <n-select v-model:value="batchAddPlatform" :options="platformOptions" style="width:200px" />
+          </n-form-item>
+          <n-text depth="3">{{ batchAddHint }}</n-text>
           <n-input
             v-model:value="batchAddText"
             type="textarea"
             :rows="12"
-            placeholder="example.com,1.2.3.4&#10;myshop.com,5.6.7.8&#10;blog.org"
+            :placeholder="batchAddPlaceholder"
           />
         </n-space>
         <template #footer>
@@ -133,6 +136,9 @@
           <n-form-item label="域名" path="domain">
             <n-input v-model:value="formData.domain" placeholder="example.com" />
           </n-form-item>
+          <n-form-item label="平台" path="platform">
+            <n-select v-model:value="formData.platform" :options="platformOptions" />
+          </n-form-item>
           <n-form-item label="服务器IP" path="server_ip">
             <n-input v-model:value="formData.server_ip" placeholder="1.2.3.4" />
           </n-form-item>
@@ -158,6 +164,20 @@
               filterable
             />
           </n-form-item>
+          <template v-if="formData.platform === 'shopify'">
+            <n-form-item label="建站状态">
+              <n-select v-model:value="formData.status" :options="statusOptions" />
+            </n-form-item>
+            <n-form-item label="API Key">
+              <n-input v-model:value="formData.shopify_key" type="password" show-password-on="click" placeholder="beb9ecda5bff9d3a18d318cedb23b0f4" />
+            </n-form-item>
+            <n-form-item label="Store URL">
+              <n-input v-model:value="formData.shopify_store_url" placeholder="https://xxx.myshopify.com" />
+            </n-form-item>  
+            <n-form-item label="API Token">
+              <n-input v-model:value="formData.shopify_token" type="password" show-password-on="click" placeholder="shpat_xxx" />
+            </n-form-item>
+          </template>
         </n-form>
         <template #footer>
           <n-space justify="end">
@@ -237,7 +257,7 @@
               <n-descriptions-item label="流水线状态">{{ detail.site.pipeline_status }}</n-descriptions-item>
             </n-descriptions>
           </n-card>
-          <n-card title="站点与 Woo 信息" size="small">
+          <n-card v-if="detail.site.platform === 'wordpress'" title="站点与 Woo 信息" size="small">
             <n-descriptions label-placement="left" :column="1" bordered size="small">
               <n-descriptions-item label="登录地址">{{ detail.site.login_url }}</n-descriptions-item>
               <n-descriptions-item label="Woo CK">{{ detail.site.woo_ck }}</n-descriptions-item>
@@ -246,6 +266,50 @@
               <n-descriptions-item label="Feed Link">{{ detail.site.feed_link }}</n-descriptions-item>
             </n-descriptions>
           </n-card>
+          <n-card v-if="detail.site.platform === 'shopify'" title="Shopify 配置" size="small">
+            <template #header-extra>
+              <n-button size="tiny" type="primary" @click="openShopifyEdit">编辑</n-button>
+            </template>
+            <n-descriptions label-placement="left" :column="1" bordered size="small">
+              <n-descriptions-item label="建站状态">{{ detail.site.status || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="API Key">
+                <template v-if="detail.site.shopify_key">
+                  {{ detail.site.shopify_key.substring(0, 8) }}...
+                </template>
+                <template v-else>-</template>
+              </n-descriptions-item>
+              <n-descriptions-item label="Store URL">{{ detail.site.shopify_store_url || '-' }}</n-descriptions-item>
+              <n-descriptions-item label="API Token">
+                <template v-if="detail.site.shopify_token">
+                  {{ detail.site.shopify_token.substring(0, 8) }}...
+                </template>
+                <template v-else>-</template>
+              </n-descriptions-item>
+            </n-descriptions>
+          </n-card>
+          <!-- Shopify 配置编辑弹窗 -->
+          <n-modal v-model:show="showShopifyEdit" preset="card" title="编辑 Shopify 配置" style="max-width: 480px">
+            <n-form label-placement="left" label-width="100">
+              <n-form-item label="建站状态">
+                <n-select v-model:value="shopifyForm.status" :options="statusOptions" />
+              </n-form-item>
+              <n-form-item label="API Key">
+                <n-input v-model:value="shopifyForm.key" type="password" show-password-on="click" placeholder="beb9ecda5bff9d3a18d318cedb23b0f4" />
+              </n-form-item>
+              <n-form-item label="Store URL">
+                <n-input v-model:value="shopifyForm.store_url" placeholder="https://xxx.myshopify.com" />
+              </n-form-item>
+              <n-form-item label="API Token">
+                <n-input v-model:value="shopifyForm.token" type="password" show-password-on="click" placeholder="shpat_xxx" />
+              </n-form-item>
+            </n-form>
+            <template #footer>
+              <n-space justify="end">
+                <n-button @click="showShopifyEdit = false">取消</n-button>
+                <n-button type="primary" @click="saveShopifyConfig" :loading="shopifySaving">保存</n-button>
+              </n-space>
+            </template>
+          </n-modal>
           <n-card title="Gmail 分配信息" size="small">
             <n-descriptions v-if="detail.gmail" label-placement="left" :column="2" bordered size="small">
               <n-descriptions-item label="Username">{{ detail.gmail.username }}</n-descriptions-item>
@@ -374,12 +438,57 @@ const gmailFullAddress = computed(() => {
   return parts.join(', ') || '-'
 })
 
+// ─── Shopify 配置编辑（详情弹窗内） ───
+const showShopifyEdit = ref(false)
+const shopifySaving = ref(false)
+const shopifyForm = reactive({ key: '', store_url: '', token: '', status: '' })
+const shopifyCurrentSiteId = ref(null)
+const statusOptions = [
+  { label: '待建站', value: '待建站' },
+  { label: '已建站', value: '已建站' },
+]
+function openShopifyEdit() {
+  shopifyCurrentSiteId.value = detail.value?.site?.id
+  shopifyForm.key = detail.value?.site?.shopify_key || ''
+  shopifyForm.store_url = detail.value?.site?.shopify_store_url || ''
+  shopifyForm.token = detail.value?.site?.shopify_token || ''
+  shopifyForm.status = detail.value?.site?.status || '待建站'
+  showShopifyEdit.value = true
+}
+async function saveShopifyConfig() {
+  shopifySaving.value = true
+  try {
+    await api.updateSite({
+      id: shopifyCurrentSiteId.value,
+      status: shopifyForm.status,
+      shopify_key: shopifyForm.key,
+      shopify_store_url: shopifyForm.store_url,
+      shopify_token: shopifyForm.token,
+    })
+    message.success('保存成功')
+    showShopifyEdit.value = false
+    // 刷新详情弹窗数据
+    if (shopifyCurrentSiteId.value) {
+      const r = await api.getSiteById({ site_id: shopifyCurrentSiteId.value })
+      if (r?.data) detail.value = r.data
+    }
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '保存失败')
+  } finally {
+    shopifySaving.value = false
+  }
+}
+
 // ─── 搜索 & 表单 ───
 const showAdd = ref(false)
 const editId = ref(null)
 const saving = ref(false)
 const formRef = ref(null)
-const formData = reactive({ domain: '', server_ip: '', dept_id: null, assign_to: null })
+const formData = reactive({ domain: '', server_ip: '', platform: 'wordpress', dept_id: null, assign_to: null, status: '', shopify_key: '', shopify_store_url: '', shopify_token: '' })
+const platformOptions = [
+  { label: 'WordPress (1Panel 建站)', value: 'wordpress' },
+  { label: 'Shopify (手动配置)', value: 'shopify' },
+]
 const formRules = {
   domain: { required: true, message: '域名必填', trigger: 'blur' },
 }
@@ -392,10 +501,12 @@ const userOption = computed(() => {
   return rawUserList.value.filter((u) => u.dept?.id === queryItems.dept_id)
 })
 
-// 表单的用户选择器：与所选部门联动
+// 表单的用户选择器：与所选部门联动，排除 admin
 const userFormOption = computed(() => {
-  if (!formData.dept_id) return rawUserList.value
-  return rawUserList.value.filter((u) => u.dept?.id === formData.dept_id)
+  const list = formData.dept_id
+    ? rawUserList.value.filter((u) => u.dept?.id === formData.dept_id)
+    : rawUserList.value
+  return list.filter((u) => u.username !== 'admin')
 })
 
 // 表单中选了用户后，自动同步其部门
@@ -447,18 +558,21 @@ const columns = [
     }),
   },
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '域名', key: 'domain', width: 150, ellipsis: { tooltip: true } },
-  { title: '服务器IP', key: 'server_ip', width: 140, align: 'center' },
+  { title: '域名', key: 'domain', width: 140, ellipsis: { tooltip: true }, align: 'center' },
+  { title: '服务器IP', key: 'server_ip', width: 140, align: 'center',
+    render: (r) => r.platform === 'shopify' ? h('span', { style: 'color:#999' }, '-') : (r.server_ip || '-'),
+  },
+  { title: '平台', key: 'platform', width: 60, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   { title: 'CF 状态', key: 'cloudflare_status', width: 80, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
   { title: 'Dynadot', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
-  { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已创建' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
-  { title: '产品数', key: 'woo_product_count', width: 100, align: 'center',
+  { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已建站' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
+  { title: '产品数', key: 'product_count', width: 80, align: 'center',
     render: (row) => {
-      const count = row.woo_product_count || 0
+      const count = row.product_count || 0
       return h(NSpace, { size: 4, justify: 'center', align: 'center' }, {
         default: () => [
           h('span', { style: 'font-weight:600;min-width:24px' }, count),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: (e) => { e.stopPropagation(); syncWooCount(row.id, row) } },
+          h(NButton, { size: 'tiny', quaternary: true, onClick: (e) => { e.stopPropagation(); syncProductCount(row.id, row) } },
             { default: () => h(TheIcon, { icon: 'mdi:sync', size: 14 }) }
           ),
         ],
@@ -466,23 +580,25 @@ const columns = [
     },
   },
   { title: 'Gmail', key: 'gmail_username', width: 80, render: (r) => r.gmail_username ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
-  { title: 'Hub 状态', key: 'hub_status', width: 120, render: (r) => statusTag(r.hub_status), align: 'center' },
+  { title: 'Hub 状态', key: 'hub_status', width: 100, render: (r) => statusTag(r.hub_status), align: 'center' },
   { title: 'GMC', key: 'gmc_status', width: 80, render: (r) => statusTag(r.gmc_status), align: 'center' },
   { title: '重定向', key: 'pipeline_status', width: 80, render: (r) => statusTag(redirectLabel(r)), align: 'center' },
   { title: '操作', key: 'actions', width: 400,
     render: (row) => {
       const dnsOk = (row.cloudflare_status || '').includes('success') || (row.cloudflare_status || '').includes('已解析')
       const redirectOk = (row.pipeline_status || '').startsWith('redirect:')
-      const provisionOk = (row.status || '').includes('已创建')
-      const wooOk = (row.woo_import_status || '').includes('成功')
+      const provisionOk = (row.status || '').includes('已创建') || (row.status || '').includes('已存在')
+      const importOk = (row.woo_import_status || '').includes('成功')
 
       return h(NSpace, { size: 'small' }, {
         default: () => [
           h(NButton, { size: 'tiny', onClick: () => goDetail(row.id) }, { default: () => '详情' }),
           withDirectives(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' }), [[vPermission, 'post/api/v1/site-pipeline/site/update']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'info', ghost: !dnsOk, onClick: () => doSingleAction('dns', row.id) }, { default: () => 'DNS+NS' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/dns']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/provision']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !wooOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/woo-import']]),
+          row.platform === 'shopify'
+            ? h(NButton, { size: 'tiny', type: 'default', disabled: true }, { default: () => '建站' })
+            : withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/provision']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !importOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/woo-import']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/redirect']]),
           row.gmail_username
             ? withDirectives(h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' }), [[vPermission, 'post/api/v1/gmail/unassign']])
@@ -527,10 +643,12 @@ const batchExtraTargetUrl = ref('')
 const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
 
-// 批量分配弹窗：用户选项与所选部门联动
+// 批量分配弹窗：用户选项与所选部门联动，排除 admin
 const batchAssignUserOption = computed(() => {
-  if (!batchAssignDeptId.value) return rawUserList.value
-  return rawUserList.value.filter((u) => u.dept?.id === batchAssignDeptId.value)
+  const list = batchAssignDeptId.value
+    ? rawUserList.value.filter((u) => u.dept?.id === batchAssignDeptId.value)
+    : rawUserList.value
+  return list.filter((u) => u.username !== 'admin')
 })
 watch(batchAssignDeptId, (newDeptId) => {
   if (newDeptId && batchAssignTo.value) {
@@ -564,20 +682,29 @@ const singleRedirectLoading = ref(false)
 const showBatchAdd = ref(false)
 const batchAddText = ref('')
 const batchAddLoading = ref(false)
+const batchAddPlatform = ref('wordpress')
 const showBatchAddResult = ref(false)
 const batchAddTotal = ref(0)
 const batchAddBatchId = ref('')
 const batchAddJobId = ref(0)
+
+const batchAddHint = computed(() => batchAddPlatform.value === 'shopify'
+  ? '每行一个域名（Shopify 配置后续到编辑页面补充）'
+  : '每行一个站点，格式：域名,服务器IP（用逗号或 Tab 分隔，IP 可省略）')
+
+const batchAddPlaceholder = computed(() => batchAddPlatform.value === 'shopify'
+  ? 'my-store.com\nanother-store.com'
+  : 'example.com,1.2.3.4\nmyshop.com,5.6.7.8\nblog.org')
 
 const batchActionLabelMap = {
   dns: '批量 DNS+NS',
   'dynadot-ns': '批量 Dynadot NS',
   provision: '批量建站',
   hub: '批量 Hub 分发',
-  'woo-import': '批量 Woo 导入',
+  'woo-import': '批量导入产品',
   redirect: '批量重定向',
   'assign-gmail': '批量分配Gmail',
-  assign: '批量分配',
+  assign: '批量分配用户',
   delete: '批量删除',
 }
 
@@ -586,7 +713,7 @@ const batchActions = [
   { label: '批量 Dynadot NS', key: 'dynadot-ns', icon: 'mdi:domain', permission: 'post/api/v1/site-pipeline/site/batch-dynadot-ns' },
   { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch', permission: 'post/api/v1/site-pipeline/site/batch-provision' },
   { label: '批量 Hub 分发', key: 'hub', icon: 'mdi:cube-send', permission: 'post/api/v1/site-pipeline/site/batch-hub-dispatch' },
-  { label: '批量 Woo 导入', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
+  { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
   { label: '批量分配', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
@@ -641,7 +768,7 @@ async function executeBatchAction() {
     } else if (action === 'hub') {
       res = await api.batchHubDispatch(ids, 'create_env')
     } else if (action === 'woo-import') {
-      res = await api.batchWooImport(ids)
+      res = await api.batchImportProducts(ids)
     } else if (action === 'redirect') {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
     } else if (action === 'assign-gmail') {
@@ -702,8 +829,13 @@ function openEdit(row) {
   editId.value = row.id
   formData.domain = row.domain
   formData.server_ip = row.server_ip
+  formData.platform = row.platform || 'wordpress'
   formData.dept_id = row.dept_id ?? null
-  formData.assign_to = row.create_by ?? null
+  formData.assign_to = null
+  formData.status = row.status ?? ''
+  formData.shopify_key = row.shopify_key ?? ''
+  formData.shopify_store_url = row.shopify_store_url ?? ''
+  formData.shopify_token = row.shopify_token ?? ''
   showAdd.value = true
 }
 
@@ -722,6 +854,7 @@ async function doSave() {
     editId.value = null
     formData.domain = ''
     formData.server_ip = ''
+    formData.platform = 'wordpress'
     formData.dept_id = null
     formData.assign_to = null
     reload()
@@ -739,12 +872,17 @@ async function doBatchAdd() {
     message.warning('请输入站点信息')
     return
   }
+  const platform = batchAddPlatform.value
   const lines = text.split('\n').filter(l => l.trim())
   const items = []
   for (const line of lines) {
     const parts = line.split(/[,\t]/).map(s => s.trim()).filter(Boolean)
     if (parts.length === 0) continue
-    items.push({ domain: parts[0], server_ip: parts[1] || '' })
+    if (platform === 'shopify') {
+      items.push({ domain: parts[0], server_ip: '', platform: 'shopify' })
+    } else {
+      items.push({ domain: parts[0], server_ip: parts[1] || '', platform: 'wordpress' })
+    }
   }
   if (items.length === 0) {
     message.warning('未解析到有效站点')
@@ -888,13 +1026,13 @@ async function doSingleAction(action, siteId) {
         message.success('建站已触发')
       }
     } else if (action === 'woo-import') {
-      const res = await api.importWoo(siteId)
+      const res = await api.importProducts(siteId)
       const data = res?.data
       if (data?.job_id) {
         const count = data.total || '?'
-        message.success(`Woo 导入已触发：${count} 个产品，任务 #${data.job_id}`)
+        message.success(`产品导入已触发：${count} 个产品，任务 #${data.job_id}`)
       } else {
-        message.success('Woo 导入产品已触发')
+        message.success('产品导入已触发')
       }
     } else if (action === 'redirect') {
       singleRedirectSiteId.value = siteId
@@ -936,13 +1074,13 @@ async function doSingleRedirectConfirm() {
   }
 }
 
-// ─── 同步 Woo 产品数量 ───
-async function syncWooCount(siteId, row) {
+// ─── 同步产品数量 ───
+async function syncProductCount(siteId, row) {
   try {
     message.loading('正在查询远端产品数量...')
-    const res = await api.refreshWooCount(siteId)
-    const count = res?.data?.woo_product_count ?? 0
-    row.woo_product_count = count
+    const res = await api.refreshProductCount(siteId)
+    const count = res?.data?.product_count ?? 0
+    row.product_count = count
     message.success(`站点 ${row.domain} 远端产品总数: ${count}`)
   } catch (e) {
     message.error(e?.response?.data?.msg || '查询失败')
@@ -953,7 +1091,7 @@ onMounted(() => {
   $table.value?.handleSearch()
   baseApi.getDepts().then((res) => (deptOption.value = res.data))
   baseApi.getUserList({ page: 1, page_size: 200 }).then((res) => {
-    rawUserList.value = (res.data || []).map((u) => ({ label: `${u.username} (${u.dept?.name || '-'})`, value: u.id, dept: u.dept }))
+    rawUserList.value = (res.data || []).map((u) => ({ label: `${u.username} (${u.dept?.name || '-'})`, value: u.id, username: u.username, dept: u.dept }))
   })
 })
 </script>

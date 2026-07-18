@@ -52,13 +52,17 @@ class Settings(BaseSettings):
     留空则使用内存限流（单实例模式，多 worker 不共享状态）。"""
 
     # ── 数据库 ──
-    DB_ENGINE: str = "mysql"  # sqlite / mysql / postgres
+    DB_ENGINE: str = "sqlite"  # sqlite / mysql / postgres
     DB_SQLITE_PATH: str = ""  # SQLite 模式下的数据库文件路径
     DB_HOST: str = "db"
     DB_PORT: int = 3306
     DB_USER: str = "admin"
     DB_PASSWORD: str = ""
     DB_NAME: str = "vue_fastapi_admin"
+
+    # ── 流水线 / Feed ──
+    FEED_EXPIRE_DAYS: int = 3
+    """Feed 文件下载有效期（天），过期后不可下载"""
 
     @property
     def TORTOISE_ORM(self) -> dict:
@@ -72,7 +76,11 @@ class Settings(BaseSettings):
                     "user": self.DB_USER,
                     "password": self.DB_PASSWORD,
                     "database": self.DB_NAME,
+                    "connect_timeout": 10,
+                    "charset": "utf8mb4",
                 },
+                "minsize": 2,
+                "maxsize": 10,
             }
         elif self.DB_ENGINE == "postgres":
             connections["default"] = {

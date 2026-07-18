@@ -1,20 +1,31 @@
-"""同步配置读取器 —— 兼容旧服务，内部委托 ProviderResolver
+"""同步配置读取器 —— 委托 ProviderResolver，兼容 MySQL/SQLite
 
-所有同步服务类通过此模块读取配置，不再直接访问 settings 或硬编码常量。
-异步代码请直接使用 ProviderResolver。
-
-旧 key → 新 key 映射：
-- 旧：CF_API_TOKEN、OP_URL、HUBSTUDIO_BASE_URL 等（带前缀，兼容旧 config 表）
-- 新：api_token、url、base_url 等（无前缀，存于 provider_config_items）
+所有同步服务类通过此模块读取配置，内部全部委托 ProviderResolver，
+不再直接使用 raw SQLite 连接。
 """
 
-import sqlite3
-import os
+from app.utils.provider_resolver import ProviderResolver, _run_sync
 
+# 旧 key 前缀 → provider_type
+_PREFIX_TYPE_MAP = {
+    "CF_": "cloudflare",
+    "DYNADOT_": "dynadot",
+    "OP_": "onepanel",
+    "WP_": "onepanel",
+    "HUBSTUDIO_": "hubstudio",
+    "WOO_": "woo",
+    "SHOPIFY_": "shopify",
+}
 
-# 数据库路径与 settings.BASE_DIR 一致：项目根目录下的 db.sqlite3
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DB_PATH = os.path.join(_BASE_DIR, "db.sqlite3")
+# 旧 category 名 → provider_type
+_CATEGORY_TYPE_MAP = {
+    "cloudflare": "cloudflare",
+    "dynadot": "dynadot",
+    "onepanel": "onepanel",
+    "hubstudio": "hubstudio",
+    "woo": "woo",
+    "shopify": "shopify",
+}
 
 # 旧 key → 新 key 映射（旧 config 表前缀 → provider_config_items 的 config_key）
 _KEY_MAP = {
@@ -84,29 +95,7 @@ _KEY_MAP = {
     "SHOPIFY_MAX_PRODUCTS_PER_SOURCE": "default_max_products",
 }
 
-# 旧 provider_type 名 → 新 provider_type（category 名称兼容）
-_CATEGORY_TYPE_MAP = {
-    "cloudflare": "cloudflare",
-    "dynadot": "dynadot",
-    "onepanel": "onepanel",
-    "hubstudio": "hubstudio",
-    "woo": "woo",
-    "shopify": "shopify",
-}
-
-# 旧 key 前缀 → provider_type（WP_ 归属 pipeline，PIPELINE_ 归属 pipeline 等）
-_PREFIX_TYPE_MAP = {
-    "CF_": "cloudflare",
-    "DYNADOT_": "dynadot",
-    "OP_": "onepanel",
-    "WP_": "pipeline",
-    "HUBSTUDIO_": "hubstudio",
-    "WOO_": "woo",
-    "SHOPIFY_": "shopify",
-    "PIPELINE_": "pipeline",
-}
-
-# 反向映射（新 key → 旧 key），按 provider_type 分组，避免同名 key（如 timeout）被覆盖
+# 反向映射（新 key → 旧 key），按 provider_type 分组
 _REVERSE_KEY_MAP_BY_TYPE: dict = {}
 for _old_key, _new_key in _KEY_MAP.items():
     for _prefix, _ptype in _PREFIX_TYPE_MAP.items():
@@ -115,18 +104,15 @@ for _old_key, _new_key in _KEY_MAP.items():
             break
 
 
-def _get_provider_id(conn, provider_type: str) -> int:
-    """获取默认 provider_id"""
-    row = conn.execute(
-        "SELECT id FROM config_provider WHERE provider_type=? AND is_default=1 AND status='active' LIMIT 1",
-        (provider_type,)
-    ).fetchone()
-    if not row:
-        row = conn.execute(
-            "SELECT id FROM config_provider WHERE provider_type=? AND status='active' ORDER BY priority DESC, id LIMIT 1",
-            (provider_type,)
-        ).fetchone()
-    return row[0] if row else None
+def _resolve_old_key(name: str) -> tuple[str | None, str]:
+    """解析旧 key 名称 → (provider_type, new_key)"""
+    provider_type = None
+    for prefix, ptype in _PREFIX_TYPE_MAP.items():
+        if name.startswith(prefix):
+            provider_type = ptype
+            break
+    new_key = _KEY_MAP.get(name, name)
+    return provider_type, new_key
 
 
 def get_provider_info(provider_type: str) -> dict:
@@ -135,19 +121,17 @@ def get_provider_info(provider_type: str) -> dict:
     Returns:
         {"provider_id": int, "provider_name": str} 或 {} 如果无 Provider
     """
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        pid = _get_provider_id(conn, provider_type)
-        if not pid:
-            return {}
-        row = conn.execute(
-            "SELECT provider_name FROM config_provider WHERE id=?", (pid,)
-        ).fetchone()
-        return {"provider_id": pid, "provider_name": row[0] if row else str(pid)}
-    except sqlite3.OperationalError:
+    async def _fetch():
+        from app.models.config_provider import ConfigProvider
+        p = await ConfigProvider.get_default(provider_type)
+        if p:
+            return {"provider_id": p.id, "provider_name": p.provider_name}
         return {}
-    finally:
-        conn.close()
+
+    try:
+        return _run_sync(_fetch())
+    except Exception:
+        return {}
 
 
 def get_config(name: str, default: str = "") -> str:
@@ -158,34 +142,26 @@ def get_config(name: str, default: str = "") -> str:
     2. 旧 config 表（fallback）
     3. 返回 default
     """
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        # 解析 provider_type
-        provider_type = None
-        for prefix, ptype in _PREFIX_TYPE_MAP.items():
-            if name.startswith(prefix):
-                provider_type = ptype
-                break
+    provider_type, new_key = _resolve_old_key(name)
 
+    async def _fetch():
         if provider_type:
-            pid = _get_provider_id(conn, provider_type)
-            if pid:
-                # 先尝试用新 key 查
-                new_key = _KEY_MAP.get(name, name)
-                row = conn.execute(
-                    "SELECT config_value FROM provider_config_item WHERE provider_id=? AND config_key=?",
-                    (pid, new_key)
-                ).fetchone()
-                if row and row[0]:
-                    return row[0].strip().strip('`')
-
+            p = await ConfigProvider.get_default(provider_type)
+            if p:
+                item = await ProviderConfigItem.filter(
+                    provider_id=p.id, config_key=new_key
+                ).first()
+                if item and item.config_value:
+                    return item.config_value.strip().strip('`')
         # Fallback 到旧 config 表
-        row = conn.execute("SELECT value FROM config WHERE name=? AND is_enabled=1", (name,)).fetchone()
-        return row[0] if row else default
-    except sqlite3.OperationalError:
+        from app.models.config import Config
+        row = await Config.filter(name=name, is_enabled=True).first()
+        return row.value if row else default
+
+    try:
+        return _run_sync(_fetch())
+    except Exception:
         return default
-    finally:
-        conn.close()
 
 
 def get_config_map(category: str) -> dict:
@@ -193,39 +169,39 @@ def get_config_map(category: str) -> dict:
 
     返回值 key 为旧命名格式（如 OP_URL），兼容现有 service
     """
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        provider_type = _CATEGORY_TYPE_MAP.get(category, category)
-        pid = _get_provider_id(conn, provider_type)
-        if pid:
-            rows = conn.execute(
-                "SELECT config_key, config_value FROM provider_config_item WHERE provider_id=?",
-                (pid,)
-            ).fetchall()
-            if rows:
-                reverse_map = _REVERSE_KEY_MAP_BY_TYPE.get(provider_type, {})
-                result = {}
-                for new_key, value in rows:
-                    old_key = reverse_map.get(new_key, new_key)
-                    result[old_key] = value.strip().strip('`') if isinstance(value, str) else value
+    provider_type = _CATEGORY_TYPE_MAP.get(category, category)
 
-                # 合并旧 config 表中的数据（补充 provider 中缺失的 key）
-                old_rows = conn.execute(
-                    "SELECT name, value FROM config WHERE category=? AND is_enabled=1 ORDER BY sort_order",
-                    (category,)
-                ).fetchall()
-                for old_key, old_value in old_rows:
-                    if old_key not in result:
-                        result[old_key] = old_value
+    async def _fetch():
+        result = {}
+        from app.models.config_provider import ConfigProvider
+        from app.models.config import Config
+
+        p = await ConfigProvider.get_default(provider_type)
+        if p:
+            items = await ProviderConfigItem.filter(provider_id=p.id).all()
+            if items:
+                reverse_map = _REVERSE_KEY_MAP_BY_TYPE.get(provider_type, {})
+                for item in items:
+                    old_key = reverse_map.get(item.config_key, item.config_key)
+                    result[old_key] = item.config_value.strip().strip('`')
+
+                # 补充旧 config 表中 provider 缺失的 key
+                old_rows = await Config.filter(
+                    category=category, is_enabled=True
+                ).order_by("sort_order").all()
+                for row in old_rows:
+                    if row.name not in result:
+                        result[row.name] = row.value
                 return result
 
         # Fallback 到旧 config 表
-        rows = conn.execute(
-            "SELECT name, value FROM config WHERE category=? AND is_enabled=1 ORDER BY sort_order",
-            (category,)
-        ).fetchall()
-        return {k: v.strip().strip('`') if isinstance(v, str) else v for k, v in rows}
-    except sqlite3.OperationalError:
+        rows = await Config.filter(category=category, is_enabled=True).order_by("sort_order").all()
+        return {r.name: r.value for r in rows}
+
+    try:
+        return _run_sync(_fetch())
+    except Exception:
         return {}
-    finally:
-        conn.close()
+
+# 重新导出以便调用方统一引用
+from app.utils.provider_resolver import ProviderResolver  # noqa: E402, F401

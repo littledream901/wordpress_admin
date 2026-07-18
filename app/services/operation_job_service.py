@@ -44,7 +44,6 @@ _ACTION_PROVIDER_MAP: dict[str, str] = {
     "redirect": "cloudflare",
     "provision": "onepanel",
     "woo_import": "woo",
-    "assign_gmail": "pipeline",
 }
 for _hub_key in ["hub_create_env", "hub_create_account", "hub_update_env", "hub_website_control", "hub_gmc_check"]:
     _ACTION_PROVIDER_MAP[_hub_key] = "hubstudio"

@@ -55,8 +55,8 @@ class ProvisionTaskRunner(TaskRunner):
         return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 10}
 
     async def _run(self, job: OperationJob, site):
-        # 优先 pipeline Provider 的 max_concurrent，回退 settings
-        _mc_val = await ProviderResolver.get_config('pipeline', 'max_concurrent', default='')
+        # 从 onepanel Provider 读取 max_concurrent
+        _mc_val = await ProviderResolver.get_config('onepanel', 'max_concurrent', default='')
         max_cc = int(_mc_val) if _mc_val and _mc_val.isdigit() else 3
         async with asyncio.Semaphore(max_cc):
             await self._run_impl(job, site)

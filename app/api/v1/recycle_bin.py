@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Query
 
 from app.controllers.account import account_controller
+from app.controllers.ads_manager import ads_env_controller
 from app.controllers.config_provider import provider_controller
 from app.controllers.gmail_account import gmail_account_controller
 from app.controllers.site_pipeline import site_controller
@@ -16,6 +17,7 @@ _CONTROLLER_MAP = {
     RecycleBinType.gmail: gmail_account_controller,
     RecycleBinType.account: account_controller,
     RecycleBinType.provider: provider_controller,
+    RecycleBinType.ads: ads_env_controller,
 }
 
 # 类型 → 显示名称映射
@@ -24,6 +26,7 @@ _TYPE_LABELS = {
     RecycleBinType.gmail: "Gmail账号",
     RecycleBinType.account: "账号",
     RecycleBinType.provider: "配置提供者",
+    RecycleBinType.ads: "ADS账号",
 }
 
 
@@ -37,6 +40,8 @@ def _get_summary_row(obj_dict: dict, item_type: RecycleBinType) -> str:
         return f"[{obj_dict.get('account_type', '')}] {obj_dict.get('username', '')}"
     elif item_type == RecycleBinType.provider:
         return f"[{obj_dict.get('provider_type', '')}] {obj_dict.get('provider_name', '')}"
+    elif item_type == RecycleBinType.ads:
+        return f"[{obj_dict.get('ads_env_id', '')}] {obj_dict.get('domain', '')}"
     return ""
 
 

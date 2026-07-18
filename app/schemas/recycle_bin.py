@@ -8,6 +8,7 @@ class RecycleBinType(str, Enum):
     gmail = "gmail"
     account = "account"
     provider = "provider"
+    ads = "ads"
 
 
 class RecycleBinQuery(BaseModel):

@@ -31,10 +31,17 @@ class ShopifyCollectService:
     }
 
     def __init__(self, timeout: int = None):
-        from app.utils.provider_resolver import ProviderResolver
-        self.timeout = timeout if timeout is not None else int(ProviderResolver.sync_get_config("shopify", "request_timeout", "30"))
+        self.timeout = timeout if timeout is not None else self._read_default_timeout()
         self.session = httpx.Client(http2=True)
         self.session.headers.update(self.REQUEST_HEADERS)
+
+    @staticmethod
+    def _read_default_timeout() -> int:
+        try:
+            from app.utils.provider_resolver import ProviderResolver
+            return int(ProviderResolver.sync_get_config("shopify", "request_timeout", "30"))
+        except Exception:
+            return 30
 
     # ── URL 工具 ──────────────────────────────────────────────
 
@@ -188,39 +195,38 @@ class ShopifyCollectService:
         }
 
     @staticmethod
-    def _insert_product(source, source_url: str, parsed: Dict[str, Any]) -> None:
-        """去重写入产品到 SQLite（同步操作，在 asyncio.to_thread 内安全）"""
-        import sqlite3
-        conn = sqlite3.connect("db.sqlite3")
-        try:
-            exist = conn.execute(
-                "SELECT id FROM site_pipeline_shopify_product WHERE product_url=?",
-                (parsed["product_url"],),
-            ).fetchone()
-            if not exist:
-                conn.execute(
-                    "INSERT INTO site_pipeline_shopify_product "
-                    "(source_id, source_url, product_url, handle, title, vendor, product_type, tags, "
-                    "prod_info_json, status, assigned_status, imported_status, imported_result, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (
-                        source.id,
-                        source_url,
-                        parsed["product_url"],
-                        parsed["handle"],
-                        parsed["title"],
-                        parsed["vendor"],
-                        parsed["product_type"],
-                        parsed["tags"],
-                        parsed["prod_info_json"],
-                        "ready",
-                        "",
-                        "",
-                        "",
-                        datetime.now().isoformat(),
-                        datetime.now().isoformat(),
-                    ),
+    def _insert_product(source, source_url: str, product_data: dict) -> bool:
+        """去重写入产品（线程内安全调用 Tortoise ORM，兼容 MySQL/SQLite）"""
+        import asyncio
+        from app.models.shopify_collect import ShopifyProduct
+
+        url = product_data.get("product_url", "").strip()
+        if not url:
+            return False
+
+        async def _do():
+            existing = await ShopifyProduct.filter(product_url=url).first()
+            if existing:
+                return False
+            try:
+                await ShopifyProduct.create(
+                    source_id=source.id,
+                    source_url=source_url,
+                    product_url=url,
+                    handle=product_data.get("handle", ""),
+                    title=product_data.get("title", ""),
+                    vendor=product_data.get("vendor", ""),
+                    product_type=product_data.get("product_type", ""),
+                    tags=product_data.get("tags", ""),
+                    prod_info_json=product_data.get("prod_info_json", "{}"),
+                    status="pending",
+                    assigned_status="unassigned",
+                    imported_status="unimported",
+                    imported_result="{}",
                 )
-                conn.commit()
-        finally:
-            conn.close()
+                return True
+            except Exception as e:
+                _log.warning(f"[ShopifyCollect] 写入产品失败 {url}: {e}")
+                return False
+
+        return asyncio.run(_do())

@@ -250,7 +250,7 @@ create_site → apply_ssl → restore_db → restore_files → rebuild_after_fil
 
 ## Docker 部署
 
-> **部署前必读**: 请先完成 [部署检查清单](docs/deployment.md#部署前检查清单)，确保生产环境配置正确。
+> **部署前必读**: 请先阅读 [部署指南](deploy/deployment.md)，确保生产环境配置正确。
 
 ### 快速部署（推荐）
 
@@ -301,17 +301,26 @@ docker compose logs -f
 ### 容器架构
 
 ```
-┌──────────────────────────────────────────┐
-│  Docker Container (wordpress-admin)    │
-│                                          │
-│  Nginx (:80)                             │
-│    ├── /api/*   → uvicorn (:9999)        │
-│    │               Python FastAPI         │
-│    ├── /static/* → 静态文件                │
-│    └── /*       → SPA (index.html)       │
-│                                          │
-│  Volume: ./data → 持久化数据库/日志        │
-└──────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  Docker Network (app-network)                     │
+│                                                   │
+│  ┌────────────────────────────────────────────┐  │
+│  │  App 容器 (wordpress-admin)                │  │
+│  │  Nginx (:80)                               │  │
+│  │    ├── /api/*   → uvicorn (:9999)          │  │
+│  │    │               Python FastAPI           │  │
+│  │    ├── /static/* → 静态文件                  │  │
+│  │    └── /*       → SPA (index.html)         │  │
+│  │  Volumes: ./data, ./logs, ./static,        │  │
+│  │           ./uploads/feeds                   │  │
+│  └────────────────────────────────────────────┘  │
+│                                                   │
+│  ┌────────────────────────────────────────────┐  │
+│  │  DB 容器 (wordpress-admin-db)              │  │
+│  │  MySQL 8.0 (:3306)                          │  │
+│  │  Volume: mysql-data → /var/lib/mysql        │  │
+│  └────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────┘
 ```
 
 ### 环境变量参考

@@ -25,7 +25,7 @@ class ImportJob(BaseModel, TimestampMixin):
         ("failed", "失败"),
     ]
 
-    import_type = fields.CharField(max_length=32, choices=IMPORT_TYPES, description="导入类型", index=True)
+    import_type = fields.CharField(max_length=32, choices=IMPORT_TYPES, description="导入类型", db_index=True)
     file_name = fields.CharField(max_length=255, description="文件名")
     status = fields.CharField(max_length=16, default="pending", choices=STATUS_CHOICES, description="状态")
     success_count = fields.IntField(default=0, description="成功数量")

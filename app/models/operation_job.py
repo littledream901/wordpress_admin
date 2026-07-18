@@ -14,6 +14,7 @@ class OperationJob(BaseModel, TimestampMixin):
     RESOURCE_TYPES = [
         ("site", "站点"),
         ("gmail", "Gmail账号"),
+        ("ads", "ADS环境"),
         ("shopify_source", "采集源"),
         ("shopify_product", "商品"),
     ]
@@ -31,10 +32,22 @@ class OperationJob(BaseModel, TimestampMixin):
         ("hub_create_account", "Hub创建账号"),
         ("hub_update_env", "Hub更新环境"),
         ("hub_website_control", "Hub登录WP"),
+        ("hub_gmc_check", "Hub GMC检查"),
         ("import_sites", "导入站点"),
         ("import_gmail", "导入Gmail"),
         ("import_shopify_sources", "导入采集源"),
         ("import_shopify_products", "导入商品"),
+        ("batch_create", "批量创建站点"),
+        ("batch_delete", "批量删除站点"),
+        ("batch_dns", "批量DNS"),
+        ("delete_site", "删除站点"),
+        ("create_ads", "创建ADS环境"),
+        ("update_ads", "更新ADS环境"),
+        ("delete_ads", "删除ADS环境"),
+        ("ads_add_site", "ADS关联站点"),
+        ("ads_remove_site", "ADS移除站点"),
+        ("delete_gmail", "删除Gmail账号"),
+        ("unassign_gmail", "取消分配Gmail"),
     ]
 
     STATUS_CHOICES = [
@@ -49,11 +62,11 @@ class OperationJob(BaseModel, TimestampMixin):
         ("skipped", "已跳过"),
     ]
 
-    resource_type = fields.CharField(max_length=32, description="资源类型", index=True)
-    resource_id = fields.IntField(default=0, description="资源ID", index=True)
-    domain = fields.CharField(max_length=255, default="", description="关联域名", index=True)
-    action_type = fields.CharField(max_length=32, choices=ACTION_TYPES, description="操作类型", index=True)
-    status = fields.CharField(max_length=16, default="pending", choices=STATUS_CHOICES, description="任务状态", index=True)
+    resource_type = fields.CharField(max_length=32, description="资源类型", db_index=True)
+    resource_id = fields.IntField(default=0, description="资源ID", db_index=True)
+    domain = fields.CharField(max_length=255, default="", description="关联域名", db_index=True)
+    action_type = fields.CharField(max_length=32, choices=ACTION_TYPES, description="操作类型", db_index=True)
+    status = fields.CharField(max_length=16, default="pending", choices=STATUS_CHOICES, description="任务状态", db_index=True)
     step = fields.CharField(max_length=64, default="", description="当前步骤标识")
     total_steps = fields.IntField(default=1, description="总步骤数")
     payload_json = fields.TextField(default="{}", description="任务负载(JSON)")
@@ -61,7 +74,7 @@ class OperationJob(BaseModel, TimestampMixin):
     error_message = fields.TextField(default="", description="错误信息")
     worker_name = fields.CharField(max_length=128, default="", description="执行节点")
     last_heartbeat = fields.DatetimeField(null=True, description="最后心跳时间")
-    batch_id = fields.CharField(max_length=64, default="", description="批次ID（批量操作）", index=True)
+    batch_id = fields.CharField(max_length=64, default="", description="批次ID（批量操作）", db_index=True)
     retry_count = fields.IntField(default=0, description="已重试次数")
     max_retry = fields.IntField(default=3, description="最大重试次数")
     started_at = fields.DatetimeField(null=True, description="开始执行时间")

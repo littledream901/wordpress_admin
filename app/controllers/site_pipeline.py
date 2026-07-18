@@ -27,6 +27,7 @@ from app.services.onepanel_service import (
 from app.services.providers.dynadot_service import DynadotService
 from app.services.tasks.runner import task_runner
 from app.services.woo_import_service import WooImportService
+from app.services.importers import get_importer
 from app.utils.config_reader import get_config
 from app.utils.provider_resolver import ProviderResolver
 
@@ -37,7 +38,7 @@ _PROVISION_TIMEOUT_MINUTES = 30
 
 def _load_max_concurrent() -> int:
     try:
-        val = ProviderResolver.sync_get_config('pipeline', 'max_concurrent', '')
+        val = ProviderResolver.sync_get_config('onepanel', 'max_concurrent', '')
         if val and val.isdigit():
             return int(val)
     except Exception:
@@ -60,7 +61,7 @@ onepanel_wp_restorer = OnePanelWordPressRestorer(onepanel_api, onepanel_files)
 woo_import_service = WooImportService()
 
 _provision_semaphore = asyncio.Semaphore(_load_max_concurrent())
-_woo_import_semaphore = asyncio.Semaphore(_load_max_concurrent())
+_import_semaphore = asyncio.Semaphore(_load_max_concurrent())
 
 
 # ── 辅助工具函数 ──
@@ -102,6 +103,8 @@ def _run_dns_sync(site):
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
+        if site.platform == 'shopify':
+            return loop.run_until_complete(cloudflare_service.provision_shopify_dns(site))
         return loop.run_until_complete(cloudflare_service.provision_dns(site))
     finally:
         loop.close()
@@ -260,14 +263,39 @@ class SitePipelineController:
             site_dict['assign_to_name'] = ''
         gmail = await GmailAccount.filter(assigned_site_id=obj.id).first()
 
-        CORE_TYPES = ['cloudflare', 'dynadot', 'onepanel', 'hubstudio']
+        CORE_TYPES = ['cloudflare', 'dynadot', 'onepanel', 'hubstudio'] if obj.platform != 'shopify' \
+                     else ['cloudflare', 'dynadot', 'hubstudio', 'shopify']
+
+        # 批量查询：一次获取所有 bindings + 所有 provider 信息
+        bindings = await ResourceProviderBinding.filter(
+            resource_type='site', resource_id=site_id, provider_type__in=CORE_TYPES
+        ).all()
+        binding_map = {b.provider_type: b for b in bindings}
+        bound_provider_ids = [b.provider_id for b in bindings]
+        default_providers = await ConfigProvider.filter(
+            provider_type__in=CORE_TYPES, is_default=True, status='active'
+        ).all()
+        default_map = {}
+        for dp in default_providers:
+            if dp.provider_type not in default_map:
+                default_map[dp.provider_type] = dp
+        # 补充非默认的 active provider
+        for ptype in CORE_TYPES:
+            if ptype not in default_map:
+                dp = await ConfigProvider.filter(provider_type=ptype, status='active').order_by('-priority', 'id').first()
+                if dp:
+                    default_map[ptype] = dp
+
+        bound_pids = set(bound_provider_ids)
+        all_pids = bound_pids | {default_map[ptype].id for ptype in CORE_TYPES if ptype in default_map}
+        provider_records = await ConfigProvider.filter(id__in=list(all_pids)).all() if all_pids else []
+        provider_map = {p.id: p for p in provider_records}
+
         providers = {}
         for ptype in CORE_TYPES:
-            binding = await ResourceProviderBinding.filter(
-                resource_type='site', resource_id=site_id, provider_type=ptype
-            ).first()
+            binding = binding_map.get(ptype)
             if binding:
-                p = await ConfigProvider.filter(id=binding.provider_id).first()
+                p = provider_map.get(binding.provider_id)
                 providers[ptype] = {
                     'provider_id': binding.provider_id,
                     'provider_name': p.provider_name if p else f'#{binding.provider_id}',
@@ -275,7 +303,7 @@ class SitePipelineController:
                     'bound': True,
                 }
             else:
-                dp = await ConfigProvider.get_default(ptype)
+                dp = default_map.get(ptype)
                 providers[ptype] = {
                     'provider_id': dp.id if dp else None,
                     'provider_name': dp.provider_name if dp else '无默认',
@@ -427,11 +455,11 @@ class SitePipelineController:
                 if item_assign_to:
                     assigned_user = await User.get_or_none(id=item_assign_to)
                     site.create_by = item_assign_to
-                    site.dept_id = assigned_user.dept_id if assigned_user else (dept_id or 0)
+                    site.dept_id = assigned_user.dept_id if assigned_user else dept_id
                 else:
                     site.create_by = user_id if user_id else 0
                     item_dept_id = getattr(item, 'dept_id', None)
-                    site.dept_id = item_dept_id if item_dept_id is not None else (dept_id or 0)
+                    site.dept_id = item_dept_id if item_dept_id is not None else dept_id
                 await site.save()
                 results.append({"domain": item.domain, "ok": True, "error": ""})
             except Exception as e:
@@ -547,6 +575,8 @@ class SitePipelineController:
 
     async def provision_site(self, site_id: int) -> dict:
         site = await site_controller.get(id=site_id)
+        if site.platform == 'shopify':
+            return {"ok": False, "error": "Shopify 站点无需建站，请手动填写 Token", "code": 400}
         blocked = await self._check_provision_blocked(site_id)
         if blocked:
             return {"ok": False, "error": "该站点已有建站任务执行中", "code": 400}
@@ -566,6 +596,10 @@ class SitePipelineController:
             if not site:
                 results.append({"site_id": site_id, "ok": False, "error": "site not found"})
                 continue
+            if site.platform == 'shopify':
+                results.append({"site_id": site_id, "domain": site.domain, "ok": False,
+                              "error": "Shopify 站点无需建站"})
+                continue
             blocked = await self._check_provision_blocked(site_id)
             if blocked:
                 results.append({"site_id": site_id, "domain": site.domain, "ok": False, "error": "已有建站任务执行中"})
@@ -583,7 +617,8 @@ class SitePipelineController:
         if not cf_token or not cf_account:
             return {"ok": False, "error": "Cloudflare 未配置：请在 系统管理 → 提供商管理 中配置 Cloudflare API Token 和 Account ID", "code": 400}
         site = await site_controller.get(id=site_id)
-        if not site.server_ip:
+        # Shopify 站点无需 server_ip
+        if site.platform != 'shopify' and not site.server_ip:
             return {"ok": False, "error": "site server_ip is empty", "code": 400}
         job = await self._create_job(site_id, site.domain, "dns")
         asyncio.create_task(self._run_dns_single_bg(job, site))
@@ -604,7 +639,7 @@ class SitePipelineController:
         for sid in site_ids:
             try:
                 site = await site_controller.get(id=sid)
-                if not site or not site.server_ip:
+                if not site or (site.platform != 'shopify' and not site.server_ip):
                     invalid.append({"site_id": sid, "error": "no server_ip"})
                 else:
                     valid_sites.append(site)
@@ -729,18 +764,19 @@ class SitePipelineController:
         except Exception as e:
             await self._complete_job(job, ok=False, error=str(e))
 
-    # ── Woo Import ──
-    async def woo_import(self, site_id: int) -> dict:
+    # ── 产品导入 ──
+    async def import_products(self, site_id: int) -> dict:
         site = await site_controller.get(id=site_id)
+        importer = get_importer(site.platform)
         rows = await woo_import_service.select_products_for_site(site)
         if not rows:
             return {"ok": False, "error": "没有可用的 ready 产品供导入", "code": 400}
         job = await self._create_job(site_id, site.domain, "woo_import", total_steps=len(rows))
-        asyncio.create_task(self._run_woo_import_bg(job, site, pre_selected_rows=rows))
+        asyncio.create_task(self._run_import_bg(job, site, importer, pre_selected_rows=rows))
         return {"ok": True, "data": {"job_id": job.id, "domain": site.domain, "status": "running", "total": len(rows)}}
 
-    async def batch_woo_import(self, site_ids: List[int]) -> dict:
-        batch_id = f"woo-{int(time.time())}"
+    async def batch_import_products(self, site_ids: List[int]) -> dict:
+        batch_id = f"import-{int(time.time())}"
         sites = []
         results = []
         for site_id in site_ids:
@@ -753,48 +789,60 @@ class SitePipelineController:
             return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": 0, "success": 0, "fail": len(site_ids)}}
         configured_count = int(await ProviderResolver.get_config("woo", "import_product_count", default="10"))
         for site in sites:
+            importer = get_importer(site.platform)
             rows = await woo_import_service.select_products_for_site(site, import_count=configured_count)
             if not rows:
                 results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": "没有可用的 ready 产品"})
                 continue
             job = await self._create_job(site.id, site.domain, "woo_import", batch_id=batch_id, total_steps=len(rows))
-            asyncio.create_task(self._run_woo_import_bg(job, site, pre_selected_rows=rows))
+            asyncio.create_task(self._run_import_bg(job, site, importer, pre_selected_rows=rows))
             results.append({"site_id": site.id, "domain": site.domain, "ok": True, "job_id": job.id, "status": "running", "product_count": len(rows)})
         return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": len(results),
                 "success": sum(1 for r in results if r["ok"]), "fail": sum(1 for r in results if not r["ok"])}}
 
-    async def _run_woo_import_bg(self, job: OperationJob, site, pre_selected_rows=None):
-        async with _woo_import_semaphore:
+    async def _run_import_bg(self, job: OperationJob, site, importer, pre_selected_rows=None):
+        async with _import_semaphore:
             await self._update_job_step(job, "importing")
             try:
-                result = await woo_import_service.import_for_site(site, pre_selected_rows=pre_selected_rows)
+                result = await importer.import_products(site, pre_selected_rows)
                 ok = result.get("ok", False) if isinstance(result, dict) else False
                 await self._complete_job(job, ok=ok, result=result)
                 if ok and result.get("success", 0) > 0:
-                    await self._refresh_woo_product_count(site)
+                    if site.platform == 'shopify':
+                        await self._refresh_shopify_product_count(site)
+                    else:
+                        await self._refresh_product_count(site)
             except Exception as e:
                 await self._complete_job(job, ok=False, error=str(e))
 
-    async def refresh_woo_count(self, site_id: int) -> dict:
+    async def refresh_product_count(self, site_id: int) -> dict:
         site = await site_controller.get(id=site_id)
+        if site.platform == 'shopify':
+            if not site.shopify_store_url or not site.shopify_token:
+                return {"ok": False, "error": "Shopify Store URL 或 API Token 未配置", "code": 400}
+            try:
+                total = await self._refresh_shopify_product_count(site)
+                return {"ok": True, "data": {"site_id": site_id, "domain": site.domain, "product_count": total}}
+            except Exception as e:
+                return {"ok": False, "error": f"无法连接 Shopify API: {e}", "code": 500}
         if not site.woo_ck or not site.woo_cs:
             return {"ok": False, "error": "该站点未配置 WooCommerce API 密钥（woo_ck / woo_cs）", "code": 400}
         if not site.login_url:
             return {"ok": False, "error": "该站点未配置登录地址", "code": 400}
         try:
-            total = await self._refresh_woo_product_count(site)
-            return {"ok": True, "data": {"site_id": site_id, "domain": site.domain, "woo_product_count": total}}
+            total = await self._refresh_product_count(site)
+            return {"ok": True, "data": {"site_id": site_id, "domain": site.domain, "product_count": total}}
         except Exception as e:
             return {"ok": False, "error": f"无法连接 WooCommerce API: {e}", "code": 500}
 
-    async def _refresh_woo_product_count(self, site) -> int:
+    async def _refresh_product_count(self, site) -> int:
         from urllib.parse import urlparse
         from httpx import BasicAuth
         if not site.woo_ck or not site.woo_cs or not site.login_url:
             return 0
         parsed = urlparse(site.login_url)
         wc_api_url = f"{parsed.scheme}://{parsed.netloc}/wp-json/wc/v3/products"
-        ssl_val = await ProviderResolver.get_config("pipeline", "wp_verify_ssl", "false")
+        ssl_val = await ProviderResolver.get_config("onepanel", "wp_verify_ssl", "false")
         verify_ssl = ssl_val.lower() != "false"
         loop = asyncio.get_event_loop()
         resp = await loop.run_in_executor(
@@ -809,8 +857,31 @@ class SitePipelineController:
         )
         total_str = resp.headers.get("X-WP-Total", "0")
         total = int(total_str) if total_str.isdigit() else 0
-        site.woo_product_count = total
+        site.product_count = total
         await site.save()
+        return total
+
+    async def _refresh_shopify_product_count(self, site) -> int:
+        """通过 Shopify Admin API 查询远端产品总数。"""
+        if not site.shopify_store_url or not site.shopify_token:
+            return 0
+        store = site.shopify_store_url.rstrip('/')
+        if not store.startswith('http'):
+            store = f'https://{store}'
+        url = f'{store}/admin/api/2024-01/products/count.json'
+        async with httpx.AsyncClient(
+            headers={'X-Shopify-Access-Token': site.shopify_token},
+            timeout=15,
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                _log.warning(f'[ShopifyCount] HTTP {resp.status_code}: {resp.text[:200]}')
+                return 0
+            data = resp.json()
+            total = data.get('count', 0)
+        site.product_count = total
+        await site.save()
+        _log.info(f'[ShopifyCount] site={site.id} domain={site.domain} count={total}')
         return total
 
 

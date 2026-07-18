@@ -110,7 +110,16 @@ function buildApiTree(data) {
         unique_id: groupKey,
         path: groupKey,
         summary: groupLabel,
+        apiPrefix: '', // 从第一个子节点的 API path 提取英文模块前缀
         children: [],
+      }
+    }
+
+    // 从 API path 提取英文模块前缀：/api/v1/site-pipeline/site/list → site-pipeline
+    if (!groupedData[groupKey].apiPrefix) {
+      const parts = item['path'].replace(/^\//, '').split('/')
+      if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'v1') {
+        groupedData[groupKey].apiPrefix = parts[2]
       }
     }
 
@@ -180,51 +189,82 @@ function collectLeafMenuIds(nodes) {
 }
 
 // 菜单 → API 级联：勾选菜单时自动勾选对应模块的 API（及按钮）
-// 根据菜单 path 的最后一段匹配 API 路径前缀
-function matchMenuToApiGroup(menuPath, apiGroupSummary) {
-  if (!menuPath || !apiGroupSummary) return false
-  // 从菜单 path 提取关键词（如 system/user → user, site-pipeline/site-list → site-pipeline,site-list）
-  const menuSegs = menuPath.toLowerCase().split('/')
-  const apiSummaryLower = apiGroupSummary.toLowerCase()
-  // 尝试每个菜单路径段（从后往前）去匹配 API 路径
+// 匹配规则（按优先级）：
+//   1. API path 英文模块前缀匹配（如 site-pipeline ↔ sitepipeline）
+//   2. API 分组标签匹配（如 "站点流水线" 含中文时回退）
+function matchMenuToApiGroup(menuPath, apiGroupSummary, apiPrefix = '') {
+  if (!menuPath) return false
+  const menuSegs = menuPath.toLowerCase().split('/').filter(Boolean)
+
+  // 优先：用英文模块前缀匹配（最精确）
+  const cleanPrefix = apiPrefix.replace(/[-_]/g, '').toLowerCase()
+  if (cleanPrefix && cleanPrefix.length >= 3) {
+    for (const seg of menuSegs.reverse()) {
+      const cleanSeg = seg.replace(/[-_]/g, '')
+      if (cleanSeg.length < 3) continue
+      if (cleanSeg.includes(cleanPrefix) || cleanPrefix.includes(cleanSeg)) return true
+    }
+  }
+
+  // 回退：用 API 分组标签匹配
+  const apiClean = (apiGroupSummary || '').toLowerCase().replace(/[-_]/g, '')
+  if (!apiClean) return false
   for (const seg of menuSegs.reverse()) {
-    if (!seg) continue
-    // 去掉连字符：site-list → sitelist, SitePipeline → sitepipeline
     const cleanSeg = seg.replace(/[-_]/g, '')
-    const cleanSummary = apiSummaryLower.replace(/[-_]/g, '')
-    if (cleanSummary.includes(cleanSeg) || cleanSeg.includes(cleanSummary)) return true
+    if (cleanSeg.length < 3) continue
+    if (apiClean.includes(cleanSeg)) return true
   }
   return false
 }
 
+// 双向联动防循环标志
+let _skipApiWatch = false
+let _skipMenuWatch = false
+
+// 菜单 → API 级联：勾选/取消菜单时自动同步 API
 watch(menu_ids, (newIds, oldIds) => {
-  if (!apiOption.value.length) return
+  if (_skipMenuWatch || !apiOption.value.length) return
 
   const addedIds = newIds.filter((id) => !oldIds.includes(id))
   const removedIds = oldIds.filter((id) => !newIds.includes(id))
 
+  _skipApiWatch = true
+
+  // 收集所有需要添加的 API（先收集，最后一次性赋值，避免多次触发 watch）
+  const addSet = new Set(api_ids.value)
   for (const menuId of addedIds) {
     const menuNode = findMenuNode(menuOption.value, menuId)
     if (!menuNode) continue
+    // 仅对叶子菜单节点（无子节点）触发 API 级联
+    if (menuNode.children && menuNode.children.length > 0) continue
+    // 拼接父菜单路径用于匹配（父路径 + 自身路径覆盖更多前缀段）
+    const parentNode = findParentNode(menuOption.value, menuId)
+    const matchPath = parentNode ? parentNode.path + '/' + menuNode.path : menuNode.path
+    // 遍历所有 API 分组，添加所有匹配的（同一模块可能有多个 tag）
     for (const group of apiOption.value) {
-      if (matchMenuToApiGroup(menuNode.path, group.summary)) {
-        const childIds = group.children.map((c) => c.unique_id)
-        api_ids.value = [...new Set([...api_ids.value, ...childIds])]
-        break
+      if (matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)) {
+        group.children.forEach((c) => addSet.add(c.unique_id))
       }
     }
   }
 
+  // 收集需要移除的 API
+  const removeSet = new Set()
   for (const menuId of removedIds) {
     const menuNode = findMenuNode(menuOption.value, menuId)
     if (!menuNode) continue
+    if (menuNode.children && menuNode.children.length > 0) continue
+    const menuParent = findParentNode(menuOption.value, menuId)
+    const menuMatchPath = menuParent ? menuParent.path + '/' + menuNode.path : menuNode.path
     const stillChecked = newIds.some((id) => {
       const node = findMenuNode(menuOption.value, id)
       if (!node) return false
+      const nodeParent = findParentNode(menuOption.value, id)
+      const nodeMatchPath = nodeParent ? nodeParent.path + '/' + node.path : node.path
       for (const group of apiOption.value) {
         if (
-          matchMenuToApiGroup(node.path, group.summary) &&
-          matchMenuToApiGroup(menuNode.path, group.summary)
+          matchMenuToApiGroup(nodeMatchPath, group.summary, group.apiPrefix) &&
+          matchMenuToApiGroup(menuMatchPath, group.summary, group.apiPrefix)
         ) {
           return true
         }
@@ -233,14 +273,66 @@ watch(menu_ids, (newIds, oldIds) => {
     })
     if (!stillChecked) {
       for (const group of apiOption.value) {
-        if (matchMenuToApiGroup(menuNode.path, group.summary)) {
-          const childIds = new Set(group.children.map((c) => c.unique_id))
-          api_ids.value = api_ids.value.filter((id) => !childIds.has(id))
-          break
+        if (matchMenuToApiGroup(menuMatchPath, group.summary, group.apiPrefix)) {
+          group.children.forEach((c) => removeSet.add(c.unique_id))
         }
       }
     }
   }
+
+  // 一次性应用（先添加再移除，移除优先级高于添加）
+  if (removeSet.size > 0) {
+    removeSet.forEach((id) => addSet.delete(id))
+  }
+  api_ids.value = [...addSet]
+
+  _skipApiWatch = false
+})
+
+// API → 菜单 反向联动：当某模块所有 API 都被取消勾选时，自动取消对应菜单
+watch(api_ids, (newIds, oldIds) => {
+  if (_skipApiWatch || !apiOption.value.length || !menuOption.value.length) return
+
+  _skipMenuWatch = true
+
+  for (const group of apiOption.value) {
+    const childIds = group.children.map((c) => c.unique_id)
+    const checkedInGroup = newIds.filter((id) => childIds.includes(id))
+    const prevCheckedInGroup = oldIds.filter((id) => childIds.includes(id))
+
+    // 从全无 → 有选中：勾选对应菜单
+    if (prevCheckedInGroup.length === 0 && checkedInGroup.length > 0) {
+      const leafIds = collectLeafMenuIds(menuOption.value)
+      for (const leafId of leafIds) {
+        const node = findMenuNode(menuOption.value, leafId)
+        if (!node) continue
+        const p = findParentNode(menuOption.value, leafId)
+        const matchPath = p ? p.path + '/' + node.path : node.path
+        if (matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)) {
+          if (!menu_ids.value.includes(leafId)) {
+            menu_ids.value = [...menu_ids.value, leafId]
+          }
+        }
+      }
+    }
+
+    // 从有 → 全无：取消勾选对应菜单
+    if (prevCheckedInGroup.length > 0 && checkedInGroup.length === 0) {
+      const leafIds = collectLeafMenuIds(menuOption.value)
+      const toRemove = leafIds.filter((leafId) => {
+        const node = findMenuNode(menuOption.value, leafId)
+        if (!node) return false
+        const p = findParentNode(menuOption.value, leafId)
+        const matchPath = p ? p.path + '/' + node.path : node.path
+        return matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)
+      })
+      if (toRemove.length > 0) {
+        menu_ids.value = menu_ids.value.filter((id) => !toRemove.includes(id))
+      }
+    }
+  }
+
+  _skipMenuWatch = false
 })
 
 // 递归查找菜单节点
@@ -249,6 +341,20 @@ function findMenuNode(nodes, id) {
     if (node.id === id) return node
     if (node.children && node.children.length > 0) {
       const found = findMenuNode(node.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// 查找菜单节点的父节点
+function findParentNode(nodes, childId, parent = null) {
+  for (const node of nodes) {
+    if (node.children && node.children.length > 0) {
+      for (const child of node.children) {
+        if (child.id === childId) return node
+      }
+      const found = findParentNode(node.children, childId, node)
       if (found) return found
     }
   }
@@ -367,10 +473,11 @@ const columns = [
 
                   menuOption.value = menusResponse.data
                   rawApiData.value = apisResponse.data
-                  menu_ids.value = (roleAuthorizedResponse.data.menus || []).map((v) => v.id)
+                  // 先设 api_ids 再设 menu_ids，确保 menu_ids watch 在此基础上追加
                   api_ids.value = (roleAuthorizedResponse.data.apis || []).map(
                     (v) => v.method.toLowerCase() + v.path
                   )
+                  menu_ids.value = (roleAuthorizedResponse.data.menus || []).map((v) => v.id)
 
                   // 填充数据权限配置
                   const apiDataScopes = roleAuthorizedResponse.data.data_scopes || []

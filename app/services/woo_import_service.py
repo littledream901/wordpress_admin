@@ -56,7 +56,7 @@ class WooRequestLimiter:
                 self.error_cooldown_seconds = float(cfg.get("error_cooldown_seconds", self.error_cooldown_seconds))
                 self.max_error_cooldown_seconds = float(cfg.get("max_error_cooldown_seconds", self.max_error_cooldown_seconds))
             # 读取 SSL 验证配置（默认不验证，避免 Cloudflare 代理导致握手超时）
-            ssl_val = ProviderResolver.sync_get_config("pipeline", "wp_verify_ssl", "false")
+            ssl_val = ProviderResolver.sync_get_config("onepanel", "wp_verify_ssl", "false")
             self.verify_ssl = ssl_val.lower() != "false"
         except Exception:
             pass
@@ -212,7 +212,7 @@ async def _fetch_and_update_feed_link(site: Site) -> None:
     if not site.ctx_refresh_url:
         return
 
-    _wp_ssl_val = await ProviderResolver.get_config('pipeline', 'wp_verify_ssl', default='true')
+    _wp_ssl_val = await ProviderResolver.get_config('onepanel', 'wp_verify_ssl', default='true')
     wp_verify_ssl = _wp_ssl_val.lower() != 'false'
 
     async with httpx.AsyncClient(timeout=60, verify=wp_verify_ssl, follow_redirects=True) as client:

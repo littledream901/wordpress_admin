@@ -271,7 +271,7 @@ class HubStudioOrchestrationService:
         return await HubStudioJob.filter(id=job_id).first()
 
     async def retry_job(self, job_id: int, execute_now: bool = False) -> Optional[HubStudioJob]:
-        """重试失败任务"""
+        """重试失败任务，同步重置关联的 OperationJob"""
         job = await HubStudioJob.filter(id=job_id).first()
         if not job:
             return None
@@ -281,6 +281,20 @@ class HubStudioOrchestrationService:
         job.started_at = None
         job.finished_at = None
         await job.save()
+
+        # 同步重置关联的 OperationJob 状态
+        op_job = await OperationJob.filter(
+            resource_type="site", resource_id=job.site_id,
+            action_type=f"hub_{job.job_type}",
+            status__in=["running", "failed"],
+        ).order_by("-id").first()
+        if op_job:
+            op_job.status = "pending"
+            op_job.error_message = ""
+            op_job.finished_at = None
+            await op_job.save()
+            logger.info(f"HubStudio 重试同步 OperationJob: id={op_job.id}")
+
         logger.info(f"HubStudio 任务已重试: id={job.id}, retry={job.retry_count}")
 
         if execute_now:
@@ -559,6 +573,44 @@ class HubStudioOrchestrationService:
     async def trigger_hub_gmc_check(self, site_id: int, provider_id: int = 0,
                                      execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
         return await self.dispatch_for_site(site_id, "gmc_check", provider_id=provider_id, execute_now=execute_now)
+
+    async def trigger_hub_open_env(self, site_id: int, provider_id: int = 0) -> dict:
+        """直接打开 HubStudio 浏览器环境（不创建任务，同步执行）
+
+        调用 HubStudio Connector 的 browser/start API 启动浏览器窗口。
+        仅当后端与 Connector 运行在同一台机器时可用。
+        """
+        site = await Site.filter(id=site_id).first()
+        if not site:
+            raise SiteNotFoundError(site_id=site_id)
+        if not site.hub_env_id:
+            raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行创建环境")
+
+        # 获取 provider 配置并启动 runtime
+        provider_config = await self._get_provider_config(provider_id)
+        if not provider_config.get("connector_path"):
+            raise ValueError("Provider 未配置 connector_path，无法直接打开浏览器")
+
+        from app.services.hubstudio.runtime import HubStudioRuntime
+        from app.services.hubstudio.client import HubStudioClient
+
+        runtime = HubStudioRuntime(
+            connector_path=provider_config["connector_path"],
+            http_port=provider_config.get("http_port", 6873),
+        )
+
+        if not runtime.is_port_open():
+            runtime.start()
+            import time
+            for _ in range(10):
+                if runtime.is_port_open():
+                    break
+                time.sleep(1)
+
+        client = HubStudioClient(base_url=f"http://localhost:{runtime.http_port}")
+        client.start_browser(int(site.hub_env_id), isHeadless=False)
+
+        return {"status": "success", "message": f"浏览器已启动: {site.domain}"}
 
     # ── 内部辅助 ──
 

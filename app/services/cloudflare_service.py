@@ -59,6 +59,19 @@ class CloudflareService:
             return z['id'], z.get('name_servers') or [], 'pending'
         return None, [], ''
 
+    def delete_records_by_type(self, zone_id: str, record_type: str) -> int:
+        """删除 Zone 下指定类型的所有 DNS 记录，返回删除数量"""
+        data = self._get(f'/zones/{zone_id}/dns_records', type=record_type, per_page=100)
+        if not data.get('success'):
+            return 0
+        deleted = 0
+        for record in (data.get('result') or []):
+            resp = self._request('DELETE', f'/zones/{zone_id}/dns_records/{record["id"]}')
+            if resp.get('success'):
+                deleted += 1
+                logger.info("已删除 DNS %s 记录: %s → %s", record_type, record.get('name'), record.get('content'))
+        return deleted
+
     def add_or_update_a_record(self, zone_id: str, record_name: str, target_ip: str) -> bool:
         data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='A')
         if not data.get('success'):
@@ -68,6 +81,22 @@ class CloudflareService:
         if records:
             record = records[0]
             if record.get('content') == target_ip and record.get('proxied') == self.proxied:
+                return True
+            data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
+            return bool(data.get('success'))
+        data = self._post(f'/zones/{zone_id}/dns_records', payload)
+        return bool(data.get('success'))
+
+    def add_or_update_cname_record(self, zone_id: str, record_name: str, target: str) -> bool:
+        """添加或更新 CNAME 记录"""
+        data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='CNAME')
+        if not data.get('success'):
+            return False
+        payload = {'type': 'CNAME', 'name': record_name, 'content': target, 'ttl': self.ttl, 'proxied': self.proxied}
+        records = data.get('result') or []
+        if records:
+            record = records[0]
+            if record.get('content') == target and record.get('proxied') == self.proxied:
                 return True
             data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
             return bool(data.get('success'))
@@ -135,4 +164,82 @@ class CloudflareService:
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': root_ok, 'www_ok': www_ok,
             'dynadot_result': dynadot_result,
+        }
+
+    async def provision_shopify_dns(self, site: Site) -> Dict[str, Any]:
+        """Shopify 站点 DNS 配置：
+        1. 获取/创建 Cloudflare Zone + 自动 Dynadot NS
+        2. 删除域名上所有 A 和 AAAA 记录
+        3. A 记录 @ → 23.227.38.65
+        4. CNAME 记录 www → shops.myshopify.com.
+        """
+        SHOPIFY_IP = '23.227.38.65'
+        SHOPIFY_CNAME = 'shops.myshopify.com.'
+
+        started = datetime.now()
+        zone_id, ns, status = self.get_or_create_zone(site.domain)
+        if not zone_id:
+            raise CloudflareError("create zone", detail=f"domain={site.domain}")
+
+        dynadot_result = None
+        if status == 'pending' or status == 'invalid_nameservers':
+            if status == 'invalid_nameservers':
+                logger.warning("{{domain:{}}} 域名 NS 状态异常(invalid_nameservers)，执行修复 NS 操作".format(site.domain))
+            else:
+                logger.info("{{domain:{}}} 全新域名 Zone，调用 Dynadot API 修改 NS 服务器".format(site.domain))
+            try:
+                from app.services.providers.dynadot_service import DynadotService
+                dynadot_svc = DynadotService()
+                dynadot_result = dynadot_svc.set_nameserver(site.domain, ns)
+                ok = dynadot_result.get("success", False)
+                site.dynadot_status = "ns_updated" if ok else f"ns_failed:{str(dynadot_result.get('error',''))[:80]}"
+                logger.info("{{domain:{}}} Dynadot NS 修改结果: {}".format(site.domain, '成功' if ok else '失败'))
+            except Exception as e:
+                dynadot_result = {"success": False, "error": str(e)}
+                site.dynadot_status = f"ns_failed:{str(e)[:80]}"
+                logger.error("{{domain:{}}} Dynadot NS 修改异常: {}".format(site.domain, str(e)))
+        else:
+            logger.info("{{domain:{}}} Zone 状态为 {}，无需修改 NS".format(site.domain, status))
+            site.dynadot_status = f"zone_{status}"
+
+        # 删除域名上所有 A 和 AAAA 记录
+        deleted_a = self.delete_records_by_type(zone_id, 'A')
+        deleted_aaaa = self.delete_records_by_type(zone_id, 'AAAA')
+        logger.info("{{domain:{}}} Shopify DNS: 已删除 {} 条 A 记录, {} 条 AAAA 记录".format(
+            site.domain, deleted_a, deleted_aaaa))
+
+        # A 记录：@ → Shopify IP
+        root_ok = self.add_or_update_a_record(zone_id, site.domain, SHOPIFY_IP)
+        # CNAME 记录：www → shops.myshopify.com.
+        www_ok = self.add_or_update_cname_record(zone_id, f'www.{site.domain}', SHOPIFY_CNAME)
+
+        site.cloudflare_status = '已解析' if root_ok and www_ok else '部分失败'
+
+        now = datetime.now()
+        log_entry = json.dumps({
+            "ts": now.isoformat(),
+            "source": "cloudflare_shopify_dns",
+            "action": "Shopify DNS 解析 + NS 配置",
+            "status": "success" if (root_ok and www_ok) else "partial_fail",
+            "started_at": started.isoformat(),
+            "completed_at": now.isoformat(),
+            "duration_ms": int((now - started).total_seconds() * 1000),
+            "zone_id": zone_id,
+            "zone_status": status,
+            "name_servers": ns,
+            "root_ok": root_ok,
+            "www_ok": www_ok,
+            "dynadot_result": dynadot_result,
+            "deleted_a": deleted_a,
+            "deleted_aaaa": deleted_aaaa,
+            "provider": get_provider_info("cloudflare"),
+        }, ensure_ascii=False)
+        site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
+
+        await site.save()
+        return {
+            'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
+            'root_ok': root_ok, 'www_ok': www_ok,
+            'dynadot_result': dynadot_result,
+            'deleted_a': deleted_a, 'deleted_aaaa': deleted_aaaa,
         }

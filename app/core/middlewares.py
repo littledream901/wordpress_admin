@@ -48,7 +48,7 @@ class SimpleBaseMiddleware:
     async def before_request(self, request: Request):
         pass
 
-    async def after_request(self, request: Request):
+    async def after_request(self, request: Request, status_code: int = 0):
         pass
 
 
@@ -117,7 +117,7 @@ class BackGroundTaskMiddleware(SimpleBaseMiddleware):
     async def before_request(self, request):
         await BgTasks.init_bg_tasks_obj()
 
-    async def after_request(self, request):
+    async def after_request(self, request, status_code: int = 0):
         await BgTasks.execute_tasks()
 
 

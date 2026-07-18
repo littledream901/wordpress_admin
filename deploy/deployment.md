@@ -43,12 +43,13 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 
 ```bash
 git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
-cd /opt/wordpress-admin
+
 ```
 
 ### 步骤 2：一键部署
 
 ```bash
+cd /opt/wordpress-admin
 bash deploy/deploy.sh init
 ```
 
@@ -260,6 +261,39 @@ DB_SQLITE_PATH=./data/db.sqlite3
 
 然后使用不含 `db` 服务的 `docker-compose.yml` 启动。
 
+### 场景四：远程连接数据库（IDE / 客户端工具）
+
+使用 `deploy.sh init` 部署后，MySQL 远程连接已**自动配置**：
+
+- **端口映射**：`docker-compose.yml` 默认将 MySQL 的 `3306` 端口映射到宿主机 `127.0.0.1:3306`（可通过 `.env` 中 `MYSQL_PORT` 自定义）
+- **SSL 要求**：`deploy.sh` 已自动执行 `ALTER USER ... REQUIRE NONE`，admin 和 root 用户均可直接远程连接
+
+**连接信息（admin 用户）：**
+
+| 配置项 | 值 |
+|--------|-----|
+| Host | 服务器公网 IP |
+| Port | 3306（或 `.env` 中 `MYSQL_PORT` 指定的端口） |
+| User | `admin`（`.env` 中 `DB_USER` 的值） |
+| Password | `.env` 中 `DB_PASSWORD` 的值 |
+| Database | `vue_fastapi_admin` |
+
+**连接信息（root 用户）：**
+
+| 配置项 | 值 |
+|--------|-----|
+| Host | 服务器公网 IP |
+| Port | 3306（或 `.env` 中 `MYSQL_PORT` 指定的端口） |
+| User | `root` |
+| Password | `.env` 中 `MYSQL_ROOT_PASSWORD` 的值 |
+| Database | 留空（root 可查看所有库） |
+
+> **安全提醒**：默认端口映射仅绑定 `127.0.0.1`，外部无法直连。如需从外网访问，需修改 `.env` 中 `MYSQL_PORT` 为 `0.0.0.0:3306`（不推荐）。更安全的做法是使用 SSH 隧道：
+> ```bash
+> ssh -L 3307:127.0.0.1:3306 root@服务器IP
+> ```
+> 然后本地连接 `127.0.0.1:3307`。
+
 ---
 
 ## deploy.sh 命令参考
@@ -305,7 +339,7 @@ docker compose exec -T db mysqldump -uadmin -p"$(grep DB_PASSWORD .env | cut -d=
 tar -czf "static_backup_$(date +%Y%m%d_%H%M%S).tar.gz" static/
 
 # 定时备份（crontab，每天凌晨 3 点）
-# 0 3 * * * cd /opt/wordpress-admin && docker compose exec -T db mysqldump -uadmin -p"your-password" wordpres_admin > /backup/db_$(date +\%Y\%m\%d).sql
+# 0 3 * * * cd /opt/wordpress-admin && docker compose exec -T db mysqldump -uadmin -p"your-password" vue_fastapi_admin > /backup/db_$(date +\%Y\%m\%d).sql
 ```
 
 ### MySQL 恢复
@@ -390,7 +424,7 @@ server {
 
 ```caddyfile
 admin.your-domain.com {
-    reverse_proxy 127.0.0.1:80
+    reverse_proxy 127.0.0.1:18080
     encode gzip
 }
 ```
@@ -463,9 +497,79 @@ docker compose exec app ls -la static/avatars/
 
 ### Q: 从 SQLite 迁移到 MySQL
 
-1. 导出现有数据（SQLite → JSON）
-2. 修改 `.env` 为 MySQL 配置
-3. 重新部署后导入数据
+1. 导出现有数据：
+
+```bash
+# 在项目目录下执行，将 SQLite 数据导出为 JSON
+docker compose exec app python -c "
+import asyncio, json
+from tortoise import Tortoise
+from app.settings import TORTOISE_ORM
+
+async def export_data():
+    await Tortoise.init(config=TORTOISE_ORM)
+    conn = Tortoise.get_connection('default')
+    # 导出所有业务表（排除 aerich 迁移表）
+    tables = ['users', 'roles', 'menus', 'apis', 'depts', 'auditlog',
+              'config', 'configprovider', 'sites', 'gmails', 'shopify_sources',
+              'shopify_products', 'operation_jobs', 'accounts']
+    dump = {}
+    for table in tables:
+        try:
+            rows = await conn.execute_query(f'SELECT * FROM {table}')
+            dump[table] = rows
+        except Exception:
+            pass
+    with open('data/export.json', 'w', encoding='utf-8') as f:
+        json.dump(dump, f, ensure_ascii=False, default=str)
+    print('数据已导出到 data/export.json')
+
+asyncio.run(export_data())
+"
+```
+
+2. 备份旧数据目录：
+
+```bash
+cp data/db.sqlite3 data/db.sqlite3.bak
+```
+
+3. 修改 `.env` 为 MySQL 配置（参考上方环境配置说明），然后重新部署：
+
+```bash
+bash deploy/deploy.sh update
+```
+
+4. 导入数据（重新部署后执行）：
+
+```bash
+docker compose exec app python -c "
+import asyncio, json
+from tortoise import Tortoise
+from app.settings import TORTOISE_ORM
+
+async def import_data():
+    await Tortoise.init(config=TORTOISE_ORM)
+    conn = Tortoise.get_connection('default')
+    with open('data/export.json', 'r', encoding='utf-8') as f:
+        dump = json.load(f)
+    for table, rows in dump.items():
+        if rows:
+            # 按表逐条插入，跳过自增 ID 让数据库自动分配
+            for row in rows:
+                keys = [k for k in row.keys() if k != 'id']
+                placeholders = ', '.join(['%s'] * len(keys))
+                columns = ', '.join(keys)
+                values = [row[k] for k in keys]
+                await conn.execute_query(
+                    f'INSERT INTO {table} ({columns}) VALUES ({placeholders})',
+                    values
+                )
+    print('数据导入完成')
+
+asyncio.run(import_data())
+"
+```
 
 ---
 

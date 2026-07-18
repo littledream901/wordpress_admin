@@ -1,4 +1,4 @@
-"""站点流水线 API —— 站点 CRUD / 批量操作 / DNS / 建站 / Dynadot / HubStudio / Woo"""
+"""站点流水线 API —— 站点 CRUD / 批量操作 / DNS / 建站 / Dynadot / HubStudio / 产品导入"""
 import asyncio
 import logging
 import time
@@ -73,7 +73,14 @@ async def update_site(site_in: SiteUpdate):
 
 @router.post('/site/delete', summary='删除站点（同时异步删除 1Panel 网站）')
 async def delete_site(site_id: int = Query(...)):
+    site = await site_controller.get_or_none(id=site_id)
     result = await site_pipeline_controller.delete_site(site_id)
+    if site:
+        from app.services.operation_job_service import operation_job_service
+        await operation_job_service.create_task(
+            resource_type="site", resource_id=site.id,
+            action_type="delete_site", domain=site.domain,
+        )
     return Success(msg='已移入回收站')
 
 
@@ -165,9 +172,9 @@ async def batch_hub_dispatch(site_ids: list[int] = Body(...), job_type: str = Bo
                          "fail": sum(1 for r in results if not r["ok"])})
 
 
-@router.post('/site/batch-woo-import', summary='批量执行 Woo 导入')
-async def batch_woo_import(site_ids: list[int] = Body(...)):
-    result = await site_pipeline_controller.batch_woo_import(site_ids)
+@router.post('/site/batch-woo-import', summary='批量产品导入')
+async def batch_import_products(site_ids: list[int] = Body(...)):
+    result = await site_pipeline_controller.batch_import_products(site_ids)
     data = result['data']
     return Success(data=data)
 
@@ -208,19 +215,19 @@ async def provision_redirect(site_id: int, target_url: str = Body('', embed=True
     return Fail(code=result.get('code', 500), msg=str(result.get('error')))
 
 
-@router.post('/site/{site_id}/woo-import', summary='触发 Woo 商品导入')
-async def woo_import(site_id: int):
-    result = await site_pipeline_controller.woo_import(site_id)
+@router.post('/site/{site_id}/woo-import', summary='触发产品导入')
+async def import_products(site_id: int):
+    result = await site_pipeline_controller.import_products(site_id)
     if result['ok']:
         return Success(data=result['data'], msg=f'正在导入 {result["data"]["total"]} 个产品，请在任务中心查看进度')
     return Fail(code=result.get('code', 400), msg=result.get('error'))
 
 
-@router.post('/site/{site_id}/refresh-woo-count', summary='同步站点 WooCommerce 远端产品数量')
-async def refresh_woo_count(site_id: int):
-    result = await site_pipeline_controller.refresh_woo_count(site_id)
+@router.post('/site/{site_id}/refresh-woo-count', summary='同步站点远端产品数量')
+async def refresh_product_count(site_id: int):
+    result = await site_pipeline_controller.refresh_product_count(site_id)
     if result['ok']:
-        return Success(data=result['data'], msg=f'远端产品总数: {result["data"]["woo_product_count"]}')
+        return Success(data=result['data'], msg=f'远端产品总数: {result["data"]["product_count"]}')
     return Fail(code=result.get('code', 500), msg=result.get('error'))
 
 
@@ -359,6 +366,12 @@ async def trigger_hub_gmc_check(site_id: int, provider_id: int = Body(0, embed=T
     return Success(data={"job": await job.to_dict(), "result": result,
                          "mode": "sync" if execute_now else "async"},
                    msg='Hub GMC 状态检查已执行' if execute_now else 'Hub GMC 状态检查任务已派发（等待 Agent）')
+
+
+@router.post('/site/{site_id}/hub-open-env', summary='打开 Hub 浏览器环境')
+async def trigger_hub_open_env(site_id: int, provider_id: int = Body(0, embed=True)):
+    result = await hubstudio_service.trigger_hub_open_env(site_id, provider_id=provider_id)
+    return Success(data=result, msg=f'浏览器环境已打开')
 
 
 # ══════════════════════════════════════════════════════════════════════════

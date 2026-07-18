@@ -11,6 +11,7 @@ from app.models.shopify_collect import ShopifyProduct, ShopifySource
 from app.schemas.shopify_collect import ShopifyProductUpdate, ShopifySourceCreate, ShopifySourceUpdate
 from app.services.shopify_collect_service import ShopifyCollectService
 from app.services.woo_import_service import WooImportService
+from app.services.importers import get_importer
 
 shopify_collect_service = ShopifyCollectService()
 woo_import_service = WooImportService()

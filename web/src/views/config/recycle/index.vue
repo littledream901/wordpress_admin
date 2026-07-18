@@ -78,6 +78,7 @@ const typeOptions = [
   { value: 'gmail', label: 'Gmail' },
   { value: 'account', label: '账号' },
   { value: 'provider', label: '配置' },
+  { value: 'ads', label: 'ADS' },
 ]
 
 // 详情字段分组定义
@@ -102,6 +103,9 @@ const FIELD_GROUPS = {
   provider: [
     { title: '基本信息', keys: ['id', 'provider_name', 'provider_type', 'is_default', 'status', 'priority', 'created_at', 'updated_at'] },
     { title: '其他', keys: ['description', 'remark', 'api_version', 'base_url', 'error_message'] },
+  ],
+  ads: [
+    { title: '基本信息', keys: ['id', 'ads_env_id', 'domain', 'status', 'remark', 'created_at', 'updated_at', 'deleted_at'] },
   ],
 }
 
@@ -240,7 +244,7 @@ const LABEL_MAP = {
   hub_status: 'Hub状态', hub_env_id: 'Hub环境ID', hub_env_name: 'Hub环境名称',
   hub_account_id: 'Hub账号ID', pipeline_status: '流水线状态',
   pipeline_log: '流水线日志', gmc_data: 'GMC数据', gmc_status: 'GMC状态',
-  woo_product_count: '商品数量', woo_import_status: 'Woo导入状态',
+  product_count: '商品数量', woo_import_status: 'Woo导入状态',
   username: '用户名', password: '密码', assigned_site_id: '分配站点ID', assigned_site_domain: '分配站点域名',
   last_name: '姓', first_name: '名', full_name: '全名', phone: '电话', recovery_email: '恢复邮箱',
   country: '国家', province_state: '省/州', city: '城市', zip_code: '邮编',
@@ -249,6 +253,7 @@ const LABEL_MAP = {
   account_type: '账号类型', env_id: '环境ID', provider_id: 'Provider ID', two_fa: '2FA', remark: '备注',
   provider_name: 'Provider名称', provider_type: 'Provider类型', is_default: '默认', priority: '优先级',
   description: '描述', base_url: '基础URL', api_version: 'API版本', error_message: '错误信息',
+  ads_env_id: 'ADS环境ID', domain: '域名', deleted_at: '删除时间',
 }
 
 function fieldLabel(key) {

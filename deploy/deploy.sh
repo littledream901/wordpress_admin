@@ -142,9 +142,15 @@ init_deploy() {
 
         sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$SECRET/" .env
         sed -i "s/^DEFAULT_PASSWORD=.*/DEFAULT_PASSWORD=$DEFAULT_PW/" .env
-        sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
-        sed -i "s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
-        log "已生成 .env（随机密钥）"
+        # 切换为 MySQL（.env.example 默认为 SQLite 适合本地开发）
+        sed -i "s/^DB_ENGINE=.*/DB_ENGINE=mysql/" .env
+        sed -i "s/^# DB_HOST=.*/DB_HOST=db/" .env
+        sed -i "s/^# DB_PORT=.*/DB_PORT=3306/" .env
+        sed -i "s/^# DB_USER=.*/DB_USER=admin/" .env
+        sed -i "s/^# DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
+        sed -i "s/^# DB_NAME=.*/DB_NAME=vue_fastapi_admin/" .env
+        sed -i "s/^# MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
+        log "已生成 .env（随机密钥，MySQL 模式）"
         echo ""
         echo -e "  ${YELLOW}管理员初始密码: ${DEFAULT_PW}${NC}"
         echo -e "  ${YELLOW}请妥善保存，可通过 .env 中 DEFAULT_PASSWORD 查看${NC}"
@@ -162,6 +168,21 @@ init_deploy() {
             sed -i "s/^DEFAULT_PASSWORD=.*/DEFAULT_PASSWORD=$DEFAULT_PW/" .env
             log "已更新 DEFAULT_PASSWORD"
         fi
+        # 确保使用 MySQL（覆盖 .env.example 的 SQLite 默认值）
+        if grep -q "^DB_ENGINE=sqlite" .env 2>/dev/null; then
+            log "检测到 SQLite，切换为 MySQL..."
+            sed -i "s/^DB_ENGINE=.*/DB_ENGINE=mysql/" .env
+            sed -i "s/^# DB_HOST=.*/DB_HOST=db/" .env
+            sed -i "s/^# DB_PORT=.*/DB_PORT=3306/" .env
+            sed -i "s/^# DB_USER=.*/DB_USER=admin/" .env
+            DB_PW=$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c24 || python3 -c "import secrets; print(secrets.token_urlsafe(18))")
+            MYSQL_ROOT_PW=$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c24 || python3 -c "import secrets; print(secrets.token_urlsafe(18))")
+            sed -i "s/^# DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
+            sed -i "s/^# DB_NAME=.*/DB_NAME=vue_fastapi_admin/" .env
+            sed -i "s/^# MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
+            log "已切换为 MySQL 模式"
+        fi
+        # 兼容旧格式：未注释的模板密码
         if grep -q "^DB_PASSWORD=change-me-to-a-strong-password" .env 2>/dev/null; then
             DB_PW=$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c24 || python3 -c "import secrets; print(secrets.token_urlsafe(18))")
             sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
@@ -182,11 +203,30 @@ init_deploy() {
     step "构建镜像并启动容器..."
     docker compose up -d --build
 
-    # 4. 等待服务就绪
+    # 4. 配置 MySQL 远程访问
+    step "配置 MySQL 远程访问..."
+    # 从 .env 读取密码（shell 不会自动 source）
+    MYSQL_ROOT_PW=$(grep "^MYSQL_ROOT_PASSWORD=" .env | cut -d= -f2)
+    # 等待 MySQL 就绪
+    for i in $(seq 1 30); do
+        if docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
+            break
+        fi
+        sleep 2
+    done
+    # 允许 admin 用户远程连接（关闭 SSL 要求，解决客户端握手失败）
+    docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
+        -e "ALTER USER '${DB_USER:-admin}'@'%' REQUIRE NONE; FLUSH PRIVILEGES;"
+    # 允许 root 用户远程连接（mysql_native_password 兼容旧客户端）
+    docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
+        -e "ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PW}' REQUIRE NONE; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+    log "MySQL 远程访问已配置（127.0.0.1:3306 → admin + root 用户）"
+
+    # 5. 等待应用服务就绪
     step "等待服务就绪..."
     wait_healthy
 
-    # 5. 输出部署信息
+    # 6. 输出部署信息
     local _port="${APP_PORT:-127.0.0.1:18080}"
     _port="${_port##*:}"
     echo ""

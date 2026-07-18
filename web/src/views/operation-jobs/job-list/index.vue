@@ -96,7 +96,7 @@ const actionOptions = [
   { value: 'redirect', label: '301重定向' },
   { value: 'provision', label: '1Panel建站' },
   { value: 'assign_gmail', label: '分配Gmail' },
-  { value: 'woo_import', label: 'Woo导入' },
+  { value: 'woo_import', label: '产品导入' },
   { value: 'collect', label: '采集' },
   { value: 'collect_shopify', label: 'Shopify采集' },
   { value: 'hub_create_env', label: 'Hub创建环境' },

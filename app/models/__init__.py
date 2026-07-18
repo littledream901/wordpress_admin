@@ -16,3 +16,5 @@ from .shopify_collect import *
 from .operation_job import *
 
 from .import_job import *
+
+from .ads_manager import *

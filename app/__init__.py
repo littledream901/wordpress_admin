@@ -11,6 +11,7 @@ try:
     from app.core.exceptions import SettingNotFound
     from app.core.init_app import (
         init_essential,
+        init_superuser,
         make_middlewares,
         register_exceptions,
         register_routers,
@@ -52,6 +53,7 @@ if _HAS_FASTAPI:
         完整初始化请运行: python scripts/init_system.py
         """
         await init_essential()
+        await init_superuser()
 
         # 后台任务：每小时清理过期的 Feed 文件
         async def _cleanup_loop():
@@ -88,6 +90,7 @@ if _HAS_FASTAPI:
             title=settings.APP_TITLE,
             description=settings.APP_DESCRIPTION,
             version=settings.VERSION,
+            debug=settings.DEBUG,
             # 生产环境关闭 API 文档
             openapi_url="/openapi.json" if settings.DEBUG else None,
             docs_url="/docs" if settings.DEBUG else None,

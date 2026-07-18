@@ -134,6 +134,7 @@ const columns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', width: 200, ellipsis: { tooltip: true } },
   { title: '服务器IP', key: 'server_ip', width: 130 },
+  { title: '平台', key: 'platform', width: 80, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   {
     title: 'Hub环境ID', key: 'hub_env_id', width: 130,
     render: (r) => r.hub_env_id || '-',
@@ -165,21 +166,23 @@ const columns = [
     },
   },
   {
-    title: '操作', key: 'actions', width: 380, fixed: 'right',
+    title: '操作', key: 'actions', width: 440, fixed: 'right',
     render: (r) => {
-      const buttons = [
+        const buttons = [
         { label: '创建环境', type: 'primary', action: 'create_env', ghost: !r.hub_env_id },
         { label: '创建账号', type: 'info', action: 'create_account', ghost: !r.hub_env_id },
         { label: '更新环境', type: 'warning', action: 'update_env', ghost: !r.hub_env_id },
-        { label: '登录WP', type: 'success', action: 'website_control', ghost: !r.hub_env_id },
+        { label: '登录WP', type: 'success', action: 'website_control', ghost: !r.hub_env_id, disabled: r.platform === 'shopify' },
         { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !r.hub_env_id },
+        { label: '打开环境', type: 'error', action: 'open_env', ghost: !r.hub_env_id },
       ]
       return h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, buttons.map(btn =>
         h(NButton, {
           size: 'tiny',
-          type: btn.type,
+          type: btn.disabled ? 'default' : btn.type,
           ghost: btn.ghost,
-          onClick: () => dispatchSingle(r, btn.action),
+          disabled: btn.disabled,
+          onClick: () => handleAction(r, btn.action),
         }, { default: () => btn.label })
       ))
     },
@@ -219,6 +222,23 @@ function dispatchSingle(row, jobType) {
   dispatchJobType.value = jobType
   dispatchExecuteNow.value = !agentOnline.value
   showDispatch.value = true
+}
+
+function handleAction(row, action) {
+  if (action === 'open_env') {
+    openEnvironment(row)
+  } else {
+    dispatchSingle(row, action)
+  }
+}
+
+async function openEnvironment(row) {
+  try {
+    await api.triggerHubOpenEnv(row.id, 0)
+    message.success(`站点 ${row.domain} 浏览器环境已打开`)
+  } catch (e) {
+    message.error(`打开环境失败: ${e}`)
+  }
 }
 
 const fnMap = {

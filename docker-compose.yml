@@ -37,6 +37,8 @@ services:
     image: mysql:8.0
     container_name: wordpress-admin-db
     restart: unless-stopped
+    ports:
+      - "${MYSQL_PORT:-127.0.0.1:3306}:3306"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-secret-change-me}
       MYSQL_DATABASE: ${DB_NAME:-vue_fastapi_admin}

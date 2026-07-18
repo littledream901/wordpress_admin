@@ -13,7 +13,6 @@ CATEGORY_LABELS = {
     'hubstudio': 'HubStudio',
     'woo': 'WooCommerce',
     'shopify': 'Shopify',
-    'pipeline': '流水线',
     'general': '通用',
 }
 

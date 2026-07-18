@@ -15,6 +15,7 @@ db.sqlite3-wal
 
 # 环境变量（生产密钥）
 .env
+db-tunnel.ps1
 
 # Agent 打包产物
 agent_build/build/

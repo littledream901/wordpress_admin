@@ -13,12 +13,25 @@
 - get_float()→ float，转换失败返回 default
 """
 
+import asyncio
+import concurrent.futures
 import logging
 from typing import Union
 
-from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
+from app.models.config_provider import ConfigProvider, ProviderConfigItem
 
 _log = logging.getLogger(__name__)
+
+
+def _run_sync(coro):
+    """在同步上下文中安全执行 async 协程（兼容事件循环内外场景）"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # 已在事件循环内 → 用线程池隔离执行
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result(timeout=30)
 
 
 class ProviderResolver:
@@ -114,59 +127,16 @@ class ProviderResolver:
 
     @classmethod
     def sync_get_config(cls, provider_type: str, config_key: str, default: str = "") -> str:
-        """同步版本 — 用于非 async 服务类 __init__"""
-        import sqlite3
-        db_path = "db.sqlite3"
-        conn = sqlite3.connect(db_path)
+        """同步版本 — Tortoise 未初始化时静默返回 default"""
         try:
-            # 获取默认 provider
-            row = conn.execute(
-                "SELECT id FROM config_provider WHERE provider_type=? AND is_default=1 AND status='active' LIMIT 1",
-                (provider_type,)
-            ).fetchone()
-            if not row:
-                row = conn.execute(
-                    "SELECT id FROM config_provider WHERE provider_type=? AND status='active' ORDER BY priority DESC, id LIMIT 1",
-                    (provider_type,)
-                ).fetchone()
-            if not row:
-                return default
-            provider_id = row[0]
-            val_row = conn.execute(
-                "SELECT config_value FROM provider_config_item WHERE provider_id=? AND config_key=?",
-                (provider_id, config_key)
-            ).fetchone()
-            return val_row[0].strip().strip('`') if val_row else default
-        except sqlite3.OperationalError:
+            return _run_sync(cls.get_config(provider_type, config_key, default=default))
+        except Exception:
             return default
-        finally:
-            conn.close()
 
     @classmethod
     def sync_get_config_map(cls, provider_type: str) -> dict:
-        """同步版本 — 获取 provider 所有配置"""
-        import sqlite3
-        db_path = "db.sqlite3"
-        conn = sqlite3.connect(db_path)
+        """同步版本 — Tortoise 未初始化时静默返回 {}"""
         try:
-            row = conn.execute(
-                "SELECT id FROM config_provider WHERE provider_type=? AND is_default=1 AND status='active' LIMIT 1",
-                (provider_type,)
-            ).fetchone()
-            if not row:
-                row = conn.execute(
-                    "SELECT id FROM config_provider WHERE provider_type=? AND status='active' ORDER BY priority DESC, id LIMIT 1",
-                    (provider_type,)
-                ).fetchone()
-            if not row:
-                return {}
-            provider_id = row[0]
-            items = conn.execute(
-                "SELECT config_key, config_value FROM provider_config_item WHERE provider_id=?",
-                (provider_id,)
-            ).fetchall()
-            return {k: v.strip().strip('`') if isinstance(v, str) else v for k, v in items}
-        except sqlite3.OperationalError:
+            return _run_sync(cls.get_config_map(provider_type))
+        except Exception:
             return {}
-        finally:
-            conn.close()
