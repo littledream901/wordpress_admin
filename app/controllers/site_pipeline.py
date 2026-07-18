@@ -857,7 +857,7 @@ class SitePipelineController:
         )
         total_str = resp.headers.get("X-WP-Total", "0")
         total = int(total_str) if total_str.isdigit() else 0
-        site.product_count = total
+        site.woo_product_count = total
         await site.save()
         return total
 
@@ -879,7 +879,7 @@ class SitePipelineController:
                 return 0
             data = resp.json()
             total = data.get('count', 0)
-        site.product_count = total
+        site.woo_product_count = total
         await site.save()
         _log.info(f'[ShopifyCount] site={site.id} domain={site.domain} count={total}')
         return total

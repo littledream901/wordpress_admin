@@ -6,6 +6,7 @@ from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     domain = fields.CharField(max_length=255, unique=True, description='域名', db_index=True)
+    platform = fields.CharField(max_length=32, default='wordpress', description='平台类型: wordpress / shopify')
     server_ip = fields.CharField(max_length=64, default='', description='服务器IP')
     status = fields.CharField(max_length=64, default='待处理', description='站点状态', db_index=True)
     create_by = fields.IntField(null=True, description='创建者用户ID', db_index=True)
@@ -30,6 +31,8 @@ class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     pipeline_status = fields.CharField(max_length=64, default='', description='流水线状态', db_index=True)
     pipeline_log = fields.TextField(default='', description='流水线日志')
     woo_product_count = fields.IntField(default=0, description='WooCommerce远端产品总数')
+    shopify_store_url = fields.CharField(max_length=500, default='', description='Shopify店铺URL')
+    shopify_token = fields.CharField(max_length=255, default='', description='Shopify Access Token')
 
     class Meta:
         table = 'site_pipeline_site'
