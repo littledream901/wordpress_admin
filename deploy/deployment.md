@@ -451,6 +451,76 @@ docker compose up -d
 
 ---
 
+## 完全重新部署（清除所有数据）
+
+当需要彻底重置环境时（如数据库结构变更、迁移失败、测试后清理），可以删除所有容器、数据卷和文件后重新部署。
+
+### 步骤 1：停止并删除容器和 MySQL 数据卷
+
+```bash
+cd /opt/wordpress-admin
+
+# 停止并删除容器、网络、数据卷（MySQL 所有数据将丢失！）
+docker compose down -v
+
+# 确认已清理
+docker compose ps
+```
+
+`-v` 会一并删除 `docker-compose.yml` 中定义的 `mysql-data` 匿名卷，相当于清空 MySQL 数据库。
+
+### 步骤 2：删除持久化文件
+
+```bash
+# 删除备份文件
+rm -f data/backup_*.sql data/static_backup_*.tar.gz
+
+# 删除日志
+rm -rf logs/*
+
+# 删除上传的头像
+rm -rf static/avatars/*
+
+# 删除 .env 配置文件（如需要重新生成密钥）
+rm -f .env .env.bak
+```
+
+### 步骤 3：拉取最新代码
+
+```bash
+# 确保在正确的分支
+git fetch origin
+git checkout main
+git pull origin main
+```
+
+### 步骤 4：重新部署
+
+```bash
+bash deploy/deploy.sh init
+```
+
+> **提醒**：重新部署会生成新的 `DEFAULT_PASSWORD`，请注意保存输出的管理员密码。
+
+### 本地开发环境（SQLite）清理
+
+本地开发使用 SQLite 时，需额外删除数据库文件：
+
+```bash
+rm -f data/db.sqlite3 data/db.sqlite3.bak*
+```
+
+### 仅清理容器（保留数据）
+
+如果只想重建容器而保留数据库和配置文件：
+
+```bash
+docker compose down          # 仅停止容器，不删除数据卷
+bash deploy/deploy.sh update # 拉取代码并重建
+```
+
+---
+
 ## 常见问题
 
 ### Q: 启动后提示 SECRET_KEY 未设置
