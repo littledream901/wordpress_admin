@@ -205,22 +205,29 @@ init_deploy() {
 
     # 4. 配置 MySQL 远程访问
     step "配置 MySQL 远程访问..."
-    # 从 .env 读取密码（shell 不会自动 source）
-    MYSQL_ROOT_PW=$(grep "^MYSQL_ROOT_PASSWORD=" .env | cut -d= -f2)
+    # 从 .env 读取密码（shell 不会自动 source，-m1 防止重复行导致变量污染）
+    MYSQL_ROOT_PW=$(grep -m1 "^MYSQL_ROOT_PASSWORD=" .env | cut -d= -f2)
+    DB_USER_VAL=$(grep -m1 "^DB_USER=" .env | cut -d= -f2 || echo "admin")
     # 等待 MySQL 就绪
+    local mysql_ready=false
     for i in $(seq 1 30); do
         if docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
+            mysql_ready=true
             break
         fi
         sleep 2
     done
-    # 允许 admin 用户远程连接（关闭 SSL 要求，解决客户端握手失败）
-    docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
-        -e "ALTER USER '${DB_USER:-admin}'@'%' REQUIRE NONE; FLUSH PRIVILEGES;"
-    # 允许 root 用户远程连接（mysql_native_password 兼容旧客户端）
-    docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
-        -e "ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PW}' REQUIRE NONE; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
-    log "MySQL 远程访问已配置（127.0.0.1:3306 → admin + root 用户）"
+    if [ "$mysql_ready" = false ]; then
+        warn "MySQL 未能在 60 秒内就绪，跳过远程访问配置（容器启动后可用 deploy.sh update 重试）"
+    else
+        # 允许 admin 用户远程连接（关闭 SSL 要求，解决客户端握手失败）
+        docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
+            -e "ALTER USER '${DB_USER_VAL}'@'%' REQUIRE NONE; FLUSH PRIVILEGES;"
+        # 允许 root 用户远程连接（mysql_native_password 兼容旧客户端）
+        docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
+            -e "ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${MYSQL_ROOT_PW}' REQUIRE NONE; GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+        log "MySQL 远程访问已配置（127.0.0.1:3306 → admin + root 用户）"
+    fi
 
     # 5. 等待应用服务就绪
     step "等待服务就绪..."
@@ -252,11 +259,11 @@ update_deploy() {
     # 1. 备份当前状态
     log "备份当前数据库和静态文件..."
     # 从 .env 文件读取数据库配置（shell 环境变量可能不存在于 update 上下文中）
-    DB_ENGINE_VAL=$(grep "^DB_ENGINE=" .env 2>/dev/null | cut -d= -f2 || echo "sqlite")
-    MYSQL_ROOT_PW=$(grep "^MYSQL_ROOT_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
-    DB_USER_VAL=$(grep "^DB_USER=" .env 2>/dev/null | cut -d= -f2 || echo "admin")
-    DB_PW=$(grep "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
-    DB_NAME_VAL=$(grep "^DB_NAME=" .env 2>/dev/null | cut -d= -f2 || echo "vue_fastapi_admin")
+    DB_ENGINE_VAL=$(grep -m1 "^DB_ENGINE=" .env 2>/dev/null | cut -d= -f2 || echo "sqlite")
+    MYSQL_ROOT_PW=$(grep -m1 "^MYSQL_ROOT_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
+    DB_USER_VAL=$(grep -m1 "^DB_USER=" .env 2>/dev/null | cut -d= -f2 || echo "admin")
+    DB_PW=$(grep -m1 "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
+    DB_NAME_VAL=$(grep -m1 "^DB_NAME=" .env 2>/dev/null | cut -d= -f2 || echo "vue_fastapi_admin")
     if [ "${DB_ENGINE_VAL}" = "mysql" ] && [ -n "${MYSQL_ROOT_PW}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
         docker compose exec -T db mysqldump -u"${DB_USER_VAL}" -p"${DB_PW}" "${DB_NAME_VAL}" \
             > "data/backup_$(date +%Y%m%d_%H%M%S).sql" 2>/dev/null && log "MySQL 已备份到 data/" || warn "MySQL 备份失败"

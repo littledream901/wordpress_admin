@@ -774,14 +774,17 @@ async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> b
     now = datetime.now()
     expires = now + timedelta(seconds=timeout_seconds)
 
+    # MySQL/PostgreSQL 用 %s 占位符，SQLite 用 ?
+    placeholder = "?" if settings.DB_ENGINE == "sqlite" else "%s"
+
     # 清理过期锁
     await conn.execute_query(
-        "DELETE FROM system_init_lock WHERE lock_key = ? AND expires_at < ?",
+        f"DELETE FROM system_init_lock WHERE lock_key = {placeholder} AND expires_at < {placeholder}",
         [lock_key, now.isoformat()]
     )
     try:
         await conn.execute_query(
-            "INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES (?, ?, ?, ?)",
+            f"INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})",
             [lock_key, _INSTANCE_ID, now.isoformat(), expires.isoformat()]
         )
         logger.info(f"[InitLock] 获取锁成功: {lock_key}, instance={_INSTANCE_ID}")
