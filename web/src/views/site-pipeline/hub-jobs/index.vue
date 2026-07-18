@@ -5,7 +5,7 @@
       :columns="columns"
       :query-items="queryItems"
       :get-data="getData"
-      @onChecked="onCheckedChange"
+      @on-checked="onCheckedChange"
       @update:query-items="onUpdateQueryItems"
     >
       <template #queryBar>
@@ -28,7 +28,7 @@
           placeholder="域名搜索"
           clearable
           style="width: 200px"
-          @keyup.enter="crudRef.handleQuery()"
+          @keyup.enter="crudRef.handleSearch()"
         />
       </template>
       <template #queryBarActions>
@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, h } from 'vue'
+import { ref, reactive, h, onMounted } from 'vue'
 import { NButton, NTag, useMessage } from 'naive-ui'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
@@ -114,15 +114,21 @@ async function getData({ page, page_size, job_type, status, domain }) {
   return { data: res?.data ?? [], total: res?.total ?? 0 }
 }
 
+onMounted(() => {
+  crudRef.value?.handleSearch()
+})
+
 // ─── 选项 ───
 const jobTypeOptions = [
   { value: '', label: '全部' },
   { value: 'create_env', label: '创建环境' },
   { value: 'create_account', label: '创建账号' },
   { value: 'update_env', label: '更新环境' },
-  { value: 'website_control', label: '网站控制' },
+  { value: 'website_control', label: '登录WP' },
   { value: 'gmc_check', label: 'GMC检查' },
 ]
+const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]))
+function jobTypeLabel(v) { return jobTypeMap[v] || v }
 
 const statusOptions = [
   { value: '', label: '全部状态' },
@@ -154,7 +160,7 @@ function copyText(text) {
 async function retryJob(row) {
   await api.dispatchHubJob(row.site_id, { job_type: row.job_type, execute_now: true })
   message.success('已重新触发任务')
-  crudRef.value.handleQuery()
+  crudRef.value.handleSearch()
 }
 
 async function retryCurrent() {
@@ -166,7 +172,7 @@ async function cancelJob(row) {
   try {
     await api.cancelHubJob(row.id)
     message.success('任务已取消')
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
   } catch (e) {
     message.error(`取消失败: ${e}`)
   }
@@ -186,7 +192,7 @@ async function batchRetry() {
   }
   message.success(`已重置 ${selected.length} 个任务为 pending`)
   checkedRowKeys.value = []
-  crudRef.value.handleQuery()
+  crudRef.value.handleSearch()
 }
 
 async function batchCancel() {
@@ -199,7 +205,7 @@ async function batchCancel() {
     const r = await api.batchCancelHubJobs(ids)
     message.success(`批量取消完成: 成功 ${r?.data?.success ?? ids.length}`)
     checkedRowKeys.value = []
-    crudRef.value.handleQuery()
+    crudRef.value.handleSearch()
   } catch (e) {
     message.error(`批量取消失败: ${e}`)
   }
@@ -215,9 +221,9 @@ const statusType = (s) => {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', width: 180, ellipsis: { tooltip: true } },
-  { title: '类型', key: 'job_type', width: 100 },
+  { title: '类型', key: 'job_type', width: 100, render: row => jobTypeLabel(row.job_type) },
   {
     title: '状态', key: 'status', width: 80,
     render: row => h(NTag, { type: statusType(row.status), size: 'small' }, { default: () => row.status }),

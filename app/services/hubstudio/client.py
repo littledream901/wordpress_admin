@@ -1,6 +1,6 @@
 """HubStudio Connector API 客户端"""
 
-import httpx
+import requests
 
 
 class HubStudioAPIError(Exception):
@@ -14,18 +14,18 @@ class HubStudioClient:
     def __init__(self, base_url: str = "http://localhost:6873", timeout: int = 60):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self.session = httpx.Client(http2=True)
+        self.session = requests.Session()
 
     def request(self, method: str, path: str, json_data=None, params=None) -> dict:
         url = f"{self.base_url}{path}"
         try:
             resp = self.session.request(
                 method.upper(), url, json=json_data, params=params,
-                timeout=httpx.Timeout(self.timeout),
+                timeout=self.timeout,
             )
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPError, OSError) as exc:
+        except (requests.RequestException, OSError) as exc:
             raise HubStudioAPIError(f"HTTP error: {exc}") from exc
         if data.get("code") != 0:
             raise HubStudioAPIError(f"code:{data.get('code')}, msg:{data.get('msg')}")
@@ -63,9 +63,6 @@ class HubStudioClient:
         return self.post("/api/v1/env/del", {"containerCodes": [int(c) for c in containerCodes]})
 
     # ── 账号管理 ──
-    def create_account(self, **kwargs) -> dict:
-        return self.post("/api/v1/account/create", kwargs)
-
     def add_container_account(self, **kwargs) -> dict:
         return self.post("/api/v1/container/add-account", kwargs)
 

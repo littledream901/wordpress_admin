@@ -4,7 +4,7 @@ from app.controllers.operation_job import operation_job_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.operation_job import BatchOperationCreate, OperationJobUpdate
 
-router = APIRouter(tags=["任务中心"])
+router = APIRouter(tags=["OperationJob"])
 
 
 @router.get('/list', summary='任务列表')

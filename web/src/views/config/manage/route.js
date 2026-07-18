@@ -16,5 +16,11 @@ export default {
       component: '/config/bindings',
       meta: { title: '资源绑定', icon: 'carbon:ibm-cloud-pak-manta-automated-data-lineage' },
     },
+    {
+      name: 'RecycleBin',
+      path: 'recycle',
+      component: '/config/recycle',
+      meta: { title: '回收站', icon: 'mdi:delete-restore' },
+    },
   ],
 }

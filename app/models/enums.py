@@ -1,4 +1,4 @@
-from enum import Enum, StrEnum
+from enum import Enum, IntEnum, StrEnum
 
 
 class EnumBase(Enum):
@@ -17,3 +17,12 @@ class MethodType(StrEnum):
     PUT = "PUT"
     DELETE = "DELETE"
     PATCH = "PATCH"
+
+
+class DataScope(IntEnum):
+    """数据权限范围"""
+    ALL = 0              # 全部数据权限
+    DEPT_AND_CHILD = 1   # 本部门及以下数据
+    DEPT_ONLY = 2        # 仅本部门数据
+    SELF_ONLY = 3        # 仅本人数据
+    CUSTOM = 4           # 自定义部门

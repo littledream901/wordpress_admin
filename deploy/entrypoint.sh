@@ -2,62 +2,136 @@
 set -e
 
 echo "========================================="
-echo "  Vue FastAPI Admin - Docker Entrypoint"
+echo "  Wordpress Admin - Docker Entrypoint"
 echo "========================================="
 
-# ========== 环境检查 ==========
-if [ "$DEBUG" = "false" ] || [ "$DEBUG" = "False" ]; then
+# =============================================
+# 环境检查
+# =============================================
+is_prod() {
+    [ "$DEBUG" = "false" ] || [ "$DEBUG" = "False" ] || [ -z "$DEBUG" ]
+}
+
+if is_prod; then
     echo "[INFO] 生产模式启动"
 
-    # 安全检查：生产环境必须设置 SECRET_KEY
-    if [ "$SECRET_KEY" = "3488a63e1765035d386f05409663f55c83bfae3b3c61a932744b20ad14244dcf" ] || [ -z "$SECRET_KEY" ]; then
+    # 密钥校验
+    if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "your-secret-key-here" ]; then
         echo "==================================================================="
-        echo "[WARN] SECRET_KEY 未设置或使用默认值！"
-        echo "[WARN] 请通过环境变量设置生产密钥: -e SECRET_KEY=<random-secret>"
+        echo "[WARN] SECRET_KEY 未设置或使用模板默认值!"
+        echo "[WARN] 请通过 .env 设置: SECRET_KEY=\$(openssl rand -hex 32)"
         echo "==================================================================="
     fi
 
-    # 检查 DEFAULT_PASSWORD
-    if [ "$DEFAULT_PASSWORD" = "123456" ] || [ "$DEFAULT_PASSWORD" = "change-me-to-a-complex-password" ]; then
+    # 密码校验
+    if [ -z "$DEFAULT_PASSWORD" ] || [ "$DEFAULT_PASSWORD" = "123456" ]; then
         echo "==================================================================="
-        echo "[WARN] DEFAULT_PASSWORD 使用不安全的值，建议更换为复杂密码"
+        echo "[WARN] DEFAULT_PASSWORD 为空或使用弱口令，建议更换"
+        echo "==================================================================="
+    fi
+
+    # CORS 校验
+    if echo "${CORS_ORIGINS:-}" | grep -qE '^\["\*"\]$|^\[\]$'; then
+        echo "==================================================================="
+        echo "[WARN] CORS_ORIGINS 配置过于宽松 (允许所有来源)"
+        echo "[WARN] 生产环境建议配置为具体域名: [\"https://your-domain.com\"]"
         echo "==================================================================="
     fi
 else
-    echo "[INFO] 开发模式启动"
+    echo "[INFO] 开发模式启动（热重载 / API 文档已开启）"
 fi
 
-# ========== 数据库表结构同步 ==========
-echo "[INFO] 执行数据库迁移 (aerich upgrade)..."
+# =============================================
+# 创建持久化目录
+# =============================================
+mkdir -p logs static/avatars uploads/feeds
+
+# =============================================
+# 数据库迁移
+# =============================================
+if [ "$DB_ENGINE" = "mysql" ]; then
+    echo "[INFO] 等待 MySQL 就绪..."
+    for i in $(seq 1 30); do
+        if mysqladmin ping -h"${DB_HOST:-db}" -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" --silent 2>/dev/null; then
+            echo "[INFO] MySQL 已就绪"
+            break
+        fi
+        echo "[INFO] 等待 MySQL... ($i/30)"
+        sleep 3
+    done
+fi
+
+echo "[INFO] 同步数据库表结构..."
 python -c "
 import asyncio
+import os
+import sys
 from tortoise import Tortoise
 from app.settings import TORTOISE_ORM
 
 async def upgrade():
     await Tortoise.init(config=TORTOISE_ORM)
+
+    migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
+
+    # 优先使用 Aerich 迁移
+    # aerich.ini 由项目根目录提供，也可回退 pyproject.toml
+    aerich_config = None
+    if os.path.exists('aerich.ini'):
+        aerich_config = 'aerich.ini'
+    elif os.path.exists('pyproject.toml'):
+        aerich_config = 'pyproject.toml'
+
+    if aerich_config and os.path.isdir(migrations_dir):
+        try:
+            from aerich import Command
+            command = Command(tortoise_config=TORTOISE_ORM, app='models', location=migrations_dir)
+            await command.init()
+            await command.upgrade(run_in_transaction=True)
+            print(f'[INFO] 数据库迁移完成 (Aerich, 配置来源: {aerich_config})')
+            return
+        except Exception as e:
+            print(f'[WARN] Aerich 迁移失败: {e}')
+            print('[WARN] 回退到 generate_schemas (safe mode)')
+
+    # 回退：使用 generate_schemas 自动建表（safe=True 不删除已有表）
     await Tortoise.generate_schemas(safe=True)
-    print('[INFO] 数据库表结构已同步')
+    print('[INFO] 数据库表结构已同步 (generate_schemas)')
 
 asyncio.run(upgrade())
 "
 
-# ========== 初始化默认数据（菜单/角色/管理员） ==========
-echo "[INFO] 初始化默认数据..."
+# =============================================
+# 初始化默认数据
+# =============================================
+echo "[INFO] 初始化默认数据（菜单/角色/管理员）..."
 python -c "
 from app.core.init_app import init_default_data
 init_default_data()
 print('[INFO] 默认数据已初始化')
 "
 
-# ========== 启动 Nginx ==========
-echo "[INFO] 启动 Nginx..."
-nginx
+# =============================================
+# 启动 Nginx
+# =============================================
+echo "[INFO] 启动 Nginx（前端静态资源 + API 反向代理）..."
+nginx -t 2>/dev/null && nginx || echo "[WARN] Nginx 配置测试未通过，跳过启动"
 
-# ========== 启动后端 ==========
-echo "[INFO] 启动 FastAPI (端口 9999)..."
-if [ "$DEBUG" = "true" ] || [ "$DEBUG" = "True" ]; then
-    exec python run.py
+# =============================================
+# 启动 FastAPI
+# =============================================
+WORKERS="${WORKERS:-2}"
+
+if is_prod; then
+    echo "[INFO] 启动 FastAPI (uvicorn, ${WORKERS} workers, 端口 9999)..."
+    exec uvicorn app:app \
+        --host 127.0.0.1 \
+        --port "${PORT:-9999}" \
+        --workers "$WORKERS" \
+        --log-level info \
+        --no-server-header \
+        --proxy-headers
 else
-    exec uvicorn app:app --host 127.0.0.1 --port 9999 --workers 2 --log-level info --no-server-header
+    echo "[INFO] 启动 FastAPI (开发模式, 热重载, 端口 ${PORT:-9999})..."
+    exec python run.py
 fi

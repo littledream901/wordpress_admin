@@ -14,6 +14,13 @@ class BaseUser(BaseModel):
     updated_at: Optional[datetime]
     last_login: Optional[datetime]
     roles: Optional[list] = []
+    dept_id: Optional[int] = None
+    dept: Optional[dict] = {}
+    avatar: Optional[str] = ""
+
+
+class UserResponse(BaseUser):
+    """用户响应 Schema，用于序列化返回给前端的用户数据"""
 
 
 class UserCreate(BaseModel):

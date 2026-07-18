@@ -18,6 +18,8 @@ a = Analysis(
     pathex=[".."],
     binaries=[],
     datas=[
+        # 默认 .env 配置（用户可在 EXE 同目录放 .env 覆盖）
+        (".env", "."),
         # Agent 入口模块（通过 importlib 直接加载，绕过 app/__init__.py）
         ("../app/agent/hubstudio_agent.py", "app/agent"),
         # executor 适配层 + 拆分后的子模块
@@ -31,7 +33,7 @@ a = Analysis(
         ("../app/services/hubstudio/tasks/create_env.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/create_account.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/update_env.py", "app/services/hubstudio/tasks"),
-        ("../app/services/hubstudio/tasks/website_control.py", "app/services/hubstudio/tasks"),
+        ("../app/services/hubstudio/tasks/wp_login.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/gmc_check.py", "app/services/hubstudio/tasks"),
     ],
     hiddenimports=[
@@ -46,7 +48,7 @@ a = Analysis(
         "idna",
         # 可选依赖（try/except 导入，PyInstaller 不会自动追踪）
         "dotenv",
-        # 浏览器自动化（website_control / gmc_check 任务需要）
+        # 浏览器自动化（wp_login / gmc_check 任务需要）
         *drission_hidden,
     ],
     hookspath=[],

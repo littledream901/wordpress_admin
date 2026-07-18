@@ -21,7 +21,7 @@ import logging
 from datetime import datetime
 
 from app.models.operation_job import OperationJob
-from app.core.exceptions import ProviderConfigError, WordPressOperationError
+from app.core.exceptions import DomainAlreadyExistsError, ProviderConfigError, WordPressOperationError
 from app.services.onepanel_service import (
     OnePanelAPI,
     OnePanelDatabaseRestorer,
@@ -55,8 +55,8 @@ class ProvisionTaskRunner(TaskRunner):
         return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 10}
 
     async def _run(self, job: OperationJob, site):
-        # 优先 pipeline Provider 的 max_concurrent，回退 settings
-        _mc_val = await ProviderResolver.get_config('pipeline', 'max_concurrent', default='')
+        # 从 onepanel Provider 读取 max_concurrent
+        _mc_val = await ProviderResolver.get_config('onepanel', 'max_concurrent', default='')
         max_cc = int(_mc_val) if _mc_val and _mc_val.isdigit() else 3
         async with asyncio.Semaphore(max_cc):
             await self._run_impl(job, site)
@@ -205,15 +205,38 @@ class ProvisionTaskRunner(TaskRunner):
                 "db_name": db_name,
                 "protocol": protocol,
                 "login_url": login_url,
-                "feeds": feeds,
                 "feed_link": feed_link,
                 "ctx_refresh_url": ctx_refresh_url,
                 "woo_ck": woo_ck,
                 "woo_cs": woo_cs,
             }, site=site)
 
+        except DomainAlreadyExistsError as exc:
+            # 站点已在 1Panel 中存在，同步已有站点信息
+            _log.info("建站跳过：域名已存在于 1Panel: %s", site.domain)
+            op_site_id = exc.onepanel_site_id
+            if not op_site_id:
+                # 回退：异常中未携带 onepanel_site_id，再次查询
+                loop = asyncio.get_event_loop()
+                try:
+                    op_site_id = await loop.run_in_executor(None, site_manager.get_site_id, site.domain)
+                except Exception as sync_err:
+                    _log.warning("同步已有站点信息失败: %s", sync_err)
+            if op_site_id:
+                site.onepanel_site_id = op_site_id
+                _log.info("已同步 1Panel 站点信息: domain=%s site_id=%s", site.domain, op_site_id)
+            # 无论 get_site_id 是否成功，都必须更新状态
+            site.status = '已存在'
+            site.onepanel_status = 'exists_in_panel'
+            site.pipeline_status = 'onepanel:exists'
+            await site.save()
+            await self._complete_job(job, ok=False, error=str(exc), site=site)
         except Exception as exc:
             _log.exception("建站执行失败: %s", exc)
+            site.status = '建站失败'
+            site.onepanel_status = 'provision_failed'
+            site.pipeline_status = 'onepanel:failed'
+            await site.save()
             await self._complete_job(job, ok=False, error=str(exc), site=site, exc=exc)
 
 

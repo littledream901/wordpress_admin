@@ -2,14 +2,25 @@
   <CommonPage show-header title="Feed 文件管理">
     <template #action>
       <div style="margin-left: auto;">
-        <n-upload :show-file-list="false" accept=".csv,.xml,.txt" :custom-request="handleUpload" :disabled="uploading">
-          <n-button type="primary" :loading="uploading">
-            <span style="display:inline-flex;align-items:center;gap:6px">
-              <span class="i-mdi:cloud-upload-outline" />
-              上传 Feed 文件
-            </span>
-          </n-button>
-        </n-upload>
+        <div style="display:flex;align-items:center;gap:8px">
+          <n-upload :show-file-list="false" accept=".csv,.xml,.txt" :custom-request="handleUpload" :disabled="uploading">
+            <n-button type="primary" :loading="uploading">
+              <span style="display:inline-flex;align-items:center;gap:6px">
+                <span class="i-mdi:cloud-upload-outline" />
+                上传 Feed 文件
+              </span>
+            </n-button>
+          </n-upload>
+          <n-progress
+            v-if="uploading && uploadPercent > 0"
+            type="line"
+            :percentage="uploadPercent"
+            :indicator-placement="'inside'"
+            style="width:160px"
+            :height="28"
+            :border-radius="6"
+          />
+        </div>
       </div>
     </template>
 
@@ -56,9 +67,15 @@
             />
           </n-form-item>
           <n-alert v-if="createResult" type="success" title="创建成功">
-            <n-space vertical :size="4">
+            <n-space vertical :size="8">
               <n-text>共替换 {{ createResult.replace_count }} 处</n-text>
               <n-text>{{ createResult.source_domain }} → {{ createResult.target_domain }}</n-text>
+              <n-space v-if="createResult.download_url" :size="6" align="center">
+                <n-text depth="3" style="font-size:13px">{{ createResult.download_url }}</n-text>
+                <n-button size="tiny" type="success" @click="copyDownloadUrl(createResult.download_url)">
+                  复制链接
+                </n-button>
+              </n-space>
             </n-space>
           </n-alert>
         </n-space>
@@ -85,7 +102,7 @@
 import { h, ref, reactive, onMounted } from 'vue'
 import {
   NAlert, NButton, NCard, NDataTable, NFormItem, NInput, NModal,
-  NSpace, NTag, NText, NUpload, useMessage,
+  NSpace, NTag, NText, NUpload, NProgress, useMessage,
 } from 'naive-ui'
 import { useClipboard } from '@vueuse/core'
 import api from '@/api/site-pipeline'
@@ -112,58 +129,91 @@ const createTargetDomain = ref('')
 const createResult = ref(null)
 const defaultDomain = ref('')
 
+// ── 平台标签 ──
+const platformConfig = {
+  wordpress: { type: 'info', label: 'WordPress' },
+  shopify: { type: 'success', label: 'Shopify' },
+  shopoem: { type: 'warning', label: 'ShopOem' },
+  generic: { type: 'default', label: '通用' },
+}
+function platformTag(platform) {
+  const cfg = platformConfig[platform]
+  if (!cfg) return h(NText, { depth: 3 }, { default: () => '-' })
+  return h(NTag, { type: cfg.type, size: 'tiny', bordered: false }, { default: () => cfg.label })
+}
+
 // ── 源文件列 ──
 const sourceColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
-  { title: '文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
+  { title: '文件名', key: 'original_name', width: 195, ellipsis: { tooltip: true } },
   {
-    title: '检测域名', key: 'source_domain', width: 150, ellipsis: { tooltip: true },
-    render: (r) => r.source_domain || h(NText, { depth: 3 }, '未检测到'),
+    title: '检测域名', key: 'source_domain', width: 170, ellipsis: { tooltip: true },
+    render: (r) => r.source_domain || h(NText, { depth: 3 }, { default: () => '未检测到' }),
   },
-  { title: '类型', key: 'file_type', width: 160 },
+  { title: '类型', key: 'file_type', width: 190},
+  { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
   {
-    title: '大小', key: 'file_size', width: 60,
+    title: '大小', key: 'file_size', width: 135,
     render: (r) => {
       const kb = r.file_size / 1024
       return kb > 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`
     },
   },
-  { title: '上传时间', key: 'created_at', width: 140 },
+  { title: '上传时间', key: 'created_at', width: 120 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
-      h(NButton, { size: 'tiny', type: 'primary', style: 'width:90px', onClick: () => openCreate(r) }, '创建新Feed'),
-      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, '删除'),
+      h(NButton, { size: 'tiny', type: 'primary', style: 'width:72px', onClick: () => openCreate(r) }, { default: () => '创建新Feed' }),
+      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, { default: () => '删除' }),
     ]),
   },
 ]
 
 // ── 已处理文件列 ──
+function expiresInfo(r) {
+  if (r.is_expired) return '已过期'
+  const m = r.expires_in_minutes || 0
+  if (m < 60) return `${m}分钟后过期`
+  if (m < 1440) return `${Math.floor(m / 60)}小时后过期`
+  return `${Math.floor(m / 1440)}天后过期`
+}
+function expiresType(r) {
+  if (r.is_expired) return 'error'
+  const m = r.expires_in_minutes || 0
+  if (m < 60) return 'warning'
+  return 'default'
+}
+
 const processedColumns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
-  { title: '原始文件名', key: 'original_name', width: 170, ellipsis: { tooltip: true } },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
+  { title: '原始文件名', key: 'original_name', width: 195, ellipsis: { tooltip: true } },
   {
-    title: '新文件名', key: 'processed_name', width: 150, ellipsis: { tooltip: true },
+    title: '新文件名', key: 'processed_name', width: 170, ellipsis: { tooltip: true },
     render: (r) => r.processed_name || '-',
   },
   {
-    title: '域名变更', key: 'domains', width: 160, ellipsis: { tooltip: true },
-    render: (r) => h(NText, { depth: 2 }, `${r.source_domain || '?'} → ${r.target_domain || '?'}`),
+    title: '域名变更', key: 'domains', width: 190, ellipsis: { tooltip: true },
+    render: (r) => `${r.source_domain || '?'} → ${r.target_domain || '?'}`,
   },
-  {
-    title: '替换次数', key: 'replace_count', width: 60,
-    render: (r) => r.replace_count > 0 ? r.replace_count : '-',
+  { title: '平台', key: 'platform', width: 85, render: (r) => platformTag(r.platform) },
+
+  { title: '替换次数', key: 'replace_count', width: 65, render: (r) => r.replace_count > 0 ? r.replace_count : '-' },
+  { title: '过期时间', key: 'expires_at', width: 70,
+    render: (r) => {
+      const info = expiresInfo(r)
+      return h(NTag, { type: expiresType(r), size: 'small' }, { default: () => info })
+    },
   },
-  { title: '创建时间', key: 'created_at', width: 140 },
+  { title: '创建时间', key: 'created_at', width: 120 },
   {
     title: '操作', key: 'actions', width: 166, fixed: 'right',
     render: (r) => h('div', { style: 'display:flex;gap:4px' }, [
       h(NButton, {
-        size: 'tiny', type: 'success', style: 'width:90px',
-        disabled: !r.download_url,
+        size: 'tiny', type: r.is_expired ? undefined : 'success', style: 'width:72px',
+        disabled: r.is_expired || !r.download_url,
         onClick: () => copyDownloadUrl(r.download_url),
-      }, '复制链接'),
-      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, '删除'),
+      }, { default: () => r.is_expired ? '已过期' : '复制链接' }),
+      h(NButton, { size: 'tiny', type: 'error', style: 'width:48px', onClick: () => doDelete(r.id) }, { default: () => '删除' }),
     ]),
   },
 ]
@@ -199,30 +249,64 @@ async function loadDefaultDomain() {
   } catch (_) {}
 }
 
-// 上传
+// 上传（分片上传，支持大文件）
+const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB
 const uploading = ref(false)
+const uploadPercent = ref(0)
 
 async function handleUpload({ file }) {
   if (!file.file) return
+  const f = file.file
+  const totalChunks = Math.ceil(f.size / CHUNK_SIZE)
+
   uploading.value = true
+  uploadPercent.value = 0
+
   try {
-    const formData = new FormData()
-    formData.append('file', file.file)
-    await api.uploadFeed(formData)
+    // 1. 初始化上传会话
+    const initRes = await api.initChunkUpload({
+      filename: f.name,
+      total_size: f.size,
+      total_chunks: totalChunks,
+    })
+    const uploadId = initRes.data.upload_id
+
+    // 2. 逐片上传
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE
+      const end = Math.min(start + CHUNK_SIZE, f.size)
+      const blob = f.slice(start, end)
+
+      const formData = new FormData()
+      formData.append('upload_id', uploadId)
+      formData.append('chunk_index', i)
+      formData.append('chunk', blob, `chunk_${i}`)
+
+      await api.uploadChunk(formData)
+      uploadPercent.value = Math.round(((i + 1) / totalChunks) * 90) // 90% for upload
+    }
+
+    // 3. 通知服务端合并分片
+    uploadPercent.value = 95
+    await api.completeChunkUpload({ upload_id: uploadId })
+    uploadPercent.value = 100
     message.success('上传成功')
     loadSources()
-  } catch (_) {
+  } catch (e) {
     message.error('上传失败')
   } finally {
     uploading.value = false
+    setTimeout(() => { uploadPercent.value = 0 }, 1500)
   }
 }
 
 // 打开创建弹窗
+const LAST_DOMAIN_KEY = 'feed_last_target_domain'
+
 function openCreate(row) {
   createTarget.value = row
   createSourceDomain.value = row.source_domain || ''
-  createTargetDomain.value = defaultDomain.value
+  createTargetDomain.value = localStorage.getItem(LAST_DOMAIN_KEY) || defaultDomain.value
   createResult.value = null
   showCreate.value = true
 }
@@ -237,6 +321,8 @@ async function confirmCreate() {
       createSourceDomain.value,
     )
     createResult.value = res.data
+    // 记住最后输入的域名
+    localStorage.setItem(LAST_DOMAIN_KEY, createTargetDomain.value)
     message.success('新 Feed 创建成功')
     loadSources()
     loadProcessed()

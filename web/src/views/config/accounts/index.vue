@@ -132,7 +132,7 @@ const {
 })
 
 const columns = [
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   {
     title: '账号类型', key: 'account_type', width: 90,
     render: (row) => h(NTag, { type: 'info', size: 'small' }, { default: () => row.account_type }),

@@ -9,7 +9,9 @@ from app.schemas.config_provider import (
     ResourceProviderBindingCreate,
 )
 
-router = APIRouter(tags=["配置中心"])
+router = APIRouter(tags=["Provider"])
+
+CORE_TYPES = ['cloudflare', 'dynadot', 'onepanel', 'hubstudio']
 
 
 # ── Provider CRUD ──
@@ -50,8 +52,8 @@ async def update_provider(payload: ConfigProviderUpdate):
 
 @router.post('/provider/delete', summary='删除 Provider')
 async def delete_provider(id: int = Query(...)):
-    await provider_controller.remove(id=id)
-    return Success(msg='删除成功')
+    await provider_controller.soft_remove(id=id)
+    return Success(msg='已移入回收站')
 
 
 @router.post('/provider/set-default', summary='设为默认')
@@ -77,6 +79,9 @@ async def list_items(provider_id: int = Query(...)):
 
 @router.post('/items/update', summary='更新配置项')
 async def update_item(payload: ProviderConfigItemUpdate):
+    from app.controllers.config_provider import _validate_config_value
+    if payload.config_value is not None and payload.config_type:
+        _validate_config_value(f"id={payload.id}", payload.config_type, payload.config_value)
     await provider_item_controller.update(id=payload.id, obj_in=payload)
     return Success(msg='更新成功')
 
@@ -133,3 +138,81 @@ async def batch_create_bindings(payload: BatchBindingRequest):
     return Success(data={"results": results, "total": len(results),
                          "success": sum(1 for r in results if r["ok"]),
                          "fail": sum(1 for r in results if not r["ok"])})
+
+
+# ── 站点绑定视图（合并站点 + 绑定信息） ──
+
+@router.get('/bindings/sites', summary='站点绑定视图')
+async def list_binding_sites(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    server_ip: str = Query(''),
+):
+    """返回站点列表，每个站点包含四种 Provider 类型的绑定状态"""
+    from app.models.site_pipeline import Site
+    from app.models.config_provider import ConfigProvider, ResourceProviderBinding
+
+    # 查询站点
+    qs = Site.filter(is_deleted=False)
+    if server_ip:
+        qs = qs.filter(server_ip__icontains=server_ip)
+    total = await qs.count()
+    sites = await qs.offset((page - 1) * page_size).limit(page_size).order_by('-id')
+
+    # 批量获取绑定和默认 provider
+    site_ids = [s.id for s in sites]
+    all_bindings = await ResourceProviderBinding.filter(
+        resource_type='site',
+        resource_id__in=site_ids,
+    ).prefetch_related('provider').all()
+    default_providers = await ConfigProvider.filter(
+        provider_type__in=CORE_TYPES,
+        is_default=True,
+    ).all()
+
+    # 索引
+    binding_map = {}
+    for b in all_bindings:
+        binding_map[(b.resource_id, b.provider_type)] = b
+
+    default_map = {p.provider_type: p for p in default_providers}
+
+    # 构建响应
+    data = []
+    for site in sites:
+        bindings = {}
+        for ptype in CORE_TYPES:
+            b = binding_map.get((site.id, ptype))
+            if b:
+                bindings[ptype] = {
+                    'bound': True,
+                    'binding_id': b.id,
+                    'provider_id': b.provider.id,
+                    'provider_name': b.provider.provider_name,
+                    'is_default': b.provider.is_default,
+                }
+            else:
+                dp = default_map.get(ptype)
+                bindings[ptype] = {
+                    'bound': False,
+                    'provider_id': dp.id if dp else None,
+                    'provider_name': dp.provider_name if dp else '无默认',
+                    'is_default': True,
+                }
+        data.append({
+            'id': site.id,
+            'domain': site.domain or '',
+            'server_ip': site.server_ip or '',
+            'bindings': bindings,
+        })
+
+    return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
+
+
+@router.get('/bindings/ips', summary='获取所有服务器 IP 列表')
+async def list_binding_ips():
+    """用于 IP 筛选下拉框"""
+    from app.models.site_pipeline import Site
+    sites = await Site.filter(is_deleted=False).all()
+    ips = sorted(set(s.server_ip for s in sites if s.server_ip))
+    return Success(data=[{'value': ip, 'label': ip} for ip in ips])

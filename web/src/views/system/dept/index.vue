@@ -1,5 +1,5 @@
 <script setup>
-import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
+import { h, onMounted, reactive, ref, resolveDirective, withDirectives } from 'vue'
 import { NButton, NForm, NFormItem, NInput, NInputNumber, NPopconfirm, NTreeSelect } from 'naive-ui'
 
 import CommonPage from '@/components/page/CommonPage.vue'
@@ -15,7 +15,7 @@ import api from '@/api'
 defineOptions({ name: '部门管理' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const vPermission = resolveDirective('permission')
 
 const {
@@ -91,7 +91,6 @@ const columns = [
               type: 'primary',
               style: 'margin-left: 8px;',
               onClick: () => {
-                console.log('row', row.parent_id)
                 if (row.parent_id === 0) {
                   isDisabled.value = true
                 } else {

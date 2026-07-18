@@ -1,5 +1,5 @@
 <script setup>
-import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
+import { h, onMounted, reactive, ref, resolveDirective, withDirectives } from 'vue'
 import {
   NButton,
   NForm,
@@ -27,7 +27,7 @@ import api from '@/api'
 defineOptions({ name: '菜单管理' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const vPermission = resolveDirective('permission')
 
 // 表单初始化内容

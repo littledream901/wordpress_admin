@@ -8,7 +8,7 @@
       </n-space>
     </template>
 
-    <CrudTable ref="$table" v-model:query-items="queryItems" :get-data="api.getList" :columns="columns" :pagination="pagination" @onChecked="onCheckedChange">
+    <CrudTable ref="$table" v-model:query-items="queryItems" :get-data="api.getList" :columns="columns" :pagination="pagination" @on-checked="onCheckedChange">
       <template #queryBar>
         <n-input v-model:value="queryItems.username" placeholder="Username 搜索" clearable style="width: 240px" @keyup.enter="$table?.handleSearch()" />
       </template>
@@ -63,12 +63,12 @@
   </CommonPage>
 </template>
 <script setup>
-import { h, reactive, ref, onMounted } from 'vue'
+import { h, reactive, ref } from 'vue'
 import { NButton, NTag, NSelect, NSpace, NGrid, NGi, NCollapse, NCollapseItem, NText, NIcon, NPopconfirm, NDivider, useMessage } from 'naive-ui'
 import { Copy } from '@vicons/carbon'
 import api from '@/api/gmail'
 import importJobApi from '@/api/importJob'
-import useCRUD from '@/composables/useCRUD'
+import { useCRUD } from '@/composables'
 
 const message = useMessage()
 const queryItems = reactive({ username: '' })
@@ -87,10 +87,6 @@ const { modalVisible, modalTitle, modalLoading, handleAdd, handleEdit, handleSav
   doUpdate: api.update,
   doDelete: async () => {},
   refresh: () => $table.value?.handleSearch(),
-})
-
-onMounted(() => {
-  $table.value?.handleSearch()
 })
 
 function formatAddress(row) {
@@ -112,7 +108,7 @@ async function copyText(row, field, label) {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   {
     title: 'Username', key: 'username', width: 280,
     render: (row) => h(NSpace, { size: 'small' }, {

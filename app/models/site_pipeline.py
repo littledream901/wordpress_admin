@@ -1,31 +1,35 @@
 from datetime import datetime
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class Site(BaseModel, TimestampMixin):
-    domain = fields.CharField(max_length=255, unique=True, description='域名', index=True)
+class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
+    domain = fields.CharField(max_length=255, unique=True, description='域名', db_index=True)
     server_ip = fields.CharField(max_length=64, default='', description='服务器IP')
-    status = fields.CharField(max_length=64, default='待处理', description='站点状态', index=True)
+    status = fields.CharField(max_length=64, default='待处理', description='站点状态', db_index=True)
+    create_by = fields.IntField(null=True, description='创建者用户ID', db_index=True)
+    dept_id = fields.IntField(null=True, description='创建者部门ID', db_index=True)
     login_url = fields.CharField(max_length=500, default='', description='登录地址')
     woo_ck = fields.CharField(max_length=255, default='', description='Woo CK')
     woo_cs = fields.CharField(max_length=255, default='', description='Woo CS')
     ctx_refresh_url = fields.CharField(max_length=500, default='', description='CTX刷新链接')
     feed_link = fields.CharField(max_length=500, default='', description='Feed链接')
-    cloudflare_status = fields.CharField(max_length=64, default='', description='Cloudflare状态', index=True)
-    dynadot_status = fields.CharField(max_length=64, default='', description='Dynadot状态', index=True)
-    onepanel_status = fields.CharField(max_length=64, default='', description='1Panel建站状态', index=True)
+    cloudflare_status = fields.CharField(max_length=64, default='', description='Cloudflare状态', db_index=True)
+    dynadot_status = fields.CharField(max_length=64, default='', description='Dynadot状态', db_index=True)
+    onepanel_status = fields.CharField(max_length=64, default='', description='1Panel建站状态', db_index=True)
+    onepanel_site_id = fields.IntField(null=True, description='1Panel 站点ID', db_index=True)
     hub_env_id = fields.CharField(max_length=255, default='', description='Hub环境ID')
     hub_env_name = fields.CharField(max_length=255, default='', description='Hub容器名称')
-    hub_status = fields.CharField(max_length=64, default='', description='Hub状态', index=True)
+    hub_status = fields.CharField(max_length=64, default='', description='Hub状态', db_index=True)
     hub_account_id = fields.CharField(max_length=255, default='', description='Hub账号ID')
     hub_last_action = fields.CharField(max_length=64, default='', description='Hub最后操作类型')
-    woo_import_status = fields.CharField(max_length=64, default='', description='Woo导入状态', index=True)
-    gmc_status = fields.CharField(max_length=64, default='', description='GMC状态', index=True)
+    woo_import_status = fields.CharField(max_length=64, default='', description='Woo导入状态', db_index=True)
+    gmc_status = fields.CharField(max_length=64, default='', description='GMC状态', db_index=True)
     gmc_data = fields.TextField(default='', description='GMC详细数据(JSON)')
-    pipeline_status = fields.CharField(max_length=64, default='', description='流水线状态', index=True)
+    pipeline_status = fields.CharField(max_length=64, default='', description='流水线状态', db_index=True)
     pipeline_log = fields.TextField(default='', description='流水线日志')
+    woo_product_count = fields.IntField(default=0, description='WooCommerce远端产品总数')
 
     class Meta:
         table = 'site_pipeline_site'
@@ -37,11 +41,11 @@ class Site(BaseModel, TimestampMixin):
 
 
 class HubStudioJob(BaseModel, TimestampMixin):
-    site_id = fields.IntField(description='站点ID', index=True)
-    domain = fields.CharField(max_length=255, description='域名', index=True)
+    site_id = fields.IntField(description='站点ID', db_index=True)
+    domain = fields.CharField(max_length=255, description='域名', db_index=True)
     provider_id = fields.IntField(default=0, description='执行节点 provider_id')
-    job_type = fields.CharField(max_length=64, default='create_env', description='任务类型', index=True)
-    status = fields.CharField(max_length=32, default='pending', description='任务状态', index=True)
+    job_type = fields.CharField(max_length=64, default='create_env', description='任务类型', db_index=True)
+    status = fields.CharField(max_length=32, default='pending', description='任务状态', db_index=True)
     payload_json = fields.TextField(default='{}', description='任务负载')
     result_json = fields.TextField(default='{}', description='任务结果')
     error_message = fields.TextField(default='', description='错误信息')

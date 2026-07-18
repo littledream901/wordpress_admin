@@ -62,10 +62,13 @@ try:
     from dotenv import load_dotenv
 
     if getattr(sys, "frozen", False):
-        # PyInstaller 打包后，.env 与 EXE 同目录
+        # PyInstaller 打包后：优先读 EXE 同目录（用户覆盖），否则读内置默认
         _env_path = os.path.join(os.path.dirname(sys.executable), ".env")
+        if not os.path.exists(_env_path):
+            _env_path = os.path.join(sys._MEIPASS, ".env")
     else:
-        _env_path = os.path.join(_PROJECT_ROOT, ".env")
+        # 开发模式：从同目录 .env 读取，与项目根 .env 隔离
+        _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     load_dotenv(_env_path)
 except ImportError:
     pass
@@ -112,6 +115,9 @@ _NETWORK_ERRORS = (
     OSError,
 )
 
+# provider_id ≠ 0 时，必须从 DB 获取的敏感密钥
+_SENSITIVE_PROVIDER_KEYS = ("app_id", "app_secret", "group_code")
+
 
 class HubStudioAgent:
     """HubStudio 本地执行 Agent"""
@@ -122,7 +128,12 @@ class HubStudioAgent:
 
         # ── 服务器连接配置 ──
         self.server_url = os.getenv("HUB_AGENT_SERVER_URL", "http://127.0.0.1:9999/api/v1")
+        # 清理：去末尾斜杠，修复内部双斜杠（保留 https:// 的 //）
         self.server_url = self.server_url.rstrip("/")
+        if "://" in self.server_url:
+            proto, rest = self.server_url.split("://", 1)
+            rest = rest.replace("//", "/")
+            self.server_url = f"{proto}://{rest}"
         self.username = os.getenv("HUB_AGENT_USERNAME", "admin")
         self.password = os.getenv("HUB_AGENT_PASSWORD", "123456")
         self._token: Optional[str] = None  # 登录后自动获取
@@ -141,24 +152,26 @@ class HubStudioAgent:
         self._max_backoff = int(os.getenv("HUB_AGENT_MAX_BACKOFF") or "300")  # 最大退避秒
 
         # ── 初始化执行器 ──
-        self.logger.info(f"Agent 启动: worker={self.worker_name}, server={self.server_url}")
+        self.logger.info(f"Agent 启动: worker={self.worker_name}, server={self.server_url}, "
+                          f"provider={self.provider_id or '不限'}")
         self.runtime = HubStudioRuntime(self.config, self.logger)
         self.executor = HubStudioLocalExecutor(self.runtime)
         self._apply_agent_config()
 
     def _load_config(self) -> dict:
-        """从环境变量加载本地配置（DB 中的配置由 _fetch_agent_config 在登录后覆盖）"""
-        return {
-            # ── 机器相关（本地独有，DB 无） ──
+        """从环境变量加载本地配置（DB 中的配置由 _fetch_agent_config 在登录后覆盖）
+
+        - 机器相关配置（connector 路径等）：始终从 .env 读取
+        - 敏感密钥（app_id / app_secret / group_code）：
+            provider_id = 0 时允许 .env 兜底，
+            provider_id ≠ 0 时必须从 DB 拉取，不清空本地兜底会在 _fetch_agent_config 后校验
+        """
+        # ── 机器相关（本地独有，DB 无） ──
+        config = {
             "connector_dir": os.getenv("HUB_CONNECTOR_DIR", r"D:\Program Files\Hubstudio"),
             "exe_name": os.getenv("HUB_EXE_NAME", "hubstudio_connector.exe"),
             "http_port": os.getenv("HUB_HTTP_PORT", "6873"),
             "base_url": os.getenv("HUB_BASE_URL", "http://localhost:6873"),
-
-            # ── 启动 Connector 必需的密钥（本地兜底，登录后由 DB 覆盖） ──
-            "app_id": os.getenv("HUB_APP_ID", ""),
-            "app_secret": os.getenv("HUB_APP_SECRET", ""),
-            "group_code": os.getenv("HUB_GROUP_CODE", ""),
             "real_kernel_version": os.getenv("HUB_KERNEL_VER", "137"),
 
             # ── 任务执行默认值（本地兜底，登录后由 DB 覆盖） ──
@@ -169,6 +182,16 @@ class HubStudioAgent:
             "admin_account_name": os.getenv("HUB_ADMIN_ACCOUNT_NAME", ""),
             "admin_account_password": os.getenv("HUB_ADMIN_ACCOUNT_PASSWORD", ""),
         }
+        # ─� 敏感密钥：provider_id ≠ 0 时不允许 .env 兜底 ──
+        if self.provider_id:
+            config["app_id"] = ""
+            config["app_secret"] = ""
+            config["group_code"] = ""
+        else:
+            config["app_id"] = os.getenv("HUB_APP_ID", "")
+            config["app_secret"] = os.getenv("HUB_APP_SECRET", "")
+            config["group_code"] = os.getenv("HUB_GROUP_CODE", "")
+        return config
 
     def _apply_agent_config(self):
         """将 Agent 级配置应用到执行器"""
@@ -251,7 +274,7 @@ class HubStudioAgent:
             try:
                 req = urllib.request.Request(url, data=body, method=method)
                 req.add_header("Content-Type", "application/json")
-                req.add_header("token", self._token)
+                req.add_header("Authorization", f"Bearer {self._token}")
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("code") and data["code"] != 200:
@@ -297,36 +320,79 @@ class HubStudioAgent:
     def _api_get(self, path: str, params: Optional[dict] = None, max_retries: int = 3) -> dict:
         return self._api_request("GET", path, params=params, max_retries=max_retries)
 
-    def _fetch_agent_config(self):
-        """从服务端拉取 Provider 配置（DB 为准），与本地 .env 合并"""
-        if not self.provider_id:
-            self.logger.info("provider_id=0，跳过服务端配置拉取")
-            return
+    def _warn_missing_sensitive(self, source: str = "DB"):
+        """检查并警告缺少必要密钥"""
+        missing = [k for k in _SENSITIVE_PROVIDER_KEYS if not self.config.get(k)]
+        if missing:
+            self.logger.error(
+                f"Provider [{self.provider_id}] 缺少必要密钥: {', '.join(missing)} "
+                f"(来源: {source})。请在后台「配置中心」→ Provider [{self.provider_id}] "
+                f"的配置项中设置，任务执行可能因此失败！"
+            )
+            return False
+        return True
 
-        self.logger.info(f"正在从服务端拉取 Provider 配置 (provider_id={self.provider_id})...")
+    def _fetch_agent_config(self):
+        """从服务端拉取 Provider 配置（DB 为准），覆盖本地默认值
+
+        provider_id = 0 时服务端自动解析默认 hubstudio Provider，
+        并返回 _resolved_provider_id 告知 Agent 实际 ID。
+        """
+        _was_zero = not self.provider_id
+
+        self.logger.info(f"正在从服务端拉取 Provider 配置 (provider_id={self.provider_id or '默认'})...")
         try:
             resp = self._api_get("/site-pipeline/hub-job/agent-config",
                                  params={"provider_id": self.provider_id})
             server_config = resp.get("data", {})
-            if not server_config:
-                self.logger.info("服务端无额外配置，使用本地 .env")
-                return
-
-            # 服务端配置优先，覆盖本地 .env
-            merged_keys = []
-            for key, value in server_config.items():
-                if value and value != self.config.get(key):
-                    self.config[key] = value
-                    merged_keys.append(key)
-
-            if merged_keys:
-                self.logger.info(f"已从服务端合并 {len(merged_keys)} 个配置项: {merged_keys}")
-                # 重新应用到 executor
-                self._apply_agent_config()
-            else:
-                self.logger.info("服务端配置与本地一致，无需更新")
         except Exception as e:
-            self.logger.warning(f"拉取服务端配置失败，使用本地 .env 兜底: {e}")
+            self.logger.error(
+                f"拉取 Provider 配置失败: {e}。"
+                f"敏感密钥（app_id / app_secret / group_code）必须在后台配置中心中设置！"
+            )
+            self._warn_missing_sensitive(source=".env 兜底")
+            return
+
+        # 服务端可能返回了实际解析的 provider_id
+        resolved_id = server_config.pop("_resolved_provider_id", self.provider_id)
+        if resolved_id and resolved_id != self.provider_id:
+            self.logger.info(f"未指定 Provider，服务端自动解析为默认 HubStudio Provider（DB 记录 ID={resolved_id}）")
+            self.provider_id = resolved_id
+
+        # 从 0 切换到 DB 模式：清空 .env 兜底的敏感密钥，强制从 DB 获取
+        if _was_zero and self.provider_id:
+            for k in _SENSITIVE_PROVIDER_KEYS:
+                self.config[k] = ""
+
+        if not server_config:
+            if self.provider_id:
+                self.logger.error(
+                    f"Provider [{self.provider_id}] 在服务端无配置项！"
+                    f"请在后台「配置中心」→ 选择该 Provider → 点击「配置」，添加 app_id / app_secret / group_code"
+                )
+                self._warn_missing_sensitive(source="DB 为空")
+            else:
+                self.logger.info("服务端无默认 hubstudio Provider，使用 .env 兜底")
+            return
+
+        # 服务端配置优先，覆盖本地
+        merged_keys = []
+        for key, value in server_config.items():
+            if key.startswith("_"):
+                continue
+            if value and value != self.config.get(key):
+                self.config[key] = value
+                merged_keys.append(key)
+
+        if merged_keys:
+            self.logger.info(f"已从服务端合并 {len(merged_keys)} 个配置项: {merged_keys}")
+            self._apply_agent_config()
+        else:
+            self.logger.info("服务端配置与本地一致，无需更新")
+
+        # 有 provider_id 时校验敏感密钥完整性
+        if self.provider_id:
+            self._warn_missing_sensitive(source="DB")
 
     # ── 心跳 ──
 
@@ -415,14 +481,18 @@ class HubStudioAgent:
 
     def run(self):
         """主循环：持续轮询"""
+        # ── 启动横幅 ──
         self.logger.info("=" * 60)
         self.logger.info(f"HubStudio Agent 已启动")
-        self.logger.info(f"  Worker: {self.worker_name}")
-        self.logger.info(f"  Server: {self.server_url}")
-        self.logger.info(f"  Provider ID: {self.provider_id or 'auto'}")
-        self.logger.info(f"  Poll Interval: {self.poll_interval}s")
-        self.logger.info(f"  Heartbeat Interval: {self.heartbeat_interval}s")
-        self.logger.info(f"  Connector: {self.config['connector_dir']}\\{self.config['exe_name']}")
+        self.logger.info(f"  Worker:      {self.worker_name}")
+        self.logger.info(f"  Server:      {self.server_url}")
+        if self.provider_id:
+            self.logger.info(f"  Provider:    [{self.provider_id}]（精确匹配，密钥从 DB 拉取）")
+        else:
+            self.logger.info(f"  Provider:    默认（服务端解析默认 Provider，密钥从 DB 拉取）")
+        self.logger.info(f"  Poll:        {self.poll_interval}s")
+        self.logger.info(f"  Heartbeat:   {self.heartbeat_interval}s")
+        self.logger.info(f"  Connector:   {self.config['connector_dir']}\\{self.config['exe_name']}")
         self.logger.info("=" * 60)
 
         # 启动前登录后端
@@ -432,11 +502,26 @@ class HubStudioAgent:
             self.logger.error(f"登录后端失败: {e}")
             self.logger.warning("Agent 将继续运行，但任务执行可能会因认证失败而报错")
 
-        # 从服务端拉取配置（DB 优先，本地 .env 兜底）
+        # 从服务端拉取配置（DB 优先）
         try:
             self._fetch_agent_config()
         except Exception as e:
-            self.logger.warning(f"拉取服务端配置失败，使用本地 .env: {e}")
+            self.logger.warning(f"拉取服务端配置失败: {e}")
+
+        # ── 配置完整性摘要 ──
+        if self.provider_id:
+            all_ok = True
+            for k in _SENSITIVE_PROVIDER_KEYS:
+                val = self.config.get(k, "")
+                status = "OK" if val else "缺失！"
+                if not val:
+                    all_ok = False
+                self.logger.info(f"  {k}: {status}")
+            if not all_ok:
+                self.logger.warning(
+                    "部分密钥缺失，任务执行可能失败。"
+                    "请在后台「配置中心」→ Provider 配置项中补充。"
+                )
 
         # 启动前检查 Connector
         try:

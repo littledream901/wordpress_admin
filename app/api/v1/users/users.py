@@ -1,20 +1,18 @@
 import logging
 import traceback
-import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Body, File, Query, UploadFile
+from fastapi.exceptions import HTTPException
 from tortoise.expressions import Q
 
 from app.controllers.dept import dept_controller
 from app.controllers.user import user_controller
-from app.core.ctx import CTX_USER_ID
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.users import *
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(tags=["User"])
 
 
 @router.get("/list", summary="查看用户列表")
@@ -85,35 +83,17 @@ async def reset_password(user_id: int = Body(..., description="用户ID", embed=
     return Success(msg="密码已重置")
 
 
-AVATAR_DIR = Path("static/avatars")
-AVATAR_DIR.mkdir(parents=True, exist_ok=True)
-
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-
-
 @router.post("/avatar/upload", summary="上传头像文件")
 async def upload_avatar(
     file: UploadFile = File(...),
 ):
     try:
-        user_id = CTX_USER_ID.get()
-        if not user_id:
-            return Fail(code=401, msg="请先登录")
-        ext = Path(file.filename).suffix.lower()
-        if ext not in ALLOWED_EXTENSIONS:
-            return Fail(code=400, msg=f"不支持的文件类型: {ext}")
-        filename = f"{uuid.uuid4().hex}{ext}"
-        filepath = AVATAR_DIR / filename
-        content = await file.read()
-        filepath.write_bytes(content)
-        avatar_url = f"/static/avatars/{filename}"
-
-        user_obj = await user_controller.get(id=user_id)
-        user_obj.avatar = avatar_url
-        await user_obj.save()
-        return Success(data={"avatar": avatar_url}, msg="头像上传成功")
+        result = await user_controller.upload_avatar(file)
+        return Success(data=result, msg="头像上传成功")
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Avatar upload error: {traceback.format_exc()}")
+        logger.error(f"Avatar upload error: {traceback.format_exc()}")
         return Fail(code=500, msg=f"上传失败: {e}")
 
 
@@ -122,17 +102,10 @@ async def set_avatar_url(
     url: str = Body(..., embed=True),
 ):
     try:
-        user_id = CTX_USER_ID.get()
-        if not user_id:
-            return Fail(code=401, msg="请先登录")
-        avatar_url = url.strip()
-        if not avatar_url:
-            return Fail(code=400, msg="URL 不能为空")
-
-        user_obj = await user_controller.get(id=user_id)
-        user_obj.avatar = avatar_url
-        await user_obj.save()
-        return Success(data={"avatar": avatar_url}, msg="头像设置成功")
+        result = await user_controller.set_avatar_url(url)
+        return Success(data=result, msg="头像设置成功")
+    except HTTPException:
+        raise
     except Exception as e:
-        logging.error(f"Avatar url error: {traceback.format_exc()}")
+        logger.error(f"Avatar url error: {traceback.format_exc()}")
         return Fail(code=500, msg=f"设置失败: {e}")

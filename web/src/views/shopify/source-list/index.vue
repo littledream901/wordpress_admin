@@ -34,7 +34,7 @@
     </CrudTable>
 
     <!-- 新增 / 编辑弹窗 -->
-    <n-modal v-model:show="modalVisible" preset="card" :title="modalTitle" style="max-width: 480px">
+    <CrudModal v-model:visible="modalVisible" :title="modalTitle" :loading="modalLoading" width="480px" @save="handleSave">
       <n-form ref="modalFormRef" :model="modalForm" label-placement="left" label-width="90">
         <n-form-item label="来源URL" path="source_url" :rule="{ required: true, message: '必填' }">
           <n-input v-model:value="modalForm.source_url" placeholder="https://store.myshopify.com" />
@@ -51,13 +51,7 @@
           <n-input v-model:value="modalForm.remark" type="textarea" />
         </n-form-item>
       </n-form>
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="modalVisible = false">取消</n-button>
-          <n-button type="primary" :loading="modalLoading" @click="handleSave">保存</n-button>
-        </n-space>
-      </template>
-    </n-modal>
+    </CrudModal>
 
     <!-- 批量导入弹窗 -->
     <n-modal v-model:show="showBatchImport" preset="card" title="批量导入采集源" style="max-width: 680px">
@@ -126,6 +120,7 @@ import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
 import api from '@/api/shopify'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
+import CrudModal from '@/components/table/CrudModal.vue'
 
 const message = useMessage()
 const router = useRouter()
@@ -181,7 +176,7 @@ const batchImportResult = ref('')
 const batchImportResultType = ref('success')
 
 const batchImportPreviewColumns = [
-  { title: '序号', key: 'index', width: 40 },
+  { title: '序号', key: 'index', width: 50 },
   { title: 'URL', key: 'url', ellipsis: { tooltip: true }, width: 300 },
   { title: '类型', key: 'typeLabel', width: 60, render: (r) => h(NTag, { type: r.valid ? 'success' : 'error', size: 'small' }, { default: () => r.typeLabel }) },
   { title: '状态', key: 'valid', width: 50, render: (r) => h(NTag, { type: r.valid ? 'success' : 'error', size: 'small' }, { default: () => r.valid ? '有效' : '无效' }) },
@@ -236,7 +231,7 @@ const columns = [
     multiple: true,
     disabled: () => false,
   },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '来源URL', key: 'source_url', ellipsis: { tooltip: true }, width: 300 },
   { title: '类型', key: 'source_type', width: 100 },
   { title: '状态', key: 'status', width: 120, render: (r) => statusTag(r.status) },

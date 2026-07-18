@@ -1,13 +1,16 @@
 <script setup>
-import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
+import { h, computed, onMounted, reactive, ref, resolveDirective, watch, withDirectives } from 'vue'
 import {
   NButton,
   NForm,
   NFormItem,
   NInput,
   NPopconfirm,
+  NSelect,
+  NSpace,
   NTag,
   NTree,
+  NTreeSelect,
   NDrawer,
   NDrawerContent,
   NTabs,
@@ -28,7 +31,7 @@ import TheIcon from '@/components/icon/TheIcon.vue'
 defineOptions({ name: '角色管理' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const vPermission = resolveDirective('permission')
 
 const {
@@ -44,50 +47,326 @@ const {
   modalFormRef,
 } = useCRUD({
   name: '角色',
-  initForm: {},
+  initForm: { data_scope: 3 },
   doCreate: api.createRole,
   doDelete: api.deleteRole,
   doUpdate: api.updateRole,
   refresh: () => $table.value?.handleSearch(),
 })
 
+// 部门树（用于自定义部门选择）
+const deptTreeOptions = ref([])
+
+// 权限设置抽屉相关
 const pattern = ref('')
-const menuOption = ref([]) // 菜单选项
+const menuOption = ref([])
 const active = ref(false)
 const menu_ids = ref([])
 const role_id = ref(0)
-const apiOption = ref([])
+const rawApiData = ref([])
 const api_ids = ref([])
-const apiTree = ref([])
+const apiTree = ref(null)
+
+// 抽屉内的数据权限配置
+const dataScopeOptions = [
+  { label: '全部数据权限', value: 0 },
+  { label: '本部门及以下数据', value: 1 },
+  { label: '仅本部门数据', value: 2 },
+  { label: '仅本人数据', value: 3 },
+  { label: '自定义部门', value: 4 },
+]
+
+// 业务模块标识 → 显示名称（与后端 RESOURCE_LABELS 同步）
+const RESOURCE_LABELS = {
+  site: '站点管理',
+  account: '账户配置',
+  gmail: 'Gmail',
+  shopify: 'Shopify',
+  operation: '操作任务',
+  import: '导入管理',
+}
+
+// 按业务模块的数据权限配置
+const drawerDataScopes = ref(
+  Object.entries(RESOURCE_LABELS).map(([resource, label]) => ({
+    resource,
+    resource_label: label,
+    data_scope: 3,
+    custom_dept_ids: [],
+  }))
+)
 
 function buildApiTree(data) {
-  const processedData = []
+  // 按 tags（模块）分组，每组用 path 作为子节点
   const groupedData = {}
-
   data.forEach((item) => {
-    const tags = item['tags']
-    const pathParts = item['path'].split('/')
-    const path = pathParts.slice(0, -1).join('/')
-    const summary = tags.charAt(0).toUpperCase() + tags.slice(1)
+    const tag = item['tags'] || 'default'
+    const groupLabel = tag.charAt(0).toUpperCase() + tag.slice(1)
+    const groupKey = tag
     const unique_id = item['method'].toLowerCase() + item['path']
-    if (!(path in groupedData)) {
-      groupedData[path] = { unique_id: path, path: path, summary: summary, children: [] }
+
+    if (!(groupKey in groupedData)) {
+      groupedData[groupKey] = {
+        unique_id: groupKey,
+        path: groupKey,
+        summary: groupLabel,
+        apiPrefix: '', // 从第一个子节点的 API path 提取英文模块前缀
+        children: [],
+      }
     }
 
-    groupedData[path].children.push({
+    // 从 API path 提取英文模块前缀：/api/v1/site-pipeline/site/list → site-pipeline
+    if (!groupedData[groupKey].apiPrefix) {
+      const parts = item['path'].replace(/^\//, '').split('/')
+      if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'v1') {
+        groupedData[groupKey].apiPrefix = parts[2]
+      }
+    }
+
+    groupedData[groupKey].children.push({
       id: item['id'],
       path: item['path'],
       method: item['method'],
       summary: item['summary'],
       unique_id: unique_id,
+      is_button: item['is_button'] || false,
     })
   })
-  processedData.push(...Object.values(groupedData))
-  return processedData
+  return Object.values(groupedData)
+}
+
+// 计算 API 分组在菜单树中的顺序索引（深度优先遍历）
+function computeApiGroupOrder(nodes, apiSummary) {
+  let order = 0
+  function walk(list) {
+    for (const node of list) {
+      if (matchMenuToApiGroup(node.path, apiSummary)) return order
+      order++
+      if (node.children?.length) {
+        const found = walk(node.children)
+        if (found !== -1) return found
+      }
+    }
+    return -1
+  }
+  const result = walk(nodes)
+  return result === -1 ? 9999 : result
+}
+
+// 接口权限树：按菜单顺序排序分组
+const apiOption = computed(() => {
+  if (!rawApiData.value.length) return []
+  const tree = buildApiTree(rawApiData.value)
+  if (!menuOption.value.length) return tree
+  tree.sort((a, b) => {
+    return computeApiGroupOrder(menuOption.value, a.summary) - computeApiGroupOrder(menuOption.value, b.summary)
+  })
+  return tree
+})
+
+// 按钮权限树：仅包含 is_button=True 的 API（继承 apiOption 排序）
+const buttonApiOption = computed(() => {
+  return apiOption.value
+    .map((group) => {
+      const buttonChildren = group.children.filter((child) => child.is_button)
+      if (buttonChildren.length === 0) return null
+      return { ...group, children: buttonChildren }
+    })
+    .filter(Boolean)
+})
+
+// 递归收集菜单树下所有叶子节点 id
+function collectLeafMenuIds(nodes) {
+  const ids = []
+  for (const node of nodes) {
+    if (node.children && node.children.length > 0) {
+      ids.push(...collectLeafMenuIds(node.children))
+    } else {
+      ids.push(node.id)
+    }
+  }
+  return ids
+}
+
+// 菜单 → API 级联：勾选菜单时自动勾选对应模块的 API（及按钮）
+// 匹配规则（按优先级）：
+//   1. API path 英文模块前缀匹配（如 site-pipeline ↔ sitepipeline）
+//   2. API 分组标签匹配（如 "站点流水线" 含中文时回退）
+function matchMenuToApiGroup(menuPath, apiGroupSummary, apiPrefix = '') {
+  if (!menuPath) return false
+  const menuSegs = menuPath.toLowerCase().split('/').filter(Boolean)
+
+  // 优先：用英文模块前缀匹配（最精确）
+  const cleanPrefix = apiPrefix.replace(/[-_]/g, '').toLowerCase()
+  if (cleanPrefix && cleanPrefix.length >= 3) {
+    for (const seg of menuSegs.reverse()) {
+      const cleanSeg = seg.replace(/[-_]/g, '')
+      if (cleanSeg.length < 3) continue
+      if (cleanSeg.includes(cleanPrefix) || cleanPrefix.includes(cleanSeg)) return true
+    }
+  }
+
+  // 回退：用 API 分组标签匹配
+  const apiClean = (apiGroupSummary || '').toLowerCase().replace(/[-_]/g, '')
+  if (!apiClean) return false
+  for (const seg of menuSegs.reverse()) {
+    const cleanSeg = seg.replace(/[-_]/g, '')
+    if (cleanSeg.length < 3) continue
+    if (apiClean.includes(cleanSeg)) return true
+  }
+  return false
+}
+
+// 双向联动防循环标志
+let _skipApiWatch = false
+let _skipMenuWatch = false
+
+// 菜单 → API 级联：勾选/取消菜单时自动同步 API
+watch(menu_ids, (newIds, oldIds) => {
+  if (_skipMenuWatch || !apiOption.value.length) return
+
+  const addedIds = newIds.filter((id) => !oldIds.includes(id))
+  const removedIds = oldIds.filter((id) => !newIds.includes(id))
+
+  _skipApiWatch = true
+
+  // 收集所有需要添加的 API（先收集，最后一次性赋值，避免多次触发 watch）
+  const addSet = new Set(api_ids.value)
+  for (const menuId of addedIds) {
+    const menuNode = findMenuNode(menuOption.value, menuId)
+    if (!menuNode) continue
+    // 仅对叶子菜单节点（无子节点）触发 API 级联
+    if (menuNode.children && menuNode.children.length > 0) continue
+    // 拼接父菜单路径用于匹配（父路径 + 自身路径覆盖更多前缀段）
+    const parentNode = findParentNode(menuOption.value, menuId)
+    const matchPath = parentNode ? parentNode.path + '/' + menuNode.path : menuNode.path
+    // 遍历所有 API 分组，添加所有匹配的（同一模块可能有多个 tag）
+    for (const group of apiOption.value) {
+      if (matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)) {
+        group.children.forEach((c) => addSet.add(c.unique_id))
+      }
+    }
+  }
+
+  // 收集需要移除的 API
+  const removeSet = new Set()
+  for (const menuId of removedIds) {
+    const menuNode = findMenuNode(menuOption.value, menuId)
+    if (!menuNode) continue
+    if (menuNode.children && menuNode.children.length > 0) continue
+    const menuParent = findParentNode(menuOption.value, menuId)
+    const menuMatchPath = menuParent ? menuParent.path + '/' + menuNode.path : menuNode.path
+    const stillChecked = newIds.some((id) => {
+      const node = findMenuNode(menuOption.value, id)
+      if (!node) return false
+      const nodeParent = findParentNode(menuOption.value, id)
+      const nodeMatchPath = nodeParent ? nodeParent.path + '/' + node.path : node.path
+      for (const group of apiOption.value) {
+        if (
+          matchMenuToApiGroup(nodeMatchPath, group.summary, group.apiPrefix) &&
+          matchMenuToApiGroup(menuMatchPath, group.summary, group.apiPrefix)
+        ) {
+          return true
+        }
+      }
+      return false
+    })
+    if (!stillChecked) {
+      for (const group of apiOption.value) {
+        if (matchMenuToApiGroup(menuMatchPath, group.summary, group.apiPrefix)) {
+          group.children.forEach((c) => removeSet.add(c.unique_id))
+        }
+      }
+    }
+  }
+
+  // 一次性应用（先添加再移除，移除优先级高于添加）
+  if (removeSet.size > 0) {
+    removeSet.forEach((id) => addSet.delete(id))
+  }
+  api_ids.value = [...addSet]
+
+  _skipApiWatch = false
+})
+
+// API → 菜单 反向联动：当某模块所有 API 都被取消勾选时，自动取消对应菜单
+watch(api_ids, (newIds, oldIds) => {
+  if (_skipApiWatch || !apiOption.value.length || !menuOption.value.length) return
+
+  _skipMenuWatch = true
+
+  for (const group of apiOption.value) {
+    const childIds = group.children.map((c) => c.unique_id)
+    const checkedInGroup = newIds.filter((id) => childIds.includes(id))
+    const prevCheckedInGroup = oldIds.filter((id) => childIds.includes(id))
+
+    // 从全无 → 有选中：勾选对应菜单
+    if (prevCheckedInGroup.length === 0 && checkedInGroup.length > 0) {
+      const leafIds = collectLeafMenuIds(menuOption.value)
+      for (const leafId of leafIds) {
+        const node = findMenuNode(menuOption.value, leafId)
+        if (!node) continue
+        const p = findParentNode(menuOption.value, leafId)
+        const matchPath = p ? p.path + '/' + node.path : node.path
+        if (matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)) {
+          if (!menu_ids.value.includes(leafId)) {
+            menu_ids.value = [...menu_ids.value, leafId]
+          }
+        }
+      }
+    }
+
+    // 从有 → 全无：取消勾选对应菜单
+    if (prevCheckedInGroup.length > 0 && checkedInGroup.length === 0) {
+      const leafIds = collectLeafMenuIds(menuOption.value)
+      const toRemove = leafIds.filter((leafId) => {
+        const node = findMenuNode(menuOption.value, leafId)
+        if (!node) return false
+        const p = findParentNode(menuOption.value, leafId)
+        const matchPath = p ? p.path + '/' + node.path : node.path
+        return matchMenuToApiGroup(matchPath, group.summary, group.apiPrefix)
+      })
+      if (toRemove.length > 0) {
+        menu_ids.value = menu_ids.value.filter((id) => !toRemove.includes(id))
+      }
+    }
+  }
+
+  _skipMenuWatch = false
+})
+
+// 递归查找菜单节点
+function findMenuNode(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    if (node.children && node.children.length > 0) {
+      const found = findMenuNode(node.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+// 查找菜单节点的父节点
+function findParentNode(nodes, childId, parent = null) {
+  for (const node of nodes) {
+    if (node.children && node.children.length > 0) {
+      for (const child of node.children) {
+        if (child.id === childId) return node
+      }
+      const found = findParentNode(node.children, childId, node)
+      if (found) return found
+    }
+  }
+  return null
 }
 
 onMounted(() => {
   $table.value?.handleSearch()
+  // 加载部门树
+  api.getDepts().then((res) => {
+    deptTreeOptions.value = res.data || []
+  })
 })
 
 const columns = [
@@ -99,6 +378,16 @@ const columns = [
     ellipsis: { tooltip: true },
     render(row) {
       return h(NTag, { type: 'info' }, { default: () => row.name })
+    },
+  },
+  {
+    title: '数据权限',
+    key: 'data_scope',
+    width: 60,
+    align: 'center',
+    render(row) {
+      const opt = dataScopeOptions.find((o) => o.value === row.data_scope)
+      return h(NTag, { type: 'warning' }, { default: () => opt?.label || '未知' })
     },
   },
   {
@@ -176,25 +465,35 @@ const columns = [
               type: 'primary',
               onClick: async () => {
                 try {
-                  // 使用 Promise.all 来同时发送所有请求
                   const [menusResponse, apisResponse, roleAuthorizedResponse] = await Promise.all([
                     api.getMenus({ page: 1, page_size: 9999 }),
                     api.getApis({ page: 1, page_size: 9999 }),
                     api.getRoleAuthorized({ id: row.id }),
                   ])
 
-                  // 处理每个请求的响应
                   menuOption.value = menusResponse.data
-                  apiOption.value = buildApiTree(apisResponse.data)
-                  menu_ids.value = roleAuthorizedResponse.data.menus.map((v) => v.id)
-                  api_ids.value = roleAuthorizedResponse.data.apis.map(
+                  rawApiData.value = apisResponse.data
+                  // 先设 api_ids 再设 menu_ids，确保 menu_ids watch 在此基础上追加
+                  api_ids.value = (roleAuthorizedResponse.data.apis || []).map(
                     (v) => v.method.toLowerCase() + v.path
                   )
+                  menu_ids.value = (roleAuthorizedResponse.data.menus || []).map((v) => v.id)
+
+                  // 填充数据权限配置
+                  const apiDataScopes = roleAuthorizedResponse.data.data_scopes || []
+                  if (apiDataScopes.length > 0) {
+                    drawerDataScopes.value.forEach((ds) => {
+                      const matched = apiDataScopes.find((s) => s.resource === ds.resource)
+                      if (matched) {
+                        ds.data_scope = matched.data_scope ?? 3
+                        ds.custom_dept_ids = (matched.custom_depts || []).map((v) => v.id)
+                      }
+                    })
+                  }
 
                   active.value = true
                   role_id.value = row.id
                 } catch (error) {
-                  // 错误处理
                   console.error('Error loading data:', error)
                 }
               },
@@ -212,32 +511,48 @@ const columns = [
 ]
 
 async function updateRoleAuthorized() {
-  const checkData = apiTree.value.getCheckedData()
-  const apiInfos = []
-  checkData &&
-    checkData.options.forEach((item) => {
-      if (!item.children) {
-        apiInfos.push({
-          path: item.path,
-          method: item.method,
-        })
-      }
-    })
-  const { code, msg } = await api.updateRoleAuthorized({
+  // 从 api_ids 构建 api_infos，确保按钮权限和接口权限的勾选都生效
+  const apiInfos = api_ids.value.map((key) => {
+    // key 格式: "get/api/v1/user/list" → method=GET, path=/api/v1/user/list
+    const httpMethod = key.match(/^(get|post|put|delete|patch)/i)
+    if (!httpMethod) return null
+    const method = httpMethod[1].toUpperCase()
+    const path = key.slice(httpMethod[1].length)
+    return { path, method }
+  }).filter(Boolean)
+
+  const payload = {
     id: role_id.value,
     menu_ids: menu_ids.value,
     api_infos: apiInfos,
-  })
+    data_scopes: drawerDataScopes.value.map((ds) => ({
+      resource: ds.resource,
+      data_scope: ds.data_scope,
+      custom_dept_ids: ds.data_scope === 4 ? ds.custom_dept_ids : [],
+    })),
+  }
+
+  const { code, msg } = await api.updateRoleAuthorized(payload)
   if (code === 200) {
     $message?.success('设置成功')
+    // 刷新已授权数据
+    const result = await api.getRoleAuthorized({ id: role_id.value })
+    menu_ids.value = (result.data.menus || []).map((v) => v.id)
+    api_ids.value = (result.data.apis || []).map((v) => v.method.toLowerCase() + v.path)
+    // 刷新数据权限配置
+    const scopes = result.data.data_scopes || []
+    if (scopes.length > 0) {
+      drawerDataScopes.value.forEach((ds) => {
+        const matched = scopes.find((s) => s.resource === ds.resource)
+        if (matched) {
+          ds.data_scope = matched.data_scope ?? 3
+          ds.custom_dept_ids = (matched.custom_depts || []).map((v) => v.id)
+        }
+      })
+    }
   } else {
     $message?.error(msg)
   }
-
-  const result = await api.getRoleAuthorized({ id: role_id.value })
-  menu_ids.value = result.data.menus.map((v) => {
-    return v.id
-  })
 }
 </script>
 
@@ -260,6 +575,7 @@ async function updateRoleAuthorized() {
       </template>
     </CrudTable>
 
+    <!-- 新增/编辑 弹窗 -->
     <CrudModal
       v-model:visible="modalVisible"
       :title="modalTitle"
@@ -288,11 +604,19 @@ async function updateRoleAuthorized() {
         <NFormItem label="角色描述" path="desc">
           <NInput v-model:value="modalForm.desc" placeholder="请输入角色描述" />
         </NFormItem>
+        <NFormItem label="数据权限" path="data_scope">
+          <NSelect
+            v-model:value="modalForm.data_scope"
+            :options="dataScopeOptions"
+            placeholder="请选择数据权限范围"
+          />
+        </NFormItem>
       </NForm>
     </CrudModal>
 
-    <NDrawer v-model:show="active" placement="right" :width="500"
-      ><NDrawerContent>
+    <!-- 权限设置抽屉 -->
+    <NDrawer v-model:show="active" placement="right" :width="550">
+      <NDrawerContent>
         <NGrid x-gap="24" cols="12">
           <NGi span="8">
             <NInput
@@ -344,6 +668,51 @@ async function updateRoleAuthorized() {
               cascade
               @update:checked-keys="(v) => (api_ids = v)"
             />
+          </NTabPane>
+          <NTabPane name="button" tab="按钮权限" display-directive="show">
+            <NTree
+              :data="buttonApiOption"
+              :checked-keys="api_ids"
+              :pattern="pattern"
+              :show-irrelevant-nodes="false"
+              key-field="unique_id"
+              label-field="summary"
+              checkable
+              :default-expand-all="true"
+              :block-line="true"
+              :selectable="false"
+              cascade
+              @update:checked-keys="(v) => (api_ids = v)"
+            />
+          </NTabPane>
+          <NTabPane name="data_scope" tab="数据权限" display-directive="show">
+            <NForm label-placement="left" label-align="left" :label-width="100">
+              <NFormItem
+                v-for="ds in drawerDataScopes"
+                :key="ds.resource"
+                :label="ds.resource_label"
+                :path="'data_scope_' + ds.resource"
+              >
+                <NSpace vertical style="width: 100%">
+                  <NSelect
+                    v-model:value="ds.data_scope"
+                    :options="dataScopeOptions"
+                    placeholder="请选择数据权限范围"
+                  />
+                  <NTreeSelect
+                    v-if="ds.data_scope === 4"
+                    v-model:value="ds.custom_dept_ids"
+                    :options="deptTreeOptions"
+                    key-field="id"
+                    label-field="name"
+                    multiple
+                    placeholder="请选择自定义部门"
+                    clearable
+                    :default-expand-all="true"
+                  />
+                </NSpace>
+              </NFormItem>
+            </NForm>
           </NTabPane>
         </NTabs>
         <template #header> 设置权限 </template>

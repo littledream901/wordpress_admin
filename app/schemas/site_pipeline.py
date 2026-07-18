@@ -8,7 +8,13 @@ class SiteBase(BaseModel):
 
 
 class SiteCreate(SiteBase):
-    pass
+    platform: str = 'wordpress'  # wordpress / shopify
+    dept_id: Optional[int] = None
+    assign_to: Optional[int] = None  # 分配给指定用户（覆盖 create_by）
+    # Shopify 专属
+    shopify_key: Optional[str] = ''
+    shopify_store_url: Optional[str] = ''
+    shopify_token: Optional[str] = ''
 
 
 class SiteBatchCreate(BaseModel):
@@ -17,6 +23,7 @@ class SiteBatchCreate(BaseModel):
 
 class SiteUpdate(BaseModel):
     id: int
+    platform: Optional[str] = None
     server_ip: Optional[str] = ''
     status: Optional[str] = ''
     login_url: Optional[str] = ''
@@ -32,6 +39,10 @@ class SiteUpdate(BaseModel):
     hub_last_action: Optional[str] = ''
     pipeline_status: Optional[str] = ''
     pipeline_log: Optional[str] = ''
+    # Shopify 专属
+    shopify_key: Optional[str] = ''
+    shopify_store_url: Optional[str] = ''
+    shopify_token: Optional[str] = ''
 
 
 class HubStudioJobCreate(BaseModel):

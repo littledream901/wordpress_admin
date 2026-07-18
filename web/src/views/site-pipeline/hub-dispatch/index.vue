@@ -8,83 +8,85 @@
       </n-space>
     </template>
 
-    <n-space vertical :size="12">
-      <!-- 搜索 & 批量操作 -->
-      <n-card size="small" rounded-10>
-        <n-space align="center" :wrap="false">
-          <n-input v-model:value="searchDomain" placeholder="域名搜索" clearable style="width: 200px" @keyup.enter="doSearch" />
-          <n-select v-model:value="searchHubStatus" :options="hubStatusFilterOptions" placeholder="Hub状态" clearable style="width: 140px" @update:value="doSearch" />
-          <n-button type="primary" @click="doSearch">搜索</n-button>
-          <template v-if="checkedRowKeys.length">
-            <n-divider vertical />
-            <span style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
-            <n-select
-              v-model:value="batchJobType"
-              :options="batchJobTypeOptions"
-              placeholder="任务类型"
-              style="width: 120px"
-            />
-            <n-switch v-model:value="batchExecuteNow" size="small" />
-            <n-text depth="3" style="font-size: 12px">同步执行</n-text>
-            <n-button type="primary" size="small" :loading="batchLoading" @click="batchDispatch">
-              批量派发
-            </n-button>
-          </template>
-        </n-space>
-      </n-card>
-
-      <!-- 站点列表 -->
-      <n-data-table
-        ref="$table"
-        :columns="columns"
-        :data="tableData"
-        :loading="loading"
-        :pagination="pagination"
-        :row-key="(r) => r.id"
-        size="small"
-        @update:checked-row-keys="(keys) => checkedRowKeys = keys"
-        @update:page="onPageChange"
-        @update:page-size="onPageSizeChange"
-      />
-
-      <!-- 单站点派发弹窗 -->
-      <n-modal v-model:show="showDispatch" preset="card" title="派发 Hub 任务" style="width: 460px">
-        <n-space vertical :size="12">
-          <n-text>站点: <b>{{ dispatchTarget?.domain }}</b> (ID: {{ dispatchTarget?.id }})</n-text>
-          <n-text v-if="dispatchTarget?.hub_env_id" depth="3">已有环境ID: {{ dispatchTarget.hub_env_id }}</n-text>
+    <CrudTable
+      ref="crudRef"
+      :columns="columns"
+      :query-items="queryItems"
+      :get-data="getData"
+      :page-size="20"
+      @on-checked="(keys) => checkedRowKeys = keys"
+      @update:query-items="onUpdateQueryItems"
+    >
+      <template #queryBar>
+        <n-input
+          v-model:value="queryItems.domain"
+          placeholder="域名搜索"
+          clearable
+          style="width: 200px"
+          @keyup.enter="crudRef?.handleSearch()"
+        />
+        <n-select
+          v-model:value="queryItems.hub_status"
+          :options="hubStatusOptions"
+          placeholder="Hub状态"
+          clearable
+          style="width: 140px"
+        />
+      </template>
+      <template #queryBarActions>
+        <template v-if="checkedRowKeys.length">
+          <span style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
           <n-select
-            v-model:value="dispatchJobType"
+            v-model:value="batchJobType"
             :options="batchJobTypeOptions"
-            placeholder="选择任务类型"
+            placeholder="任务类型"
+            style="width: 120px"
           />
-          <n-space align="center">
-            <n-switch v-model:value="dispatchExecuteNow" />
-            <n-text depth="3">同步执行 (Agent 离线时后端直接调用 Connector)</n-text>
-          </n-space>
-        </n-space>
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showDispatch = false">取消</n-button>
-            <n-button type="primary" @click="confirmDispatch">确认派发</n-button>
-          </n-space>
+          <n-switch v-model:value="batchExecuteNow" size="small" />
+          <n-text depth="3" style="font-size: 12px">同步执行</n-text>
+          <n-button type="primary" size="small" :loading="batchLoading" @click="batchDispatch">
+            批量派发
+          </n-button>
         </template>
-      </n-modal>
-    </n-space>
+      </template>
+    </CrudTable>
+
+    <!-- 单站点派发弹窗 -->
+    <n-modal v-model:show="showDispatch" preset="card" title="派发 Hub 任务" style="width: 460px">
+      <n-space vertical :size="12">
+        <n-text>站点: <b>{{ dispatchTarget?.domain }}</b> (ID: {{ dispatchTarget?.id }})</n-text>
+        <n-text v-if="dispatchTarget?.hub_env_id" depth="3">已有环境ID: {{ dispatchTarget.hub_env_id }}</n-text>
+        <n-select
+          v-model:value="dispatchJobType"
+          :options="batchJobTypeOptions"
+          placeholder="选择任务类型"
+        />
+        <n-space align="center">
+          <n-switch v-model:value="dispatchExecuteNow" />
+          <n-text depth="3">同步执行 (Agent 离线时后端直接调用 Connector)</n-text>
+        </n-space>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showDispatch = false">取消</n-button>
+          <n-button type="primary" @click="confirmDispatch">确认派发</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </CommonPage>
 </template>
 
 <script setup>
 import { h, ref, reactive, onMounted } from 'vue'
-import { NButton, NCard, NDataTable, NDivider, NInput, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
+import { NButton, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
+import CommonPage from '@/components/page/CommonPage.vue'
+import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
 
 const message = useMessage()
-const loading = ref(false)
+const crudRef = ref(null)
 const batchLoading = ref(false)
-const searchDomain = ref('')
-const searchHubStatus = ref('')
 const checkedRowKeys = ref([])
-const tableData = ref([])
 const showDispatch = ref(false)
 const dispatchTarget = ref(null)
 const dispatchJobType = ref('create_env')
@@ -93,9 +95,18 @@ const batchExecuteNow = ref(false)
 const batchJobType = ref('create_env')
 const agentOnline = ref(false)
 
-const pagination = reactive({ page: 1, pageSize: 20, itemCount: 0, showSizePicker: true, pageSizes: [10, 20, 50, 100] })
+const reload = () => crudRef.value?.handleSearch()
 
-const hubStatusFilterOptions = [
+const queryItems = reactive({
+  domain: '',
+  hub_status: '',
+})
+
+function onUpdateQueryItems(val) {
+  Object.assign(queryItems, val)
+}
+
+const hubStatusOptions = [
   { label: '全部', value: '' },
   { label: '未创建', value: '未创建' },
   { label: '已创建', value: '已创建' },
@@ -106,7 +117,7 @@ const batchJobTypeOptions = [
   { label: '创建环境', value: 'create_env' },
   { label: '创建账号', value: 'create_account' },
   { label: '更新环境', value: 'update_env' },
-  { label: '网站控制', value: 'website_control' },
+  { label: '登录WP', value: 'website_control' },
   { label: 'GMC检查', value: 'gmc_check' },
 ]
 
@@ -120,9 +131,10 @@ const statusType = (s) => {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 40, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '域名', key: 'domain', width: 200, ellipsis: { tooltip: true } },
   { title: '服务器IP', key: 'server_ip', width: 130 },
+  { title: '平台', key: 'platform', width: 80, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   {
     title: 'Hub环境ID', key: 'hub_env_id', width: 130,
     render: (r) => r.hub_env_id || '-',
@@ -131,12 +143,12 @@ const columns = [
     title: 'Hub状态', key: 'hub_status', width: 120,
     render: (r) => {
       const label = r.hub_status || '未创建'
-      return h(NTag, { type: statusType(r.hub_status), size: 'small' }, label)
+      return h(NTag, { type: statusType(r.hub_status), size: 'small' }, { default: () => label })
     },
   },
   {
     title: '流水线状态', key: 'pipeline_status', width: 120,
-    render: (r) => h(NTag, { type: 'default', size: 'small' }, r.pipeline_status || '-'),
+    render: (r) => h(NTag, { type: 'default', size: 'small' }, { default: () => r.pipeline_status || '-' }),
   },
   {
     title: 'GMC状态', key: 'gmc_status', width: 100,
@@ -150,56 +162,43 @@ const columns = [
         query_failed: 'error',
         unknown: 'default',
       }
-      return h(NTag, { type: typeMap[r.gmc_status] || 'default', size: 'small' }, label)
+      return h(NTag, { type: typeMap[r.gmc_status] || 'default', size: 'small' }, { default: () => label })
     },
   },
   {
-    title: '操作', key: 'actions', width: 380, fixed: 'right',
+    title: '操作', key: 'actions', width: 440, fixed: 'right',
     render: (r) => {
-      const buttons = [
+        const buttons = [
         { label: '创建环境', type: 'primary', action: 'create_env', ghost: !r.hub_env_id },
         { label: '创建账号', type: 'info', action: 'create_account', ghost: !r.hub_env_id },
         { label: '更新环境', type: 'warning', action: 'update_env', ghost: !r.hub_env_id },
-        { label: '网站控制', type: 'success', action: 'website_control', ghost: !r.hub_env_id },
+        { label: '登录WP', type: 'success', action: 'website_control', ghost: !r.hub_env_id, disabled: r.platform === 'shopify' },
         { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !r.hub_env_id },
+        { label: '打开环境', type: 'error', action: 'open_env', ghost: !r.hub_env_id },
       ]
       return h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, buttons.map(btn =>
         h(NButton, {
           size: 'tiny',
-          type: btn.type,
+          type: btn.disabled ? 'default' : btn.type,
           ghost: btn.ghost,
-          onClick: () => dispatchSingle(r, btn.action),
-        }, btn.label)
+          disabled: btn.disabled,
+          onClick: () => handleAction(r, btn.action),
+        }, { default: () => btn.label })
       ))
     },
   },
 ]
 
-onMounted(() => {
-  loadSites()
-  loadAgentStatus()
-})
+// ─── 数据加载 ───
 
-async function loadSites() {
-  loading.value = true
-  try {
-    const params = {
-      page: pagination.page,
-      page_size: pagination.pageSize,
-    }
-    if (searchDomain.value) params.domain = searchDomain.value
-    if (searchHubStatus.value) {
-      if (searchHubStatus.value === '未创建') params.hub_status = ''
-      else params.hub_status = searchHubStatus.value
-    }
-    const res = await api.getSiteList(params)
-    tableData.value = res.data || []
-    pagination.itemCount = res.total || 0
-  } catch (e) {
-    message.error('加载站点列表失败')
-  } finally {
-    loading.value = false
+async function getData({ page, page_size, domain, hub_status }) {
+  const params = { page, page_size }
+  if (domain) params.domain = domain
+  if (hub_status) {
+    params.hub_status = hub_status === '未创建' ? '' : hub_status
   }
+  const res = await api.getSiteList(params)
+  return { data: res?.data ?? [], total: res?.total ?? 0 }
 }
 
 async function loadAgentStatus() {
@@ -209,50 +208,63 @@ async function loadAgentStatus() {
   } catch (_) {}
 }
 
-function doSearch() {
-  pagination.page = 1
-  loadSites()
-}
+// ─── 生命周期 ───
 
-function onPageChange(page) {
-  pagination.page = page
-  loadSites()
-}
+onMounted(() => {
+  crudRef.value?.handleSearch()
+  loadAgentStatus()
+})
 
-function onPageSizeChange(size) {
-  pagination.pageSize = size
-  pagination.page = 1
-  loadSites()
-}
+// ─── 单站点派发 ───
 
 function dispatchSingle(row, jobType) {
   dispatchTarget.value = row
   dispatchJobType.value = jobType
-  dispatchExecuteNow.value = !agentOnline.value  // Agent 离线默认同步执行
+  dispatchExecuteNow.value = !agentOnline.value
   showDispatch.value = true
+}
+
+function handleAction(row, action) {
+  if (action === 'open_env') {
+    openEnvironment(row)
+  } else {
+    dispatchSingle(row, action)
+  }
+}
+
+async function openEnvironment(row) {
+  try {
+    await api.triggerHubOpenEnv(row.id, 0)
+    message.success(`站点 ${row.domain} 浏览器环境已打开`)
+  } catch (e) {
+    message.error(`打开环境失败: ${e}`)
+  }
+}
+
+const fnMap = {
+  create_env: api.triggerHubEnv,
+  create_account: api.triggerHubAccount,
+  update_env: api.triggerHubUpdate,
+  website_control: api.triggerHubControl,
+  gmc_check: api.triggerHubGmcCheck,
 }
 
 async function confirmDispatch() {
   const row = dispatchTarget.value
   try {
-    const fnMap = {
-      create_env: api.triggerHubEnv,
-      create_account: api.triggerHubAccount,
-      update_env: api.triggerHubUpdate,
-      website_control: api.triggerHubControl,
-      gmc_check: api.triggerHubGmcCheck,
-    }
     const fn = fnMap[dispatchJobType.value]
     if (fn) {
       await fn(row.id, 0, dispatchExecuteNow.value)
       message.success(`站点 ${row.domain} 的 ${dispatchJobType.value} 已派发`)
       showDispatch.value = false
-      loadSites()
+      reload()
     }
   } catch (e) {
     message.error(`派发失败: ${e}`)
   }
 }
+
+// ─── 批量派发 ───
 
 async function batchDispatch() {
   if (!checkedRowKeys.value.length) {
@@ -267,14 +279,6 @@ async function batchDispatch() {
 
   try {
     if (batchExecuteNow.value) {
-      // 同步执行：逐个调用快捷入口
-      const fnMap = {
-        create_env: api.triggerHubEnv,
-        create_account: api.triggerHubAccount,
-        update_env: api.triggerHubUpdate,
-        website_control: api.triggerHubControl,
-        gmc_check: api.triggerHubGmcCheck,
-      }
       const fn = fnMap[batchJobType.value]
       let ok = 0, fail = 0
       for (const siteId of checkedRowKeys.value) {
@@ -285,13 +289,23 @@ async function batchDispatch() {
       }
       message.success(`批量同步执行完成: 成功 ${ok}, 失败 ${fail}`)
     } else {
-      // 异步派发：使用批量接口，由 Agent 领取
       const res = await api.batchHubDispatch(checkedRowKeys.value, batchJobType.value)
       const r = res.data || res
-      message.success(`批量派发完成: 成功 ${r.success || 0}, 失败 ${r.fail || 0}`)
+      const success = r.success || 0
+      const fail = r.fail || 0
+      if (fail > 0 && r.results) {
+        // 显示具体失败原因
+        const errors = r.results
+          .filter(item => !item.ok)
+          .map(item => `${item.domain || item.site_id}: ${item.error}`)
+          .join('；')
+        message.warning(`批量派发: 成功 ${success}, 失败 ${fail}。${errors}`, { duration: 8000 })
+      } else {
+        message.success(`批量派发完成: 成功 ${success}, 失败 ${fail}`)
+      }
     }
     checkedRowKeys.value = []
-    loadSites()
+    reload()
   } catch (e) {
     message.error(`批量派发异常: ${e}`)
   } finally {

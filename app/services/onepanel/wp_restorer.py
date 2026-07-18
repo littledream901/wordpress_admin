@@ -34,8 +34,8 @@ class OnePanelWordPressRestorer:
         else:
             self.restore_mode = 'safe'
         self.old_source_domain = str(_provider_value(cfgs, 'OP_OLD_SOURCE_DOMAIN', 'old_source_domain', '') or '').strip()
-        # SSL 验证：优先 pipeline Provider，回退 settings
-        _wp_ssl = ProviderResolver.sync_get_config('pipeline', 'wp_verify_ssl', 'true')
+        # SSL 验证：从 onepanel Provider 读取
+        _wp_ssl = ProviderResolver.sync_get_config('onepanel', 'wp_verify_ssl', 'true')
         self.wp_verify_ssl = _wp_ssl.lower() != 'false'
         # 可配的额外根文件（如 .htaccess, wp-cli.yml 等）
         raw_root_files = cfgs.get('OP_RESTORE_ROOT_FILES') or ''

@@ -85,7 +85,7 @@ Agent 启动后自动从服务端拉取以下配置，以 DB 中的值为准：
 |--------|------|
 | 代理地址/账号/密码 | DB `provider_config_item`，服务端注入 `update_env` 任务 |
 | Gmail 账号/密码 | DB `gmail_account` 表，服务端注入 `create_account` 任务 |
-| WordPress 登录凭据 | 服务端注入 `website_control` 任务 |
+| WordPress 登录凭据 | 服务端注入 `wp_login` 任务 |
 
 ---
 
@@ -118,7 +118,7 @@ HUB_CONNECTOR_DIR=D:\Hubstudio
 - 启动后自动登录后端，获取 JWT Token
 - **登录后立即从服务端拉取 Provider 配置**（DB > .env），服务端不可达时降级
 - 每 `POLL_INTERVAL` 秒轮询后端领取待执行任务
-- 支持的任务类型：`create_env`、`create_account`、`update_env`、`website_control`、`gmc_check`
+- 支持的任务类型：`create_env`、`create_account`、`update_env`、`website_control`、`gmc_check`（`website_control` 模块已重命名为 `wp_login`）
 - 每 `HEARTBEAT_INTERVAL` 秒向后端发送心跳
 - 网络异常时自动指数退避重连
 - Token 过期自动刷新
@@ -126,4 +126,4 @@ HUB_CONNECTOR_DIR=D:\Hubstudio
 
 ## 依赖
 
-Agent 仅依赖 `requests` 和 `python-dotenv`，不引入 FastAPI / Tortoise 等服务端组件。`DrissionPage` 为可选依赖，仅在 `website_control` / `gmc_check` 任务类型中按需加载。
+Agent 仅依赖 `requests` 和 `python-dotenv`，不引入 FastAPI / Tortoise 等服务端组件。`DrissionPage` 为可选依赖，仅在 `wp_login` / `gmc_check` 任务类型中按需加载。

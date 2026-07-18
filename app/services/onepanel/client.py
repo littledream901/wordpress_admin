@@ -37,8 +37,8 @@ class OnePanelAPI:
         self.max_retries = int(_provider_value(cfgs, 'OP_MAX_RETRIES', 'max_retries', '5'))
         self.retry_interval = int(_provider_value(cfgs, 'OP_RETRY_INTERVAL', 'retry_interval', '5'))
         self.timeout = int(_provider_value(cfgs, 'OP_TIMEOUT', 'timeout', '45'))
-        # SSL 验证：优先 pipeline Provider，回退 settings
-        verify_ssl = ProviderResolver.sync_get_config('pipeline', 'op_verify_ssl', 'true')
+        # SSL 验证：从 onepanel Provider 读取
+        verify_ssl = ProviderResolver.sync_get_config('onepanel', 'op_verify_ssl', 'true')
         self.verify_ssl = verify_ssl.lower() != 'false'
         self.session = httpx.Client(verify=self.verify_ssl, http2=True)
 

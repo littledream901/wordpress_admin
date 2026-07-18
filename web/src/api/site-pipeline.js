@@ -16,14 +16,16 @@ export default {
   batchDynadotNs: (ids = [], nsList = '') => request.post('/site-pipeline/site/batch-dynadot-ns', { site_ids: ids, ns_list: nsList }),
   batchRedirect: (ids = [], targetUrl = '') => request.post('/site-pipeline/site/batch-redirect', { site_ids: ids, target_url: targetUrl }),
   batchHubDispatch: (ids = [], jobType = 'create_env') => request.post('/site-pipeline/site/batch-hub-dispatch', { site_ids: ids, job_type: jobType }),
-  batchWooImport: (ids = []) => request.post('/site-pipeline/site/batch-woo-import', ids),
+  batchImportProducts: (ids = []) => request.post('/site-pipeline/site/batch-woo-import', ids),
+  batchAssign: (data = {}) => request.post('/site-pipeline/site/batch-assign', data),
 
   // 单条操作
   provisionSite: (siteId) => request.post(`/site-pipeline/site/${siteId}/provision`),
   provisionDns: (siteId) => request.post(`/site-pipeline/site/${siteId}/dns`),
   provisionDynadotNs: (siteId) => request.post(`/site-pipeline/site/${siteId}/dynadot-ns`),
   provisionRedirect: (siteId, data = { target_url: '' }) => request.post(`/site-pipeline/site/${siteId}/redirect`, data),
-  importWoo: (siteId) => request.post(`/site-pipeline/site/${siteId}/woo-import`),
+  importProducts: (siteId) => request.post(`/site-pipeline/site/${siteId}/woo-import`),
+  refreshProductCount: (siteId) => request.post(`/site-pipeline/site/${siteId}/refresh-woo-count`),
 
   // HubStudio
   getHubJobList: (params = {}) => request.get('/site-pipeline/hub-job/list', { params }),
@@ -45,6 +47,15 @@ export default {
   triggerHubUpdate: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-update`, { provider_id: providerId, execute_now: executeNow }),
   triggerHubControl: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-control`, { provider_id: providerId, execute_now: executeNow }),
   triggerHubGmcCheck: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-gmc-check`, { provider_id: providerId, execute_now: executeNow }),
+  triggerHubOpenEnv: (siteId, providerId = 0) => request.post(`/site-pipeline/site/${siteId}/hub-open-env`, { provider_id: providerId }),
+
+  // ADS 环境管理
+  getAdsEnvList: (params) => request.get('/site-pipeline/ads/list', { params }),
+  createAdsEnv: (data) => request.post('/site-pipeline/ads/create', data),
+  updateAdsEnv: (data) => request.post('/site-pipeline/ads/update', data),
+  deleteAdsEnv: (data) => request.post('/site-pipeline/ads/delete', { ids: [data.id] }),
+  adsAddSite: (adsId, siteId) => request.post(`/site-pipeline/ads/${adsId}/add-site`, { site_id: siteId }),
+  adsRemoveSite: (adsId, siteId) => request.post(`/site-pipeline/ads/${adsId}/remove-site`, { site_id: siteId }),
 
   // 操作任务查询
   getJob: (params = {}) => request.get('/operation-jobs/get', { params }),
@@ -52,9 +63,15 @@ export default {
   // Feed 文件管理
   getFeedSourceList: (params = {}) => request.get('/site-pipeline/feed/source-list', { params }),
   getFeedProcessedList: (params = {}) => request.get('/site-pipeline/feed/processed-list', { params }),
-  uploadFeed: (formData) => request.post('/site-pipeline/feed/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  uploadFeed: (formData) => request.post('/site-pipeline/feed/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 }),
+
+  // 分片上传
+  initChunkUpload: (data) => request.post('/site-pipeline/feed/chunk/init', data),
+  uploadChunk: (formData) => request.post('/site-pipeline/feed/chunk/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }),
+  completeChunkUpload: (data) => request.post('/site-pipeline/feed/chunk/complete', data),
   createFeed: (id, targetDomain, sourceDomain = '') => request.post(`/site-pipeline/feed/${id}/create-feed`, { target_domain: targetDomain, source_domain: sourceDomain }),
   deleteFeed: (id) => request.delete(`/site-pipeline/feed/${id}`),
   getFeedDefaultDomain: () => request.get('/site-pipeline/feed/config/default-domain'),
   getFeedDownloadUrl: (filename) => `/site-pipeline/feed/download/${encodeURIComponent(filename)}`,
+  cleanupFeed: () => request.post('/site-pipeline/feed/cleanup'),
 }

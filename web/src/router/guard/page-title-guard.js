@@ -1,4 +1,4 @@
-const baseTitle = import.meta.env.VITE_TITLE
+const baseTitle = import.meta.env.VITE_TITLE || document.title || 'Admin'
 
 export function createPageTitleGuard(router) {
   router.afterEach((to) => {

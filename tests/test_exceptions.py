@@ -16,7 +16,8 @@ from app.core.exceptions import (
     ResourceBusyError,
     SettingNotFound,
     TaskExecutionError,
-    # 异常处理器
+)
+from app.core.exception_handlers import (
     DoesNotExistHandle,
     HttpExcHandle,
     IntegrityHandle,

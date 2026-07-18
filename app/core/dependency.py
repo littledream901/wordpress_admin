@@ -53,7 +53,9 @@ class PermissionControl:
         if current_user.is_superuser:
             return
         method = request.method
-        path = request.url.path
+        # 使用路由模式路径（如 /api/v1/user/{id}）而非实际 URL 路径（如 /api/v1/user/123）
+        route = request.scope.get("route")
+        path = route.path if route else request.url.path
         roles: list[Role] = await current_user.roles
         if not roles:
             raise HTTPException(status_code=403, detail="The user is not bound to a role")

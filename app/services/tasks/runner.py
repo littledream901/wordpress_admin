@@ -10,6 +10,7 @@ Task Runner 基类 —— 所有后台任务执行器的抽象基类。
 import asyncio
 import json
 import logging
+import os
 import traceback
 import uuid
 from datetime import datetime
@@ -26,6 +27,9 @@ from app.models.operation_job import OperationJob
 from app.models.site_pipeline import Site
 
 _log = logging.getLogger(__name__)
+
+# ── 实例标识（用于 worker 归属和心跳） ──
+_INSTANCE_ID = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 # ── action_type → provider_type 映射 ──
 _ACTION_PROVIDER: dict[str, str] = {
@@ -111,13 +115,16 @@ class TaskRunner:
             total_steps=total_steps,
             payload_json=json.dumps(payload or {}, ensure_ascii=False),
             batch_id=batch_id,
+            worker_name=_INSTANCE_ID,
+            last_heartbeat=datetime.now(),
             started_at=datetime.now(),
         )
 
     @staticmethod
     async def _update_step(job: OperationJob, step: str):
         job.step = step
-        await job.save(update_fields=["step"])
+        job.last_heartbeat = datetime.now()
+        await job.save(update_fields=["step", "last_heartbeat"])
 
     async def _complete_job(
         self,

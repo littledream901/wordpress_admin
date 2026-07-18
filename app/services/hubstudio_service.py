@@ -106,7 +106,7 @@ class HubStudioOrchestrationService:
         if not provider_id:
             provider_id = await self._resolve_provider_id(site_id)
 
-        # update_env / create_account / website_control / gmc_check 必须有 hub_env_id
+        # update_env / create_account / wp_login / gmc_check 必须有 hub_env_id
         if job_type in ("update_env", "create_account", "website_control", "gmc_check") and not site.hub_env_id:
             raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行 create_env")
 
@@ -119,9 +119,9 @@ class HubStudioOrchestrationService:
         if job_type == "create_account":
             payload = await self._enrich_create_account_payload(payload, site)
 
-        # website_control: 注入 Gmail + WordPress 凭证，供 executor 自动登录
+        # wp_login: 注入 Gmail + WordPress 凭证，供 executor 自动登录
         if job_type == "website_control":
-            payload = await self._enrich_website_control_payload(payload, site)
+            payload = await self._enrich_wp_login_payload(payload, site)
 
         job = await self.create_job(
             site_id=site.id,
@@ -271,7 +271,7 @@ class HubStudioOrchestrationService:
         return await HubStudioJob.filter(id=job_id).first()
 
     async def retry_job(self, job_id: int, execute_now: bool = False) -> Optional[HubStudioJob]:
-        """重试失败任务"""
+        """重试失败任务，同步重置关联的 OperationJob"""
         job = await HubStudioJob.filter(id=job_id).first()
         if not job:
             return None
@@ -281,6 +281,20 @@ class HubStudioOrchestrationService:
         job.started_at = None
         job.finished_at = None
         await job.save()
+
+        # 同步重置关联的 OperationJob 状态
+        op_job = await OperationJob.filter(
+            resource_type="site", resource_id=job.site_id,
+            action_type=f"hub_{job.job_type}",
+            status__in=["running", "failed"],
+        ).order_by("-id").first()
+        if op_job:
+            op_job.status = "pending"
+            op_job.error_message = ""
+            op_job.finished_at = None
+            await op_job.save()
+            logger.info(f"HubStudio 重试同步 OperationJob: id={op_job.id}")
+
         logger.info(f"HubStudio 任务已重试: id={job.id}, retry={job.retry_count}")
 
         if execute_now:
@@ -288,7 +302,7 @@ class HubStudioOrchestrationService:
             result = await self._execute_job_sync(job, "server-fallback")
             return job, result
 
-        return job, None
+        return job
 
     async def cancel_job(self, job_id: int) -> Optional[HubStudioJob]:
         """取消任务（仅 pending/running 状态可取消）"""
@@ -375,9 +389,45 @@ class HubStudioOrchestrationService:
     async def get_agent_config(self, provider_id: int) -> dict:
         """Agent 启动后拉取 Provider 配置（以 DB 为主，环境变量兜底）。
 
+        provider_id=0 时自动解析默认 hubstudio Provider。
         返回的 key 名与 Agent 端 _load_config() 一致，可直接 merge。
+        额外返回 _resolved_provider_id 告知 Agent 解析后的实际 ID。
         """
         config = {}
+        resolved_id = provider_id
+
+        # provider_id=0：解析默认 hubstudio Provider
+        if not provider_id:
+            # 诊断：先查所有 hubstudio 类型的 provider
+            all_hub = await ConfigProvider.filter(provider_type="hubstudio").all()
+            if not all_hub:
+                logger.warning("Agent 请求默认 Provider，但系统中没有任何 hubstudio 类型的 Provider")
+            else:
+                active_list = [p for p in all_hub if p.status == "active"]
+                default_list = [p for p in active_list if p.is_default]
+                logger.info(
+                    f"hubstudio Provider 统计: 总数={len(all_hub)}, "
+                    f"active={len(active_list)}, is_default={len(default_list)}"
+                )
+                if not active_list:
+                    logger.warning(
+                        f"存在 {len(all_hub)} 个 hubstudio Provider，但全部为非 active 状态: "
+                        f"{', '.join(f'{p.provider_name}({p.status})' for p in all_hub)}"
+                    )
+                elif not default_list:
+                    logger.warning(
+                        f"存在 {len(active_list)} 个 active hubstudio Provider，但未设置默认: "
+                        f"{', '.join(p.provider_name for p in active_list)}"
+                    )
+
+            default = await ConfigProvider.get_default("hubstudio")
+            if default:
+                provider_id = default.id
+                resolved_id = default.id
+                logger.info(f"Agent 请求默认 Provider → 解析为 provider_id={resolved_id} ({default.provider_name})")
+            else:
+                logger.warning("Agent 请求默认 Provider，但系统中无符合条件的 hubstudio Provider（需 status=active 且 is_default=True，或至少有一个 active）")
+
         # 1. 从 DB 读取 provider 配置
         if provider_id:
             db_items = await ProviderConfigItem.get_map(provider_id)
@@ -399,19 +449,21 @@ class HubStudioOrchestrationService:
                 if db_key in db_items:
                     config[agent_key] = db_items[db_key]
 
-        # 2. 环境变量兜底（DB 中没有的 key 才用 env）
-        _env_fallbacks = {
-            "app_id": "HUB_APP_ID",
-            "app_secret": "HUB_APP_SECRET",
-            "group_code": "HUB_GROUP_CODE",
-            "real_kernel_version": "HUB_KERNEL_VER",
-        }
-        for key, env_var in _env_fallbacks.items():
-            if key not in config or not config[key]:
-                val = os.getenv(env_var, "")
-                if val:
-                    config[key] = val
+        # 2. 环境变量兜底（仅 provider_id=0 且无默认 Provider 时生效）
+        if not resolved_id:
+            _env_fallbacks = {
+                "app_id": "HUB_APP_ID",
+                "app_secret": "HUB_APP_SECRET",
+                "group_code": "HUB_GROUP_CODE",
+                "real_kernel_version": "HUB_KERNEL_VER",
+            }
+            for key, env_var in _env_fallbacks.items():
+                if key not in config or not config[key]:
+                    val = os.getenv(env_var, "")
+                    if val:
+                        config[key] = val
 
+        config["_resolved_provider_id"] = resolved_id
         return config
 
     # ── Agent 领取/回传 ──
@@ -428,7 +480,7 @@ class HubStudioOrchestrationService:
         job.worker_name = worker_name
         job.started_at = datetime.now()
 
-        # 刷新 payload：create_account/update_env/website_control/gmc_check 依赖 hub_env_id，
+        # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
         if job.job_type in ("create_account", "update_env", "website_control", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
@@ -521,6 +573,44 @@ class HubStudioOrchestrationService:
     async def trigger_hub_gmc_check(self, site_id: int, provider_id: int = 0,
                                      execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
         return await self.dispatch_for_site(site_id, "gmc_check", provider_id=provider_id, execute_now=execute_now)
+
+    async def trigger_hub_open_env(self, site_id: int, provider_id: int = 0) -> dict:
+        """直接打开 HubStudio 浏览器环境（不创建任务，同步执行）
+
+        调用 HubStudio Connector 的 browser/start API 启动浏览器窗口。
+        仅当后端与 Connector 运行在同一台机器时可用。
+        """
+        site = await Site.filter(id=site_id).first()
+        if not site:
+            raise SiteNotFoundError(site_id=site_id)
+        if not site.hub_env_id:
+            raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行创建环境")
+
+        # 获取 provider 配置并启动 runtime
+        provider_config = await self._get_provider_config(provider_id)
+        if not provider_config.get("connector_path"):
+            raise ValueError("Provider 未配置 connector_path，无法直接打开浏览器")
+
+        from app.services.hubstudio.runtime import HubStudioRuntime
+        from app.services.hubstudio.client import HubStudioClient
+
+        runtime = HubStudioRuntime(
+            connector_path=provider_config["connector_path"],
+            http_port=provider_config.get("http_port", 6873),
+        )
+
+        if not runtime.is_port_open():
+            runtime.start()
+            import time
+            for _ in range(10):
+                if runtime.is_port_open():
+                    break
+                time.sleep(1)
+
+        client = HubStudioClient(base_url=f"http://localhost:{runtime.http_port}")
+        client.start_browser(int(site.hub_env_id), isHeadless=False)
+
+        return {"status": "success", "message": f"浏览器已启动: {site.domain}"}
 
     # ── 内部辅助 ──
 
@@ -650,8 +740,8 @@ class HubStudioOrchestrationService:
 
         return payload
 
-    async def _enrich_website_control_payload(self, payload: dict, site: Site) -> dict:
-        """为 website_control 任务注入 WordPress 登录凭证
+    async def _enrich_wp_login_payload(self, payload: dict, site: Site) -> dict:
+        """为 wp_login 任务注入 WordPress 登录凭证
 
         executor 使用这些凭证自动登录对应网站。
         """
@@ -699,7 +789,7 @@ class HubStudioOrchestrationService:
                 "hub_env_id": site.hub_env_id,
             }
         elif job_type == "website_control":
-            return {**base, "hub_env_id": site.hub_env_id, "login_url": site.login_url}
+            return {**base, "hub_env_id": site.hub_env_id, "login_url": site.login_url, "feed_link": site.feed_link}
         elif job_type == "gmc_check":
             return {**base, "hub_env_id": site.hub_env_id}
         return base
@@ -757,7 +847,7 @@ class HubStudioOrchestrationService:
                     gmc_data = result.get("gmc_data")
                     if gmc_data:
                         site.gmc_data = json.dumps(gmc_data, ensure_ascii=False)
-                    logger.info(f"[website_control] GMC 数据已回写: gmc_status={gmc_status}")
+                    logger.info(f"[wp_login] GMC 数据已回写: gmc_status={gmc_status}")
                 elif job.job_type == "gmc_check":
                     gmc_status = result.get("gmc_status", "")
                     if gmc_status:

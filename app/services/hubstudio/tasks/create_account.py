@@ -156,12 +156,12 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         except Exception as e:
             err_msg = str(e)
             if "无效的API接口" in err_msg or "add-account" in err_msg:
-                executor.logger.warning("[create_account] add-account 不可用，回退到旧接口创建 Gmail")
+                executor.logger.warning("[create_account] add-account 直连不可用，回退到 httpx 客户端")
                 try:
                     client = executor.rt.ensure_client()
-                    resp = client.create_account(**gmail_data)
+                    resp = client.add_container_account(**gmail_data)
                     results["gmail_account"] = {"ok": True, "resp": resp, "fallback": True}
-                    executor.logger.info(f"[create_account] Gmail 账号创建成功（旧接口）")
+                    executor.logger.info(f"[create_account] Gmail 账号创建成功（httpx 客户端）")
                     time.sleep(1.0)
                 except Exception as e2:
                     results["gmail_account"] = {"ok": False, "error": str(e2)}
@@ -207,20 +207,21 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
                 results["admin_account"] = {"ok": False, "error": str(e)[:200]}
                 executor.logger.error(f"[create_account] 后台账号创建失败: {e}")
     else:
-        executor.logger.info("[create_account] 无 login_url，使用旧接口创建基础账号")
+        executor.logger.info("[create_account] 无 login_url，使用 add-account 直连创建基础账号")
         try:
-            client = executor.rt.ensure_client()
-            resp = client.create_account(
-                containerCode=env_id_int,
-                accountName=executor.admin_account_name,
-                accountPassword=executor.admin_account_password,
-                siteName=executor.admin_site_name,
-            )
+            admin_data = {
+                "containerCode": env_id_int,
+                "accountName": executor.admin_account_name,
+                "accountPassword": executor.admin_account_password,
+                "siteName": executor.admin_site_name,
+                "name": executor.admin_account_name,
+            }
+            resp = call_add_account_direct(executor, admin_data, max_retries=3)
             results["account"] = {"ok": True, "resp": resp}
             executor.logger.info(f"[create_account] 基础账号创建成功")
         except Exception as e:
             results["account"] = {"ok": False, "error": str(e)[:200]}
-            executor.logger.warning(f"[create_account] 基础账号创建失败: {e}")
+            executor.logger.error(f"[create_account] 基础账号创建失败: {e}")
 
     # ── 3. 写备注 ──
     remark_fields = payload.get("remark_fields", {})
@@ -247,13 +248,34 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
                 executor.logger.warning(f"[create_account] 备注写入失败: {e}")
 
     # ── 汇总结果 ──
-    any_ok = any(v.get("ok") for v in results.values())
-    status = "success" if any_ok else "failed"
+    task_results = {k: v for k, v in results.items() if isinstance(v, dict)}
+    ok_count = sum(1 for v in task_results.values() if v.get("ok"))
+    fail_count = len(task_results) - ok_count
 
-    executor.logger.info(f"[create_account] 完成: status={status}, results={list(results.keys())}")
+    if fail_count == 0:
+        status = "success"
+    elif ok_count == 0:
+        status = "failed"
+    else:
+        status = "partial"
+
+    # 提取所有失败的错误信息
+    errors = []
+    for key, val in task_results.items():
+        if not val.get("ok"):
+            errors.append(f"[{key}] {val.get('error', '未知错误')}")
+
+    summary = f"{ok_count}/{len(task_results)} 成功" + (f", {fail_count} 失败" if fail_count else "")
+
+    executor.logger.info(
+        f"[create_account] 完成: status={status}, {summary}"
+        + (f", errors={errors}" if errors else "")
+    )
     return {
         "status": status,
+        "summary": summary,
         "account_id": "",
         "domain": domain,
+        "errors": errors,
         "results": results,
     }

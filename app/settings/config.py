@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_MAX_REQUESTS: int = 100  # 每分钟最大请求数
     RATE_LIMIT_WINDOW_SECONDS: int = 60  # 限流窗口（秒）
 
+    # ── 审计日志 ──
+    AUDIT_EXCLUDE_PATHS: typing.List[str] = []
+    """审计日志排除路径列表，支持前缀匹配（如 /static）和通配符（如 /api/v1/*/download）。
+    留空则使用内置默认值（静态文件、文档、上传接口、流式下载等）"""
+
     # ── Redis（分布式限流 / 缓存，可选）──
     REDIS_URL: str = ""
     """Redis 连接地址，格式: redis://[:password@]host:port/db。
@@ -48,12 +53,16 @@ class Settings(BaseSettings):
 
     # ── 数据库 ──
     DB_ENGINE: str = "sqlite"  # sqlite / mysql / postgres
-    DB_SQLITE_PATH: str = ""  # 为空则使用默认路径
-    DB_HOST: str = "localhost"
+    DB_SQLITE_PATH: str = ""  # SQLite 模式下的数据库文件路径
+    DB_HOST: str = "db"
     DB_PORT: int = 3306
-    DB_USER: str = "root"
+    DB_USER: str = "admin"
     DB_PASSWORD: str = ""
     DB_NAME: str = "vue_fastapi_admin"
+
+    # ── 流水线 / Feed ──
+    FEED_EXPIRE_DAYS: int = 3
+    """Feed 文件下载有效期（天），过期后不可下载"""
 
     @property
     def TORTOISE_ORM(self) -> dict:
@@ -67,7 +76,11 @@ class Settings(BaseSettings):
                     "user": self.DB_USER,
                     "password": self.DB_PASSWORD,
                     "database": self.DB_NAME,
+                    "connect_timeout": 10,
+                    "charset": "utf8mb4",
                 },
+                "minsize": 2,
+                "maxsize": 10,
             }
         elif self.DB_ENGINE == "postgres":
             connections["default"] = {

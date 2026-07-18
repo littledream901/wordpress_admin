@@ -9,8 +9,9 @@ from app.models.site_pipeline import Site
 from app.models.gmail_account import GmailAccount
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.gmail_account import GmailAccountCreate, GmailAccountUpdate, GmailAssign, GmailHealthStatus
+from app.services.operation_job_service import operation_job_service
 
-router = APIRouter()
+router = APIRouter(tags=["Gmail"])
 
 
 @router.get('/list', summary='Gmail 列表')
@@ -102,11 +103,17 @@ async def batch_delete_gmail(ids: list[int] = Body(...)):
     count = 0
     for gid in ids:
         try:
-            await gmail_account_controller.remove(id=gid)
+            gmail = await gmail_account_controller.get_or_none(id=gid)
+            await gmail_account_controller.soft_remove(id=gid)
+            if gmail:
+                await operation_job_service.create_task(
+                    resource_type="gmail", resource_id=gid,
+                    action_type="delete_gmail", domain=gmail.username,
+                )
             count += 1
         except Exception:
             pass
-    return Success(data={'deleted': count})
+    return Success(data={'deleted': count}, msg='已移入回收站')
 
 
 @router.post('/unassign', summary='取消站点已分配的 Gmail')
@@ -115,6 +122,12 @@ async def unassign_gmail(site_id: int = Body(..., embed=True)):
     gmail = await gmail_account_controller.unassign_from_site(site_id)
     if not gmail:
         return Fail(code=404, msg='该站点没有已分配的 Gmail')
+    # 记录操作任务
+    await operation_job_service.create_task(
+        resource_type="gmail", resource_id=gmail.id,
+        action_type="unassign_gmail", domain=gmail.username,
+        payload={"site_id": site_id},
+    )
     return Success(data={'gmail': await gmail.to_dict(), 'site_id': site_id}, msg='Unassigned Successfully')
 
 

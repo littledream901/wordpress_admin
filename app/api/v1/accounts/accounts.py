@@ -5,7 +5,7 @@ from app.controllers.account import account_controller
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.account import AccountCreate, AccountUpdate
 
-router = APIRouter()
+router = APIRouter(tags=["Account"])
 
 
 @router.get("/list", summary="账号列表")
@@ -51,5 +51,5 @@ async def update_account(payload: AccountUpdate):
 
 @router.delete("/delete", summary="删除账号")
 async def delete_account(id: int = Query(..., description="账号ID")):
-    await account_controller.remove(id=id)
-    return Success(msg="Deleted Successfully")
+    await account_controller.soft_remove(id=id)
+    return Success(msg="已移入回收站")

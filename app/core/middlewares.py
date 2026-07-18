@@ -34,14 +34,21 @@ class SimpleBaseMiddleware:
             return
 
         request = Request(scope, receive=receive)
+        status_code = [200]
+
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                status_code[0] = message["status"]
+            await send(message)
+
         await self.before_request(request)
-        await self.app(scope, receive, send)
-        await self.after_request(request)
+        await self.app(scope, receive, _send)
+        await self.after_request(request, status_code[0])
 
     async def before_request(self, request: Request):
         pass
 
-    async def after_request(self, request: Request):
+    async def after_request(self, request: Request, status_code: int = 0):
         pass
 
 
@@ -54,7 +61,7 @@ class TraceIDMiddleware(SimpleBaseMiddleware):
         request.state.trace_id = tid
         request.state.start_time = datetime.now()
 
-    async def after_request(self, request: Request):
+    async def after_request(self, request: Request, status_code: int = 0):
         pass
 
 
@@ -71,7 +78,7 @@ class AccessLogMiddleware(SimpleBaseMiddleware):
     async def before_request(self, request: Request):
         pass
 
-    async def after_request(self, request: Request):
+    async def after_request(self, request: Request, status_code: int = 0):
         if request.url.path.startswith(self.SKIP_PREFIXES):
             return
 
@@ -90,11 +97,11 @@ class AccessLogMiddleware(SimpleBaseMiddleware):
             pass
 
         loguru_logger.bind(trace_id=getattr(request.state, "trace_id", "-")).info(
-            f"{request.method} {request.url.path} -> {request.state.status_code} ({duration_ms}ms)",
+            f"{request.method} {request.url.path} -> {status_code} ({duration_ms}ms)",
             access={
                 "method": request.method,
                 "path": request.url.path,
-                "status": request.state.status_code,
+                "status": status_code,
                 "duration_ms": duration_ms,
                 "user_id": user_id,
                 "client_ip": request.client.host if request.client else "",
@@ -110,7 +117,7 @@ class BackGroundTaskMiddleware(SimpleBaseMiddleware):
     async def before_request(self, request):
         await BgTasks.init_bg_tasks_obj()
 
-    async def after_request(self, request):
+    async def after_request(self, request, status_code: int = 0):
         await BgTasks.execute_tasks()
 
 

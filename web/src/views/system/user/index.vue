@@ -1,5 +1,5 @@
 <script setup>
-import { h, onMounted, ref, resolveDirective, withDirectives } from 'vue'
+import { h, onMounted, reactive, ref, resolveDirective, withDirectives } from 'vue'
 import {
   NButton,
   NCheckbox,
@@ -32,7 +32,7 @@ import { useUserStore } from '@/store'
 defineOptions({ name: '用户管理' })
 
 const $table = ref(null)
-const queryItems = ref({})
+const queryItems = reactive({})
 const vPermission = resolveDirective('permission')
 
 const {

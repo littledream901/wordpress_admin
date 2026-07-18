@@ -1,10 +1,10 @@
 """配置提供者模型 — 管理多账号、多环境、多节点的配置实例"""
 from tortoise import fields
 
-from .base import BaseModel, TimestampMixin
+from .base import BaseModel, SoftDeleteMixin, TimestampMixin
 
 
-class ConfigProvider(BaseModel, TimestampMixin):
+class ConfigProvider(BaseModel, SoftDeleteMixin, TimestampMixin):
     """配置提供者（一个实例 = 一个账号/节点/环境）
 
     例如：
@@ -30,7 +30,7 @@ class ConfigProvider(BaseModel, TimestampMixin):
         ("error", "异常"),
     ]
 
-    provider_type = fields.CharField(max_length=64, choices=PROVIDER_TYPES, description="提供者类型", index=True)
+    provider_type = fields.CharField(max_length=64, choices=PROVIDER_TYPES, description="提供者类型", db_index=True)
     provider_name = fields.CharField(max_length=128, description="名称")
     description = fields.CharField(max_length=500, default="", description="描述")
     remark = fields.CharField(max_length=500, default="", description="备注")
@@ -81,7 +81,7 @@ class ProviderConfigItem(BaseModel, TimestampMixin):
     ]
 
     provider = fields.ForeignKeyField("models.ConfigProvider", related_name="items", description="所属提供者")
-    config_key = fields.CharField(max_length=128, description="配置键名", index=True)
+    config_key = fields.CharField(max_length=128, description="配置键名", db_index=True)
     config_value = fields.TextField(default="", description="配置值")
     config_type = fields.CharField(max_length=32, default="string", choices=CONFIG_TYPES, description="值类型")
     is_secret = fields.BooleanField(default=False, description="是否敏感")
@@ -110,9 +110,9 @@ class ResourceProviderBinding(BaseModel, TimestampMixin):
         ("exclusive", "独占"),
     ]
 
-    resource_type = fields.CharField(max_length=64, description="资源类型 (site/operation_job/gmail_account)", index=True)
-    resource_id = fields.IntField(description="资源ID", index=True)
-    provider_type = fields.CharField(max_length=64, description="提供者类型", index=True)
+    resource_type = fields.CharField(max_length=64, description="资源类型 (site/operation_job/gmail_account)", db_index=True)
+    resource_id = fields.IntField(description="资源ID", db_index=True)
+    provider_type = fields.CharField(max_length=64, description="提供者类型", db_index=True)
     provider = fields.ForeignKeyField("models.ConfigProvider", related_name="bindings", description="提供者")
     bind_type = fields.CharField(max_length=32, default="preferred", choices=BIND_TYPES, description="绑定类型")
     remark = fields.CharField(max_length=500, default="", description="备注")
