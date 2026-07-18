@@ -185,6 +185,9 @@ async def init_db():
     # 步骤：safe=False → safe=True，然后逐条添加 ALTER TABLE
     patches = [
         "ALTER TABLE site_pipeline_site ADD COLUMN woo_product_count INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
+        "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN shopify_token VARCHAR(255) DEFAULT ''",
     ]
     for sql in patches:
         try:
