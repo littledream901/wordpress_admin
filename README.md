@@ -19,7 +19,8 @@
 - **一键建站** — 1Panel 集成，10 步自动化部署 WordPress
 - **SSL 证书** — Let's Encrypt 自动申请与绑定
 - **301 重定向** — Cloudflare Page Rule 按需创建
-- **WooCommerce 导入** — Shopify 商品自动采集并导入
+- **ADS 环境管理** — 防关联浏览器环境管理，站点关联与解绑
+- **产品导入** — Shopify 产品导入到 WooCommerce 或 Shopify Store
 - **Feed 管理** — Google Merchant Center Feed 文件管理
 
 ### HubStudio 浏览器自动化
@@ -32,7 +33,7 @@
 - **产品池** — 自动采集、状态追踪、按需分配
 
 ### 任务中心
-- 16 种操作类型统一调度（DNS / 建站 / 采集 / 导入 等）
+- 27 种操作类型统一调度（DNS / 建站 / 采集 / 导入 / ADS 管理 等）
 - 批次追踪、步骤进度、重试机制、幂等性保障
 
 ---
@@ -126,16 +127,24 @@ pnpm dev
 │   │   ├── auditlog/            # 审计日志
 │   │   ├── config/              # 系统配置 + ConfigProvider
 │   │   ├── accounts/            # 通用账号
-│   │   ├── site_pipeline/       # 站点流水线（核心）
+│   │   ├── site_pipeline/       # 站点流水线（核心，含 ADS 路由）
 │   │   ├── gmail/               # Gmail 管理
 │   │   ├── shopify/             # Shopify 采集
 │   │   ├── operation_jobs/      # 任务中心
+│   │   ├── recycle_bin.py       # 回收站（统一软删除恢复）
 │   │   └── imports/             # 批量导入
 │   ├── controllers/             # 业务逻辑层
+│   │   └── ads_manager.py       # ADS 环境管理
 │   ├── core/                    # 核心（认证 / 权限 / 中间件 / CRUD 基类）
 │   ├── models/                  # Tortoise ORM 数据模型
+│   │   └── ads_manager.py       # AdsEnv 模型（多对多站点）
 │   ├── schemas/                 # Pydantic 请求 / 响应 Schema
+│   │   └── ads_manager.py       # ADS 校验模型
 │   ├── services/                # 外部服务集成
+│   │   ├── importers/           # 产品导入器抽象层
+│   │   │   ├── __init__.py
+│   │   │   ├── shopify.py       # Shopify Store 导入
+│   │   │   └── woocommerce.py   # WooCommerce 导入
 │   │   ├── cloudflare_service.py
 │   │   ├── onepanel_service.py
 │   │   ├── hubstudio_service.py
@@ -148,6 +157,9 @@ pnpm dev
 ├── web/                         # 前端
 │   └── src/
 │       ├── views/               # 页面模块
+│       │   ├── site-pipeline/
+│       │   │   ├── ads-manager/  # ADS 环境管理
+│       │   │   └── ...
 │       ├── router/              # 动态路由
 │       ├── store/               # Pinia 状态
 │       ├── api/                 # API 调用层
@@ -209,7 +221,7 @@ create_site → apply_ssl → restore_db → restore_files → rebuild_after_fil
 
 ### 统一任务中心（OperationJob）
 
-所有异步操作（16 种类型）统一由 `OperationJob` 管理：
+所有异步操作（27 种类型）统一由 `OperationJob` 管理：
 
 - 单任务 / 批量任务（batch_id 批次追踪）
 - 步骤进度（step / total_steps）
@@ -241,6 +253,7 @@ create_site → apply_ssl → restore_db → restore_files → rebuild_after_fil
 | 业务 | `/site-pipeline/sites` | 站点管理（批量 DNS / 建站 / 重定向 / Woo 导入） |
 | 业务 | `/site-pipeline/hub-jobs` | HubStudio 任务 |
 | 业务 | `/site-pipeline/feed` | Feed 文件管理 |
+| 业务 | `/site-pipeline/ads` | ADS 环境 CRUD + 站点关联/解绑 |
 | 业务 | `/gmail` | Gmail 账号 CRUD |
 | 业务 | `/shopify` | 采集源 + 产品管理 |
 | 业务 | `/operation-jobs` | 任务列表 + 重试 + 取消 |

@@ -6,7 +6,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 GIT_REPO="${GIT_REPO:-https://github.com/littledream901/wordpress_admin.git}"
-GIT_BRANCH="${GIT_BRANCH:-dev}"
+GIT_BRANCH="${GIT_BRANCH:-main}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -251,8 +251,14 @@ update_deploy() {
 
     # 1. 备份当前状态
     log "备份当前数据库和静态文件..."
-    if [ "${DB_ENGINE:-mysql}" = "mysql" ] && [ -n "${MYSQL_ROOT_PASSWORD:-}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PASSWORD}" --silent 2>/dev/null; then
-        docker compose exec -T db mysqldump -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" "${DB_NAME:-vue_fastapi_admin}" \
+    # 从 .env 文件读取数据库配置（shell 环境变量可能不存在于 update 上下文中）
+    DB_ENGINE_VAL=$(grep "^DB_ENGINE=" .env 2>/dev/null | cut -d= -f2 || echo "sqlite")
+    MYSQL_ROOT_PW=$(grep "^MYSQL_ROOT_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
+    DB_USER_VAL=$(grep "^DB_USER=" .env 2>/dev/null | cut -d= -f2 || echo "admin")
+    DB_PW=$(grep "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
+    DB_NAME_VAL=$(grep "^DB_NAME=" .env 2>/dev/null | cut -d= -f2 || echo "vue_fastapi_admin")
+    if [ "${DB_ENGINE_VAL}" = "mysql" ] && [ -n "${MYSQL_ROOT_PW}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
+        docker compose exec -T db mysqldump -u"${DB_USER_VAL}" -p"${DB_PW}" "${DB_NAME_VAL}" \
             > "data/backup_$(date +%Y%m%d_%H%M%S).sql" 2>/dev/null && log "MySQL 已备份到 data/" || warn "MySQL 备份失败"
     elif [ -f "data/db.sqlite3" ]; then
         cp data/db.sqlite3 "data/db.sqlite3.bak.$(date +%Y%m%d_%H%M%S)"
@@ -379,7 +385,7 @@ print_usage() {
     echo ""
     echo "示例:"
     echo "  # 从零开始（服务器上执行）"
-    echo "  git clone -b dev https://github.com/littledream901/wordpress_admin.git"
+    echo "  git clone -b main https://github.com/littledream901/wordpress_admin.git"
     echo "  cd wordpress_admin"
     echo "  bash deploy/deploy.sh init"
     echo ""

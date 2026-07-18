@@ -15,8 +15,10 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 | 用户/角色/菜单/部门 | 完善的 RBAC 权限体系 |
 | 审计日志 | 自动记录用户操作/IP/内容 |
 | 站点流水线 | 自动化建站、DNS、NS、301重定向 |
+| ADS 环境管理 | 防关联浏览器环境管理，站点关联与解绑 |
 | Shopify 采集 | 集合/单品采集，产品管理，批量分配 |
 | WooCommerce 导入 | 产品批量导入到 WordPress 站点 |
+| Shopify 导入 | 产品通过 Admin API 导入到 Shopify Store |
 | HubStudio 任务分发 | 环境创建/账号创建/GMC检查共4种任务类型 |
 | Dynadot NS 管理 | 域名 NS 修改、批量操作 |
 | Cloudflare DNS | DNS 解析、批量操作 |
@@ -42,7 +44,7 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 ### 步骤 1：克隆项目
 
 ```bash
-git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
+git clone -b main https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
 
 ```
 
@@ -91,7 +93,7 @@ grep DEFAULT_PASSWORD .env
 1. 登录 1Panel 面板，进入 **容器 → 编排 → 创建编排**
 2. 在服务器上克隆项目：
    ```bash
-   git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
+   git clone -b main https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
    ```
 3. 在 1Panel 编排界面中填写：
    - **名称**：`wordpress-admin`
@@ -109,7 +111,7 @@ grep DEFAULT_PASSWORD .env
 ### 方式二：命令行部署 + 1Panel 管理
 
 ```bash
-git clone -b dev https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
+git clone -b main https://github.com/littledream901/wordpress_admin.git /opt/wordpress-admin
 cd /opt/wordpress-admin
 bash deploy/deploy.sh init
 # 部署完成后，1Panel 容器列表自动可见
@@ -169,6 +171,7 @@ wordpress-admin/
 │   ├── models/             # 数据表模型
 │   ├── schemas/            # Pydantic 请求/响应模型
 │   ├── services/           # 第三方服务封装
+│   │   └── importers/       # 产品导入器抽象层 (Shopify/WooCommerce)
 │   ├── core/               # 全局基础能力（认证/RBAC/CRUD/中间件）
 │   ├── utils/              # 通用工具函数
 │   └── settings/           # 全局配置
@@ -512,7 +515,7 @@ async def export_data():
     # 导出所有业务表（排除 aerich 迁移表）
     tables = ['users', 'roles', 'menus', 'apis', 'depts', 'auditlog',
               'config', 'configprovider', 'sites', 'gmails', 'shopify_sources',
-              'shopify_products', 'operation_jobs', 'accounts']
+              'shopify_products', 'operation_jobs', 'accounts', 'ads_env']
     dump = {}
     for table in tables:
         try:
