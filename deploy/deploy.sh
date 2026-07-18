@@ -208,10 +208,10 @@ init_deploy() {
     # 从 .env 读取密码（shell 不会自动 source，-m1 防止重复行导致变量污染）
     MYSQL_ROOT_PW=$(grep -m1 "^MYSQL_ROOT_PASSWORD=" .env | cut -d= -f2)
     DB_USER_VAL=$(grep -m1 "^DB_USER=" .env | cut -d= -f2 || echo "admin")
-    # 等待 MySQL 就绪
+    # 等待 MySQL 完全就绪（用 mysql -e "SELECT 1" 而非 mysqladmin ping，确保认证层就绪）
     local mysql_ready=false
     for i in $(seq 1 30); do
-        if docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
+        if docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" -e "SELECT 1" >/dev/null 2>&1; then
             mysql_ready=true
             break
         fi
