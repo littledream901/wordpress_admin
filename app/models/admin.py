@@ -45,7 +45,6 @@ class Api(BaseModel, TimestampMixin):
 
     class Meta:
         table = "api"
-        unique_together = [("path", "method")]
 
 
 class Menu(BaseModel, TimestampMixin):
@@ -63,7 +62,6 @@ class Menu(BaseModel, TimestampMixin):
 
     class Meta:
         table = "menu"
-        unique_together = [("path", "parent_id")]
 
 
 class Dept(BaseModel, TimestampMixin):

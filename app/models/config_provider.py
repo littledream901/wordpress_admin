@@ -42,7 +42,6 @@ class ConfigProvider(BaseModel, SoftDeleteMixin, TimestampMixin):
     class Meta:
         table = "config_provider"
         ordering = ["-priority", "id"]
-        unique_together = [("provider_type", "provider_name")]
 
     @classmethod
     async def get_default(cls, provider_type: str) -> "ConfigProvider":
