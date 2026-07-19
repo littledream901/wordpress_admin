@@ -1,4 +1,4 @@
-"""数据库工具函数 — MySQL 兼容性适配"""
+"""数据库工具函数"""
 import logging
 import re
 
@@ -8,7 +8,7 @@ _log = logging.getLogger(__name__)
 
 
 async def safe_count(query) -> int:
-    """MySQL / SQLite 兼容的 count 查询。
+    """MySQL 兼容的 count 查询。
 
     Tortoise ORM 的 .count() 在 MySQL asyncmy 驱动下可能返回字符串，
     此函数统一转换为 int，并在所有路径失败时回退到全量 ID 计数。

@@ -171,7 +171,7 @@ class ProvisionTaskRunner(TaskRunner):
             woo_ck, woo_cs = '', ''
             try:
                 woo_ck, woo_cs = await self._exec(
-                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol, site.server_ip)
+                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol)
                 )
             except Exception as exc:
                 _log.warning("WooCommerce Key 获取失败（非阻断）：%s", exc)
@@ -184,7 +184,7 @@ class ProvisionTaskRunner(TaskRunner):
             # Step 11: health_check
             await self._update_step(job, "health_check")
             health_ok = await self._exec(
-                lambda: wp_restorer.health_check(site.domain, protocol, site.server_ip)
+                lambda: wp_restorer.health_check(site.domain, protocol)
             )
             if not health_ok:
                 raise WordPressOperationError("health check", domain=site.domain, detail=f"协议={protocol}")
@@ -192,7 +192,7 @@ class ProvisionTaskRunner(TaskRunner):
             # Step 12: fetch_feed_link
             await self._update_step(job, "fetch_feed_link")
             feed_link = await self._exec(
-                lambda: wp_restorer.fetch_last_feed_link(ctx_refresh_url, site.server_ip)
+                lambda: wp_restorer.fetch_last_feed_link(ctx_refresh_url)
             ) or ''
             login_url = f'{protocol}://{site.domain}/wp-admin'
 

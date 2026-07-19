@@ -1,7 +1,6 @@
-"""同步配置读取器 —— 委托 ProviderResolver，兼容 MySQL/SQLite
+"""同步配置读取器 —— 委托 ProviderResolver
 
-所有同步服务类通过此模块读取配置，内部全部委托 ProviderResolver，
-不再直接使用 raw SQLite 连接。
+所有同步服务类通过此模块读取配置，内部全部委托 ProviderResolver。
 """
 
 from app.models.config_provider import ConfigProvider, ProviderConfigItem

@@ -49,29 +49,25 @@ mkdir -p logs static/avatars uploads/feeds
 # =============================================
 # 数据库迁移
 # =============================================
-if [ "$DB_ENGINE" = "mysql" ]; then
-    echo "[INFO] 等待 MySQL 就绪..."
-    MYSQL_READY=false
-    for i in $(seq 1 60); do
-        if mysql -h"${DB_HOST:-db}" -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
-            echo "[INFO] MySQL 已就绪"
-            MYSQL_READY=true
-            break
-        fi
-        echo "[INFO] 等待 MySQL 认证就绪... ($i/60)"
-        sleep 3
-    done
-    if [ "$MYSQL_READY" = false ]; then
-        echo "[ERROR] MySQL 未能在 180 秒内就绪，退出"
-        exit 1
+echo "[INFO] 等待 MySQL 就绪..."
+MYSQL_READY=false
+for i in $(seq 1 60); do
+    if mysql -h"${DB_HOST:-db}" -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
+        echo "[INFO] MySQL 已就绪"
+        MYSQL_READY=true
+        break
     fi
+    echo "[INFO] 等待 MySQL 认证就绪... ($i/60)"
+    sleep 3
+done
+if [ "$MYSQL_READY" = false ]; then
+    echo "[ERROR] MySQL 未能在 180 秒内就绪，退出"
+    exit 1
 fi
 
 echo "[INFO] 同步数据库表结构..."
 python -c "
 import asyncio
-import os
-import sys
 import time
 from tortoise import Tortoise
 from tortoise.exceptions import DBConnectionError
@@ -80,48 +76,19 @@ from app.settings import TORTOISE_ORM
 async def upgrade():
     # ── 带重试的 Tortoise 初始化（MySQL 首次启动认证层可能滞后）──
     max_retries = 3
-    last_err = None
     for attempt in range(1, max_retries + 1):
         try:
             await Tortoise.init(config=TORTOISE_ORM)
             break
         except DBConnectionError as e:
-            last_err = e
             if attempt < max_retries:
                 print(f'[INFO] Tortoise 连接失败 (尝试 {attempt}/{max_retries})，10秒后重试...')
                 time.sleep(10)
             else:
                 raise
 
-    migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
-
-    # ── Aerich 迁移仅 SQLite 使用（迁移文件为 SQLite 语法，MySQL 会报语法错误）──
-    db_engine = os.environ.get('DB_ENGINE', 'sqlite')
-    if db_engine != 'mysql':
-        # 优先使用 Aerich 迁移
-        # aerich.ini 由项目根目录提供，也可回退 pyproject.toml
-        aerich_config = None
-        if os.path.exists('aerich.ini'):
-            aerich_config = 'aerich.ini'
-        elif os.path.exists('pyproject.toml'):
-            aerich_config = 'pyproject.toml'
-
-        if aerich_config and os.path.isdir(migrations_dir):
-            try:
-                from aerich import Command
-                command = Command(tortoise_config=TORTOISE_ORM, app='models', location=migrations_dir)
-                await command.init()
-                await command.upgrade(run_in_transaction=True)
-                print(f'[INFO] 数据库迁移完成 (Aerich, 配置来源: {aerich_config})')
-                return
-            except Exception as e:
-                print(f'[WARN] Aerich 迁移失败: {e}')
-                print('[WARN] 回退到 generate_schemas (safe mode)')
-    else:
-        print('[INFO] MySQL 模式，跳过 Aerich 迁移（迁移文件为 SQLite 语法），使用 generate_schemas')
-
-    # 回退：使用 generate_schemas 自动建表（safe=True 不删除已有表）
-    await Tortoise.generate_schemas(safe=True)
+    # MySQL 模式：使用 generate_schemas 自动建表（safe=False 全量重建）
+    await Tortoise.generate_schemas(safe=False)
     print('[INFO] 数据库表结构已同步 (generate_schemas)')
 
 asyncio.run(upgrade())

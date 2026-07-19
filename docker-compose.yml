@@ -22,7 +22,7 @@ services:
       - ./static:/opt/wordpress-admin/static
       # Feed 上传文件持久化
       - ./uploads/feeds:/opt/wordpress-admin/uploads/feeds
-      # 数据备份 / SQLite 持久化
+      # 数据备份持久化
       - ./data:/opt/wordpress-admin/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1/api/v1/base/health"]

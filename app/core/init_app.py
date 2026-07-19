@@ -2,7 +2,7 @@
 应用初始化模块
 ├── App Factory    : 中间件注册、异常处理注册、路由注册
 ├── Data Definitions : 菜单声明式定义
-├── Schema Migration : 数据库建表 + ALTER TABLE 补丁
+├── Schema Migration : 数据库建表
 ├── Seed Data        : 超级用户、菜单、配置、Provider、API、角色
 └── Infrastructure   : 僵尸任务清理、分布式锁、启动入口
 """
@@ -57,9 +57,9 @@ from .middlewares import (
 from .rate_limit import RateLimitMiddleware
 
 
-# ═══════════════════════════════════════════════════════════════════════════=
+# ════════════════════════════════════════════════════════════════════════════
 #  Section 1: App Factory
-# ═══════════════════════════════════════════════════════════════════════════=
+# ════════════════════════════════════════════════════════════════════════════
 
 def make_middlewares():
     """构建中间件列表（按顺序执行）"""
@@ -158,10 +158,9 @@ MENU_DEFINITIONS = [
 async def init_db():
     """初始化数据库表结构。
 
-    部署初期使用 safe=False 从模型定义全量建表。
-    后续增量字段时改为 safe=True 并在末尾添加 ALTER TABLE 补丁。
+    全新部署使用 safe=False 从模型定义全量建表。
     """
-    from tortoise import Tortoise, connections
+    from tortoise import Tortoise
 
     # 确保 Tortoise 已初始化
     from tortoise.exceptions import ConfigurationError
@@ -170,163 +169,8 @@ async def init_db():
     except ConfigurationError:
         pass  # 已经初始化，忽略
 
-    # 安全建表：仅创建不存在的表，已有表跳过
-    await Tortoise.generate_schemas(safe=True)
-
-    conn = connections.get("default")
-
-    # ── SQLite 性能优化 ──
-    if settings.DB_ENGINE == "sqlite":
-        await conn.execute_query("PRAGMA journal_mode=WAL")
-        await conn.execute_query("PRAGMA synchronous=NORMAL")
-        await conn.execute_query("PRAGMA cache_size=-8000")  # 8MB cache
-        logger.info("[init_db] SQLite WAL 模式已启用")
-
-    # ── 后续增量字段补丁（部署后按需添加）──
-    # 步骤：safe=False → safe=True，然后逐条添加 ALTER TABLE
-    # 2025-07-19 全量补全：通过模型 vs 补丁交叉对比，统一补齐所有缺失列
-    patches = [
-        # -- site_pipeline_site --
-        "ALTER TABLE site_pipeline_site ADD COLUMN dept_id INTEGER",
-        "ALTER TABLE site_pipeline_site ADD COLUMN woo_product_count INTEGER DEFAULT 0",
-        "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
-        "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN shopify_token VARCHAR(255) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN pipeline_log TEXT",
-        "ALTER TABLE site_pipeline_site ADD COLUMN hub_account_id VARCHAR(255) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN hub_last_action VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN woo_import_status VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_status VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_data TEXT",
-        # -- user --
-        "ALTER TABLE user ADD COLUMN is_superuser BOOLEAN DEFAULT 0",
-        "ALTER TABLE user ADD COLUMN is_active BOOLEAN DEFAULT 1",
-        "ALTER TABLE user ADD COLUMN alias VARCHAR(30)",
-        "ALTER TABLE user ADD COLUMN avatar VARCHAR(512) DEFAULT ''",
-        "ALTER TABLE user ADD COLUMN last_login DATETIME",
-        "ALTER TABLE user ADD COLUMN dept_id INTEGER",
-        # -- operation_job --
-        "ALTER TABLE operation_job ADD COLUMN step VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE operation_job ADD COLUMN total_steps INTEGER DEFAULT 1",
-        "ALTER TABLE operation_job ADD COLUMN worker_name VARCHAR(128) DEFAULT ''",
-        "ALTER TABLE operation_job ADD COLUMN last_heartbeat DATETIME",
-        "ALTER TABLE operation_job ADD COLUMN batch_id VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE operation_job ADD COLUMN retry_count INTEGER DEFAULT 0",
-        "ALTER TABLE operation_job ADD COLUMN max_retry INTEGER DEFAULT 3",
-        "ALTER TABLE operation_job ADD COLUMN started_at DATETIME",
-        "ALTER TABLE operation_job ADD COLUMN finished_at DATETIME",
-        # -- site_pipeline_hubstudio_job --
-        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN provider_id INTEGER DEFAULT 0",
-        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN worker_name VARCHAR(128) DEFAULT ''",
-        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN retry_count INTEGER DEFAULT 0",
-        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN started_at DATETIME",
-        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN finished_at DATETIME",
-        # -- site_pipeline_hubstudio_agent_heartbeat --
-        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN version VARCHAR(32) DEFAULT ''",
-        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN host_info VARCHAR(255) DEFAULT ''",
-        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_id INTEGER DEFAULT 0",
-        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_status VARCHAR(32) DEFAULT ''",
-        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN total_tasks INTEGER DEFAULT 0",
-        # -- config --
-        "ALTER TABLE config ADD COLUMN value TEXT",
-        "ALTER TABLE config ADD COLUMN is_secret BOOLEAN DEFAULT 0",
-        "ALTER TABLE config ADD COLUMN is_enabled BOOLEAN DEFAULT 1",
-        # -- account --
-        "ALTER TABLE account ADD COLUMN two_fa VARCHAR(500) DEFAULT ''",
-        "ALTER TABLE account ADD COLUMN provider_id INTEGER",
-        # -- config_provider --
-        "ALTER TABLE config_provider ADD COLUMN tags VARCHAR(500) DEFAULT ''",
-        # -- resource_provider_binding --
-        "ALTER TABLE resource_provider_binding ADD COLUMN remark VARCHAR(500) DEFAULT ''",
-        # -- site_pipeline_gmail_account --
-        "ALTER TABLE site_pipeline_gmail_account ADD COLUMN assigned_site_domain VARCHAR(255) DEFAULT ''",
-    ]
-    for sql in patches:
-        try:
-            await conn.execute_query(sql)
-        except Exception as e:
-            if "duplicate column" not in str(e).lower():
-                logger.warning(f"[init_db] 补丁失败: {e}")
-
-    # ── MySQL 主键修复（SQLite → MySQL 迁移后必执行）──
-    await _repair_mysql_schema()
-
-
-async def _repair_mysql_schema():
-    """MySQL Schema 修复：确保所有业务表 id 列有 PRIMARY KEY + AUTO_INCREMENT。
-
-    SQLite → MySQL 迁移后，Tortoise generate_schemas(safe=True) 可能创建
-    缺少主键约束的表，导致 ``MultipleObjectsReturned`` / ``.id`` 不可访问等兼容问题。
-
-    策略：
-    1. 对每张表执行 ALTER TABLE ... MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY
-    2. 若因重复 id 失败，自动添加临时列去重 → 重试
-    3. 若已有主键 → 跳过
-    4. 仅在 MySQL 环境下生效，幂等可重复执行
-    """
-    if settings.DB_ENGINE != "mysql":
-        return
-
-    from tortoise import Tortoise, connections
-
-    conn = connections.get("default")
-    logger.info("[repair_schema] 开始检查 MySQL 表主键约束...")
-
-    # 收集所有业务表名（排除 aerich 迁移表）
-    business_tables: set[str] = set()
-    for _app_name, models in Tortoise.apps.items():
-        for mdl in models:
-            tbl = mdl._meta.db_table
-            if tbl and tbl != "aerich":
-                business_tables.add(tbl)
-
-    repaired = 0
-    skipped = 0
-    failed = 0
-
-    for table in sorted(business_tables):
-        try:
-            await conn.execute_query(
-                f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
-            )
-            repaired += 1
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "duplicate entry" in err_msg:
-                # 存在重复 id → 自动去重后重试
-                logger.warning(f"[repair_schema] {table}: 检测到重复 id，自动清理...")
-                try:
-                    # 添加临时自增列区分同 id 行
-                    await conn.execute_query(
-                        f"ALTER TABLE `{table}` ADD COLUMN _repair_seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE KEY"
-                    )
-                    # 每组 id 保留 _repair_seq 最小的记录
-                    await conn.execute_query(
-                        f"DELETE t1 FROM `{table}` t1 "
-                        f"INNER JOIN `{table}` t2 "
-                        f"ON t1.id = t2.id AND t1._repair_seq > t2._repair_seq"
-                    )
-                    await conn.execute_query(
-                        f"ALTER TABLE `{table}` DROP COLUMN _repair_seq"
-                    )
-                    # 重试主键修复
-                    await conn.execute_query(
-                        f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
-                    )
-                    repaired += 1
-                    logger.info(f"[repair_schema] {table}: 重复已清理，PK 已修复")
-                except Exception as e2:
-                    failed += 1
-                    logger.error(f"[repair_schema] {table}: 自动清理失败，需手动处理: {e2}")
-            elif "multiple primary key" in err_msg or "primary key" in err_msg:
-                skipped += 1
-            else:
-                failed += 1
-                logger.warning(f"[repair_schema] {table}: 修复失败 ({e})")
-
-    logger.info(
-        f"[repair_schema] 完成 — 修复 {repaired}, 跳过(已有PK) {skipped}, 失败 {failed}"
-    )
+    # 全量建表（模型 pk=True 会直接生成 PRIMARY KEY AUTO_INCREMENT）
+    await Tortoise.generate_schemas(safe=False)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -927,17 +771,14 @@ async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> b
     now = datetime.now()
     expires = now + timedelta(seconds=timeout_seconds)
 
-    # MySQL/PostgreSQL 用 %s 占位符，SQLite 用 ?
-    placeholder = "?" if settings.DB_ENGINE == "sqlite" else "%s"
-
     # 清理过期锁
     await conn.execute_query(
-        f"DELETE FROM system_init_lock WHERE lock_key = {placeholder} AND expires_at < {placeholder}",
+        "DELETE FROM system_init_lock WHERE lock_key = %s AND expires_at < %s",
         [lock_key, now.isoformat()]
     )
     try:
         await conn.execute_query(
-            f"INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})",
+            "INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES (%s, %s, %s, %s)",
             [lock_key, _INSTANCE_ID, now.isoformat(), expires.isoformat()]
         )
         logger.info(f"[InitLock] 获取锁成功: {lock_key}, instance={_INSTANCE_ID}")
@@ -952,9 +793,8 @@ async def _release_init_lock(lock_key: str):
     try:
         from tortoise import connections
         conn = connections.get("default")
-        placeholder = "?" if settings.DB_ENGINE == "sqlite" else "%s"
         await conn.execute_query(
-            f"DELETE FROM system_init_lock WHERE lock_key = {placeholder} AND instance_id = {placeholder}",
+            "DELETE FROM system_init_lock WHERE lock_key = %s AND instance_id = %s",
             [lock_key, _INSTANCE_ID]
         )
     except Exception:

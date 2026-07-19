@@ -226,7 +226,7 @@ class ShopifyCollectService:
 
     @staticmethod
     def _insert_product(source, source_url: str, product_data: dict) -> bool:
-        """去重写入产品（线程内安全调用 Tortoise ORM，兼容 MySQL/SQLite）"""
+        """去重写入产品（线程内安全调用 Tortoise ORM）"""
         import asyncio
         from app.models.shopify_collect import ShopifyProduct
 

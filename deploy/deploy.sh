@@ -142,14 +142,9 @@ init_deploy() {
 
         sed -i "s/^SECRET_KEY=.*/SECRET_KEY=$SECRET/" .env
         sed -i "s/^DEFAULT_PASSWORD=.*/DEFAULT_PASSWORD=$DEFAULT_PW/" .env
-        # 切换为 MySQL（.env.example 默认为 SQLite 适合本地开发）
-        sed -i "s/^DB_ENGINE=.*/DB_ENGINE=mysql/" .env
-        sed -i "s/^# DB_HOST=.*/DB_HOST=db/" .env
-        sed -i "s/^# DB_PORT=.*/DB_PORT=3306/" .env
-        sed -i "s/^# DB_USER=.*/DB_USER=admin/" .env
-        sed -i "s/^# DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
-        sed -i "s/^# DB_NAME=.*/DB_NAME=vue_fastapi_admin/" .env
-        sed -i "s/^# MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
+        sed -i "s/^DB_HOST=.*/DB_HOST=db/" .env
+        sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
+        sed -i "s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
         # 首次部署标记：强制 init_superuser() 用 DEFAULT_PASSWORD 重置 admin 密码
         sed -i "s/^# RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=true/" .env
         log "已生成 .env（随机密钥，MySQL 模式）"
@@ -170,19 +165,10 @@ init_deploy() {
             sed -i "s/^DEFAULT_PASSWORD=.*/DEFAULT_PASSWORD=$DEFAULT_PW/" .env
             log "已更新 DEFAULT_PASSWORD"
         fi
-        # 确保使用 MySQL（覆盖 .env.example 的 SQLite 默认值）
-        if grep -q "^DB_ENGINE=sqlite" .env 2>/dev/null; then
-            log "检测到 SQLite，切换为 MySQL..."
-            sed -i "s/^DB_ENGINE=.*/DB_ENGINE=mysql/" .env
-            sed -i "s/^# DB_HOST=.*/DB_HOST=db/" .env
-            sed -i "s/^# DB_PORT=.*/DB_PORT=3306/" .env
-            sed -i "s/^# DB_USER=.*/DB_USER=admin/" .env
-            DB_PW=$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c24 || python3 -c "import secrets; print(secrets.token_urlsafe(18))")
-            MYSQL_ROOT_PW=$(openssl rand -base64 18 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c24 || python3 -c "import secrets; print(secrets.token_urlsafe(18))")
-            sed -i "s/^# DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
-            sed -i "s/^# DB_NAME=.*/DB_NAME=vue_fastapi_admin/" .env
-            sed -i "s/^# MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
-            log "已切换为 MySQL 模式"
+        # 确保 DB_HOST 指向 Docker 内部服务名
+        if grep -q "^DB_HOST=127.0.0.1" .env 2>/dev/null; then
+            log "检测到本地回环 DB_HOST，切换为 Docker 内部服务名..."
+            sed -i "s/^DB_HOST=.*/DB_HOST=db/" .env
         fi
         # 兼容旧格式：未注释的模板密码
         if grep -q "^DB_PASSWORD=change-me-to-a-strong-password" .env 2>/dev/null; then
@@ -272,17 +258,14 @@ update_deploy() {
     # 1. 备份当前状态
     log "备份当前数据库和静态文件..."
     # 从 .env 文件读取数据库配置（shell 环境变量可能不存在于 update 上下文中）
-    DB_ENGINE_VAL=$(grep -m1 "^DB_ENGINE=" .env 2>/dev/null | cut -d= -f2 || echo "sqlite")
+    DB_ENGINE_VAL=$(grep -m1 "^DB_HOST=" .env 2>/dev/null | cut -d= -f2 || echo "127.0.0.1")
     MYSQL_ROOT_PW=$(grep -m1 "^MYSQL_ROOT_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
     DB_USER_VAL=$(grep -m1 "^DB_USER=" .env 2>/dev/null | cut -d= -f2 || echo "admin")
     DB_PW=$(grep -m1 "^DB_PASSWORD=" .env 2>/dev/null | cut -d= -f2)
     DB_NAME_VAL=$(grep -m1 "^DB_NAME=" .env 2>/dev/null | cut -d= -f2 || echo "vue_fastapi_admin")
-    if [ "${DB_ENGINE_VAL}" = "mysql" ] && [ -n "${MYSQL_ROOT_PW}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
+    if [ -n "${MYSQL_ROOT_PW}" ] && docker compose exec -T db mysqladmin ping -uroot -p"${MYSQL_ROOT_PW}" --silent 2>/dev/null; then
         docker compose exec -T db mysqldump -u"${DB_USER_VAL}" -p"${DB_PW}" "${DB_NAME_VAL}" \
             > "data/backup_$(date +%Y%m%d_%H%M%S).sql" 2>/dev/null && log "MySQL 已备份到 data/" || warn "MySQL 备份失败"
-    elif [ -f "data/db.sqlite3" ]; then
-        cp data/db.sqlite3 "data/db.sqlite3.bak.$(date +%Y%m%d_%H%M%S)"
-        log "SQLite 数据库已备份"
     fi
     if [ -d "static" ]; then
         tar -czf "data/static_backup_$(date +%Y%m%d_%H%M%S).tar.gz" static/ 2>/dev/null && log "static/ 已备份" || true

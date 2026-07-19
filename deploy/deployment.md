@@ -254,16 +254,6 @@ services:
 docker compose up -d --build
 ```
 
-### 场景三：SQLite（单机/开发）
-
-```bash
-# 修改 .env
-DB_ENGINE=sqlite
-DB_SQLITE_PATH=./data/db.sqlite3
-```
-
-然后使用不含 `db` 服务的 `docker-compose.yml` 启动。
-
 ### 场景四：远程连接数据库（IDE / 客户端工具）
 
 使用 `deploy.sh init` 部署后，MySQL 远程连接已**自动配置**：
@@ -458,6 +448,107 @@ docker compose up -d
 ### 步骤 1：停止并删除容器和 MySQL 数据卷
 
 ```bash
+
+{
+  "total": 10,
+  "dns_ok": 10,
+  "dns_fail": 0,
+  "results": [
+    {
+      "site_id": 9,
+      "domain": "gsxiilvdqc.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=gsxiilvdqc.shop"
+      }
+    },
+    {
+      "site_id": 10,
+      "domain": "fmkkwatyac.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=fmkkwatyac.shop"
+      }
+    },
+    {
+      "site_id": 8,
+      "domain": "qaumnxuntr.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=qaumnxuntr.shop"
+      }
+    },
+    {
+      "site_id": 7,
+      "domain": "irsbvetetu.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=irsbvetetu.shop"
+      }
+    },
+    {
+      "site_id": 6,
+      "domain": "bsqjemcoas.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=bsqjemcoas.shop"
+      }
+    },
+    {
+      "site_id": 5,
+      "domain": "zgipokuvdr.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=zgipokuvdr.shop"
+      }
+    },
+    {
+      "site_id": 3,
+      "domain": "tyqrgvlzyd.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=tyqrgvlzyd.shop"
+      }
+    },
+    {
+      "site_id": 4,
+      "domain": "wkxuhacwtj.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=wkxuhacwtj.shop"
+      }
+    },
+    {
+      "site_id": 2,
+      "domain": "ohinspeqrf.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=ohinspeqrf.shop"
+      }
+    },
+    {
+      "site_id": 1,
+      "domain": "ksnsblmlfj.shop",
+      "ok": true,
+      "result": {
+        "ok": false,
+        "error": "Zone 创建失败: domain=ksnsblmlfj.shop"
+      }
+    }
+  ],
+  "invalid": []
+}
+
+
 cd /opt/wordpress-admin
 
 # 停止并删除容器、网络、数据卷（MySQL 所有数据将丢失！）
@@ -504,14 +595,6 @@ bash deploy/deploy.sh init
 ```
 
 > **提醒**：重新部署会生成新的 `DEFAULT_PASSWORD`，请注意保存输出的管理员密码。
-
-### 本地开发环境（SQLite）清理
-
-本地开发使用 SQLite 时，需额外删除数据库文件：
-
-```bash
-rm -f data/db.sqlite3 data/db.sqlite3.bak*
-```
 
 ### 仅清理容器（保留数据）
 
@@ -571,81 +654,7 @@ docker compose exec app ls -la static/avatars/
 2. 在 **任务中心** 查看具体错误日志
 3. 检查网络连通性：`docker compose exec app ping api.cloudflare.com`
 
-### Q: 从 SQLite 迁移到 MySQL
-
-1. 导出现有数据：
-
-```bash
-# 在项目目录下执行，将 SQLite 数据导出为 JSON
-docker compose exec app python -c "
-import asyncio, json
-from tortoise import Tortoise
-from app.settings import TORTOISE_ORM
-
-async def export_data():
-    await Tortoise.init(config=TORTOISE_ORM)
-    conn = Tortoise.get_connection('default')
-    # 导出所有业务表（排除 aerich 迁移表）
-    tables = ['users', 'roles', 'menus', 'apis', 'depts', 'auditlog',
-              'config', 'configprovider', 'sites', 'gmails', 'shopify_sources',
-              'shopify_products', 'operation_jobs', 'accounts', 'ads_env']
-    dump = {}
-    for table in tables:
-        try:
-            rows = await conn.execute_query(f'SELECT * FROM {table}')
-            dump[table] = rows
-        except Exception:
-            pass
-    with open('data/export.json', 'w', encoding='utf-8') as f:
-        json.dump(dump, f, ensure_ascii=False, default=str)
-    print('数据已导出到 data/export.json')
-
-asyncio.run(export_data())
-"
-```
-
-2. 备份旧数据目录：
-
-```bash
-cp data/db.sqlite3 data/db.sqlite3.bak
-```
-
-3. 修改 `.env` 为 MySQL 配置（参考上方环境配置说明），然后重新部署：
-
-```bash
-bash deploy/deploy.sh update
-```
-
-4. 导入数据（重新部署后执行）：
-
-```bash
-docker compose exec app python -c "
-import asyncio, json
-from tortoise import Tortoise
-from app.settings import TORTOISE_ORM
-
-async def import_data():
-    await Tortoise.init(config=TORTOISE_ORM)
-    conn = Tortoise.get_connection('default')
-    with open('data/export.json', 'r', encoding='utf-8') as f:
-        dump = json.load(f)
-    for table, rows in dump.items():
-        if rows:
-            # 按表逐条插入，跳过自增 ID 让数据库自动分配
-            for row in rows:
-                keys = [k for k in row.keys() if k != 'id']
-                placeholders = ', '.join(['%s'] * len(keys))
-                columns = ', '.join(keys)
-                values = [row[k] for k in keys]
-                await conn.execute_query(
-                    f'INSERT INTO {table} ({columns}) VALUES ({placeholders})',
-                    values
-                )
-    print('数据导入完成')
-
-asyncio.run(import_data())
-"
-```
+### Q: 建站/DNS/采集任务失败
 
 ---
 

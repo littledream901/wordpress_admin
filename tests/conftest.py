@@ -6,7 +6,11 @@ import sys as _sys
 # ═══ 必须在任何 app 导入之前设置 ────────────────────────
 _os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-12345678")
 _os.environ.setdefault("DEFAULT_PASSWORD", "test-password")
-_os.environ.setdefault("DB_URL", "sqlite://:memory:")
+_os.environ.setdefault("DB_HOST", "127.0.0.1")
+_os.environ.setdefault("DB_PORT", "3306")
+_os.environ.setdefault("DB_USER", "test")
+_os.environ.setdefault("DB_PASSWORD", "test-password")
+_os.environ.setdefault("DB_NAME", "test_db")
 _os.environ.setdefault("DEBUG", "true")
 
 # 确保项目根目录在 sys.path 中

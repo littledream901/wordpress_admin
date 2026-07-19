@@ -63,7 +63,6 @@ a = Analysis(
         "tortoise_orm",
         "aerich",
         "pypika_tortoise",
-        "aiosqlite",
         "pydantic",
         "pydantic_core",
         "pydantic_settings",

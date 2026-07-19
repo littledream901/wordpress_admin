@@ -49,7 +49,7 @@
 | 前端 | Vue 3 + Vite + Pinia |
 | UI | Naive UI 2.34 |
 | CSS | UnoCSS (原子化) + Sass |
-| 数据库 | SQLite / MySQL / PostgreSQL |
+| 数据库 | MySQL |
 | 部署 | Docker 多阶段构建 + Nginx |
 
 ---
@@ -344,9 +344,7 @@ docker compose logs -f
 | `DEFAULT_PASSWORD` | **是** | - | 新用户初始密码 |
 | `DEBUG` | 否 | `false` | `true`=开发模式（显示文档/CORS宽松） |
 | `CORS_ORIGINS` | 否 | `["*"]` | 生产必须改为具体域名 |
-| `DB_ENGINE` | 否 | `sqlite` | `sqlite` / `mysql` / `postgres` |
-| `DB_SQLITE_PATH` | 否 | `./data/db.sqlite3` | SQLite 文件路径（Docker 内建议保持默认） |
-| `DB_HOST/PORT/USER/PASSWORD/NAME` | 否 | - | MySQL/PostgreSQL 连接参数 |
+| `DB_HOST/PORT/USER/PASSWORD/NAME` | 否 | - | MySQL 连接参数 |
 | `REDIS_URL` | 否 | - | Redis 地址，多 Worker 建议配置 |
 | `WORKERS` | 否 | `1` | 生产模式 Worker 数量 |
 | `RATE_LIMIT_MAX_REQUESTS` | 否 | `100` | 每分钟最大请求数 |

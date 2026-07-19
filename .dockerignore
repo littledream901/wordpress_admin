@@ -31,7 +31,7 @@ web/node_modules/
 .env.*.local
 
 # 数据库
-*.sqlite3
+*.sql
 *.db
 *.sql
 !migrations/**/*.sql

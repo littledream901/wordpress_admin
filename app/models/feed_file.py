@@ -32,8 +32,7 @@ class FeedFile(BaseModel, TimestampMixin):
     def is_expired(self) -> bool:
         if not self.expires_at:
             return False
-        # 统一转 naive 比较（兼容 SQLite/Tortoise 可能返回 aware datetime）
-        exp = self.expires_at.replace(tzinfo=None) if self.expires_at.tzinfo else self.expires_at
+        exp = self.expires_at.replace(tzinfo=None) if getattr(self.expires_at, 'tzinfo', None) else self.expires_at
         return datetime.now() > exp
 
     @property

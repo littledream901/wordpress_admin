@@ -427,20 +427,14 @@ echo json_encode([
 
         self.file_manager.save(path, content)
 
-    # --- HTTP 直连辅助（绕过 Cloudflare CDN）---
+    # --- HTTP 请求辅助 ---
 
-    def _build_fetch_urls(self, domain: str, path: str, server_ip: str = '') -> list:
-        """构建 URL 列表，优先服务器 IP 直连，回退公网域名。
-
-        返回 [(url, headers, verify_ssl), ...]，按优先级排序。
-        服务器 IP + Host 头可绕过 Cloudflare CDN，避免 SSL/重定向问题。
-        """
-        urls = []
-        if server_ip:
-            urls.append((f'http://{server_ip}/{path}', {'Host': domain}, False))
-        urls.append((f'https://{domain}/{path}', {}, self.wp_verify_ssl))
-        urls.append((f'http://{domain}/{path}', {}, False))
-        return urls
+    def _build_fetch_urls(self, domain: str, path: str) -> list:
+        """构建 URL 列表，优先 HTTPS，回退 HTTP。"""
+        return [
+            (f'https://{domain}/{path}', {}, self.wp_verify_ssl),
+            (f'http://{domain}/{path}', {}, False),
+        ]
 
     # --- WooCommerce Key ---
 
@@ -473,12 +467,10 @@ echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$
     def remove_woo_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.woo_script}', is_dir=False)
 
-    def fetch_woo_keys(self, domain: str, token: str, protocol: str, server_ip: str = '') -> tuple:
-        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key。
-        优先直连服务器 IP 绕过 Cloudflare CDN，回退公网域名。
-        """
+    def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
+        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key。"""
         path = f'{self.woo_script}?token={token}'
-        urls = self._build_fetch_urls(domain, path, server_ip)
+        urls = self._build_fetch_urls(domain, path)
         for _ in range(self.woo_fetch_retries):
             for url, headers, verify in urls:
                 try:
@@ -616,9 +608,9 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     def remove_ctx_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
 
-    def fetch_feed_links(self, ctx_refresh_url: str, server_ip: str = '') -> list:
+    def fetch_feed_links(self, ctx_refresh_url: str) -> list:
         """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表，返回扁平的 URL 字符串列表。
-        优先直连服务器 IP 绕过 Cloudflare CDN，回退公网域名。自动过滤 logs 目录。"""
+        自动过滤 logs 目录。"""
         if not ctx_refresh_url:
             return []
         from urllib.parse import urlparse
@@ -627,7 +619,7 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         path = parsed.path.lstrip('/')
         if parsed.query:
             path = f'{path}?{parsed.query}'
-        urls = self._build_fetch_urls(domain, path, server_ip)
+        urls = self._build_fetch_urls(domain, path)
         for i in range(1, 7):
             for url, headers, verify in urls:
                 try:
@@ -647,28 +639,21 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         _log.warning("CTX Feed_Link 获取失败")
         return []
 
-    def fetch_last_feed_link(self, ctx_refresh_url: str, server_ip: str = '') -> Optional[str]:
+    def fetch_last_feed_link(self, ctx_refresh_url: str) -> Optional[str]:
         """获取第一个 feed 链接（logs 已在 fetch_feed_links 中过滤）"""
-        feeds = self.fetch_feed_links(ctx_refresh_url, server_ip)
+        feeds = self.fetch_feed_links(ctx_refresh_url)
         return feeds[0] if feeds else None
 
-    def fetch_feed_link(self, domain: str, token: str, protocol: str) -> list:
-        """已弃用，请使用 fetch_feed_links"""
-        import warnings
-        warnings.warn("fetch_feed_link is deprecated, use fetch_feed_links instead", DeprecationWarning)
-        return self.fetch_feed_links(domain, token, protocol)
 
-    def health_check(self, domain: str, protocol: str, server_ip: str = '') -> bool:
-        """对创建完成的 WordPress 站点做基础健康检查（带重试）。
-        优先直连服务器 IP 绕过 Cloudflare CDN，回退公网域名。
-        """
+    def health_check(self, domain: str, protocol: str) -> bool:
+        """对创建完成的 WordPress 站点做基础健康检查（带重试）。"""
         import httpx as _h
         import time as _time
 
         paths = ['wp-login.php', '']
         for attempt in range(1, 11):
             for path in paths:
-                urls = self._build_fetch_urls(domain, path, server_ip)
+                urls = self._build_fetch_urls(domain, path)
                 for url, headers, verify in urls:
                     try:
                         resp = _h.get(url, headers=headers, timeout=30, verify=verify, follow_redirects=True)
