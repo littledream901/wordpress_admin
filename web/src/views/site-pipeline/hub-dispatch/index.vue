@@ -132,26 +132,26 @@ const statusType = (s) => {
 const columns = [
   { type: 'selection', width: 40 },
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '域名', key: 'domain', width: 200, ellipsis: { tooltip: true } },
-  { title: '服务器IP', key: 'server_ip', width: 130 },
+  { title: '域名', key: 'domain', width: 200, ellipsis: { tooltip: true }, align: 'center' },
+  { title: '服务器IP', key: 'server_ip', width: 130, align: 'center' },
   { title: '平台', key: 'platform', width: 80, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   {
-    title: 'Hub环境ID', key: 'hub_env_id', width: 130,
+    title: 'Hub环境ID', key: 'hub_env_id', width: 100, align: 'center',
     render: (r) => r.hub_env_id || '-',
   },
   {
-    title: 'Hub状态', key: 'hub_status', width: 120,
+    title: 'Hub状态', key: 'hub_status', width: 120, align: 'center',
     render: (r) => {
       const label = r.hub_status || '未创建'
       return h(NTag, { type: statusType(r.hub_status), size: 'small' }, { default: () => label })
     },
   },
   {
-    title: '流水线状态', key: 'pipeline_status', width: 120,
+    title: '流水线状态', key: 'pipeline_status', width: 140, align: 'center',
     render: (r) => h(NTag, { type: 'default', size: 'small' }, { default: () => r.pipeline_status || '-' }),
   },
   {
-    title: 'GMC状态', key: 'gmc_status', width: 100,
+    title: 'GMC状态', key: 'gmc_status', width: 100, align: 'center',
     render: (r) => {
       const label = r.gmc_status || '-'
       const typeMap = {

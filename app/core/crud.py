@@ -8,6 +8,8 @@ from tortoise.expressions import Q
 from tortoise.models import Model
 from tortoise.transactions import in_transaction
 
+from app.utils.db_utils import safe_count
+
 _log = logging.getLogger(__name__)
 
 Total = NewType("Total", int)
@@ -36,12 +38,12 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             # 用 __not=True 代替 =False，修复 Tortoise SQLite 方言 BooleanField 过滤不匹配的 bug
             query = query.filter(is_deleted__not=True)
         try:
-            return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+            return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
         except Exception as e:
             if _use_soft_delete:
                 _log.warning("list() 查询异常: %s, 回退无过滤查询", e)
                 query = self.model.filter(search)
-                return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+                return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
             raise
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
@@ -97,8 +99,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def list_deleted(self, page: int, page_size: int, search: Q = Q(), order: list = []) -> Tuple[Total, List[ModelType]]:
         """列出已软删除的记录"""
         query = self.model.filter(is_deleted=True).filter(search)
-        return await query.count(), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
-
+        return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
     @asynccontextmanager
     async def transaction(self):
         """事务上下文管理器"""

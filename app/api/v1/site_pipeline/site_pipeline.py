@@ -17,6 +17,7 @@ from app.models.admin import User
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import HubStudioJob
 from app.schemas.base import Fail, Success, SuccessExtra
+from app.utils.db_utils import safe_count
 from app.schemas.site_pipeline import (
     HubStudioJobCreate, HubStudioJobReport,
     SiteBatchCreate, SiteCreate, SiteUpdate,
@@ -405,7 +406,7 @@ async def get_agents_status():
     try:
         agents = await hubstudio_service.get_agents_status()
         any_online = any(a["online"] for a in agents)
-        pending_jobs = await HubStudioJob.filter(status="pending").count()
+        pending_jobs = await safe_count(HubStudioJob.filter(status="pending"))
     except Exception:
         agents = []
         any_online = False

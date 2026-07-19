@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 
 from app.controllers.config_provider import binding_controller, provider_controller, provider_item_controller
 from app.schemas.base import Fail, Success, SuccessExtra
+from app.utils.db_utils import safe_count
 from app.schemas.config_provider import (
     BatchBindingRequest, BatchSaveItemsRequest, ConfigProviderCreate, ConfigProviderUpdate,
     ProviderConfigItemCreate, ProviderConfigItemUpdate,
@@ -25,7 +26,7 @@ async def list_providers(provider_type: str = Query('')):
     data = []
     for p in objs:
         d = await p.to_dict()
-        d['item_count'] = await provider_item_controller.model.filter(provider_id=p.id).count()
+        d['item_count'] = await safe_count(provider_item_controller.model.filter(provider_id=p.id))
         data.append(d)
     return SuccessExtra(data=data, total=len(data))
 
@@ -156,7 +157,7 @@ async def list_binding_sites(
     qs = Site.filter(is_deleted=False)
     if server_ip:
         qs = qs.filter(server_ip__icontains=server_ip)
-    total = await qs.count()
+    total = await safe_count(qs)
     sites = await qs.offset((page - 1) * page_size).limit(page_size).order_by('-id')
 
     # 批量获取绑定和默认 provider

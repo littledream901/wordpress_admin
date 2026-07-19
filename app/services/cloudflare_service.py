@@ -80,12 +80,21 @@ class CloudflareService:
         data = self._get('/zones', name=root_domain)
         if data.get('success') and data.get('result'):
             z = data['result'][0]
-            return z['id'], z.get('name_servers') or [], z.get('status', '')
+            return z['id'], z.get('name_servers') or [], z.get('status') or 'active'
+        # 记录 GET 失败详情
+        if not data.get('success'):
+            err_msgs = [e.get('message', str(e)) for e in data.get('errors', [])]
+            logger.warning("Cloudflare GET zones 失败 (domain=%s): %s", root_domain, '; '.join(err_msgs) or data)
         payload = {'account': {'id': self.account_id}, 'name': root_domain, 'jump_start': True}
         data = self._post('/zones', payload)
         if data.get('success'):
             z = data['result']
             return z['id'], z.get('name_servers') or [], 'pending'
+        # 记录 POST 失败详情
+        err_msgs = [e.get('message', str(e)) for e in data.get('errors', [])]
+        logger.warning("Cloudflare POST zones 失败 (domain=%s, account_id=%s): %s",
+                       root_domain, self.account_id[:8] + '...' if self.account_id else '(empty)',
+                       '; '.join(err_msgs) or data)
         return None, [], ''
 
     def delete_records_by_type(self, zone_id: str, record_type: str) -> int:

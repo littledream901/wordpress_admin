@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query
 from app.controllers.menu import menu_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.menus import *
+from app.utils.db_utils import safe_count
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ async def delete_menu(
     id: int = Query(..., description="菜单id"),
     cascade: bool = Query(False, description="是否级联删除所有子菜单"),
 ):
-    child_menu_count = await menu_controller.model.filter(parent_id=id).count()
+    child_menu_count = await safe_count(menu_controller.model.filter(parent_id=id))
     if child_menu_count > 0 and not cascade:
         return Fail(
             msg=f"该菜单下有 {child_menu_count} 个子菜单，请先删除子菜单或使用级联删除",

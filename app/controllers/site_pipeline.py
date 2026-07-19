@@ -122,7 +122,8 @@ def _apply_dns_result_to_site(site, result: dict):
         ok = dynadot_r.get("success", False) if isinstance(dynadot_r, dict) else False
         site.dynadot_status = "ns_updated" if ok else f"ns_failed:{json.dumps(dynadot_r)[:80]}"
     else:
-        site.dynadot_status = f'zone_{result.get("zone_status", "unknown")}'
+        zone_status = result.get("zone_status") or "unknown"
+        site.dynadot_status = f'zone_{zone_status}'
 
     log_entry = json.dumps({
         "ts": now.isoformat(),

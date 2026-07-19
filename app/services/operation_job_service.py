@@ -19,6 +19,7 @@ from typing import Any, Optional
 from app.controllers.operation_job import operation_job_controller
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import Site
+from app.utils.db_utils import safe_count
 
 
 # ── Site 状态字段映射 ──
@@ -206,7 +207,7 @@ class OperationJobService:
             qs = qs.filter(resource_type=resource_type)
         if action_type:
             qs = qs.filter(action_type=action_type)
-        return await qs.count()
+        return await safe_count(qs)
 
     # ── 取消 ──
 

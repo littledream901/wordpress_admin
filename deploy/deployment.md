@@ -472,6 +472,9 @@ docker compose ps
 ### 步骤 2：删除持久化文件
 
 ```bash
+# 删除 MySQL 数据卷（确保容器已停止）
+docker volume rm wordpress-admin_mysql-data 2>/dev/null || true
+
 # 删除备份文件
 rm -f data/backup_*.sql data/static_backup_*.tar.gz
 

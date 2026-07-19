@@ -11,6 +11,7 @@ from starlette.responses import Response
 from app.controllers.import_job import import_job_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.services.import_service import import_service
+from app.utils.db_utils import safe_count
 
 router = APIRouter(tags=["Import"])
 template_router = APIRouter(tags=["Template"])  # 无认证，模板下载用
@@ -40,7 +41,7 @@ async def list_imports(import_type: str = Query(''), page: int = Query(1), page_
     qs = import_job_controller.model.all()
     if import_type:
         qs = qs.filter(import_type=import_type)
-    total = await qs.count()
+    total = await safe_count(qs)
     objs = await qs.order_by('-created_at').offset((page - 1) * page_size).limit(page_size)
     data = [await obj.to_dict() for obj in objs]
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)

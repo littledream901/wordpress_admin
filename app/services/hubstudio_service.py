@@ -27,6 +27,7 @@ from app.models.config_provider import ConfigProvider, ProviderConfigItem, Resou
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import HubStudioAgentHeartbeat, HubStudioJob, Site
 from app.utils.config_reader import get_provider_info
+from app.utils.db_utils import safe_count
 
 
 # 任务类型定义
@@ -264,7 +265,7 @@ class HubStudioOrchestrationService:
         if provider_id is not None:
             q &= Q(provider_id=provider_id)
 
-        total = await HubStudioJob.filter(q).count()
+        total = await safe_count(HubStudioJob.filter(q))
         objs = await HubStudioJob.filter(q).order_by("-id").offset((page - 1) * page_size).limit(page_size)
         data = [await obj.to_dict() for obj in objs]
         return total, data

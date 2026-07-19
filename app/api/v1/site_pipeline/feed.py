@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 
 from app.models.feed_file import FeedFile
 from app.schemas.base import Fail, Success, SuccessExtra
+from app.utils.db_utils import safe_count
 
 router = APIRouter(tags=["Feed"])
 feed_download_router = APIRouter()  # 公开下载路由，无需认证
@@ -329,7 +330,7 @@ async def create_feed(
 @router.get("/source-list", summary="源文件列表")
 async def list_source(page: int = Query(1), page_size: int = Query(20)):
     qs = FeedFile.filter(status="uploaded")
-    total = await qs.count()
+    total = await safe_count(qs)
     feeds = await qs.offset((page - 1) * page_size).limit(page_size).order_by("-id")
     data = [await _feed_row(f) for f in feeds]
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
@@ -338,7 +339,7 @@ async def list_source(page: int = Query(1), page_size: int = Query(20)):
 @router.get("/processed-list", summary="已处理文件列表")
 async def list_processed(page: int = Query(1), page_size: int = Query(20)):
     qs = FeedFile.filter(status="replaced")
-    total = await qs.count()
+    total = await safe_count(qs)
     feeds = await qs.offset((page - 1) * page_size).limit(page_size).order_by("-id")
     data = [await _feed_row(f) for f in feeds]
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)

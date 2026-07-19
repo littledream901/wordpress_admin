@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query
 from app.controllers.operation_job import operation_job_controller
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.operation_job import BatchOperationCreate, OperationJobUpdate
+from app.utils.db_utils import safe_count
 
 router = APIRouter(tags=["OperationJob"])
 
@@ -28,7 +29,7 @@ async def list_jobs(
         qs = qs.filter(status=status)
     if batch_id:
         qs = qs.filter(batch_id=batch_id)
-    total = await qs.count()
+    total = await safe_count(qs)
     objs = await qs.order_by('-created_at').offset((page - 1) * page_size).limit(page_size)
     data = [await obj.to_dict() for obj in objs]
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
