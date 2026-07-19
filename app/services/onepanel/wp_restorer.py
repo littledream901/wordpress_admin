@@ -15,39 +15,6 @@ from .file_manager import OnePanelFileManager
 from .utils import _log, _provider_value, normalize_domain
 
 
-def _extract_wp_error(resp: httpx.Response) -> str:
-    """从 WordPress 错误页 HTML 中提取有意义的错误信息。
-
-    WordPress 的 wp_die 页面 CSS 很长（~2000 字符），直接截断会丢失实际报错。
-    此函数剥离 HTML 标签和 CSS，仅保留标题和正文文本。
-    """
-    status = resp.status_code
-    body = resp.text or ""
-
-    # 尝试提取 <title> 和 <p> 标签中的文本
-    title_m = re.search(r'<title>(.*?)<\/title>', body, re.IGNORECASE)
-    title = title_m.group(1) if title_m else ""
-
-    # 提取所有 <p> 标签内容（WP 错误信息在 <p> 中）
-    paragraphs = re.findall(r'<p[^>]*>(.*?)<\/p>', body, re.IGNORECASE)
-    msg_parts = [re.sub(r'<[^>]+>', '', p).strip() for p in paragraphs]
-    msg_parts = [p for p in msg_parts if p]
-
-    # 拼接结果
-    parts = [f"HTTP {status}"]
-    if title:
-        parts.append(title)
-    if msg_parts:
-        parts.append(" | ".join(msg_parts[:3]))
-    if not title and not msg_parts:
-        # 非 HTML 响应，直接截文本
-        plain = re.sub(r'<[^>]+>', ' ', body).strip()
-        plain = ' '.join(plain.split())[:300]
-        parts.append(plain)
-
-    return ": ".join(parts)
-
-
 class OnePanelWordPressRestorer:
     """WordPress 站点后处理 —— 文件恢复、域名替换、Woo Key/CTX 注入"""
 
@@ -67,8 +34,8 @@ class OnePanelWordPressRestorer:
         else:
             self.restore_mode = 'safe'
         self.old_source_domain = str(_provider_value(cfgs, 'OP_OLD_SOURCE_DOMAIN', 'old_source_domain', '') or '').strip()
-        # SSL 验证：从 onepanel Provider 读取
-        _wp_ssl = ProviderResolver.sync_get_config('onepanel', 'wp_verify_ssl', 'true')
+        # SSL 验证：优先 pipeline Provider，回退 settings
+        _wp_ssl = ProviderResolver.sync_get_config('pipeline', 'wp_verify_ssl', 'true')
         self.wp_verify_ssl = _wp_ssl.lower() != 'false'
         # 可配的额外根文件（如 .htaccess, wp-cli.yml 等）
         raw_root_files = cfgs.get('OP_RESTORE_ROOT_FILES') or ''
@@ -223,8 +190,6 @@ class OnePanelWordPressRestorer:
 
     def inject_domain_replace_script(self, service_name: str, old_domain: str, new_domain: str, target_protocol: str) -> str:
         """注入域名替换 PHP 脚本（处理 PHP serialize），返回 security token"""
-        # 先禁用插件，避免 wp-load.php 因插件 Fatal error 崩溃
-        self._disable_plugins(service_name)
         if not old_domain:
             old_domain = self.old_source_domain
         token = secrets.token_urlsafe(32)
@@ -347,38 +312,6 @@ echo json_encode([
 
     def remove_domain_replace_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
-        # 恢复插件
-        self._enable_plugins(service_name)
-
-    # --- 插件临时禁用（避免 wp-load.php 加载时 Fatal error） ---
-
-    def _disable_plugins(self, service_name: str) -> None:
-        """禁用 WordPress 插件目录（重命名），返回旧目录名用于恢复"""
-        plugins_dir = f'{self._data_root(service_name)}/wp-content/plugins'
-        backup_dir = f'{self._data_root(service_name)}/wp-content/plugins._domain_replace_disabled'
-        try:
-            if self.file_manager.exists(plugins_dir):
-                # 清理上次可能残留的备份
-                if self.file_manager.exists(backup_dir):
-                    self.file_manager.delete(backup_dir, is_dir=True)
-                self.file_manager.move([plugins_dir], backup_dir, 'cut', wait=1)
-                _log.info("已禁用 WordPress 插件目录：%s → %s", plugins_dir, backup_dir)
-        except Exception as exc:
-            _log.warning("禁用插件目录失败（域名替换仍会继续）：%s", exc)
-
-    def _enable_plugins(self, service_name: str) -> None:
-        """恢复 WordPress 插件目录"""
-        plugins_dir = f'{self._data_root(service_name)}/wp-content/plugins'
-        backup_dir = f'{self._data_root(service_name)}/wp-content/plugins._domain_replace_disabled'
-        try:
-            if self.file_manager.exists(backup_dir) and not self.file_manager.exists(plugins_dir):
-                self.file_manager.move([backup_dir], plugins_dir, 'cut', wait=1)
-                _log.info("已恢复 WordPress 插件目录：%s", plugins_dir)
-            elif self.file_manager.exists(backup_dir):
-                self.file_manager.delete(backup_dir, is_dir=True)
-                _log.info("清理残留的插件备份目录：%s", backup_dir)
-        except Exception as exc:
-            _log.warning("恢复插件目录失败：%s", exc)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
         """通过 HTTP 调用域名替换 PHP 脚本"""
@@ -391,12 +324,6 @@ echo json_encode([
             for url in urls:
                 try:
                     resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
-                    if resp.status_code != 200:
-                        last_error = _extract_wp_error(resp)
-                        continue
-                    if not resp.text or not resp.text.strip():
-                        last_error = "empty response body"
-                        continue
                     data = resp.json()
                     if data.get('code') == 200:
                         return data
