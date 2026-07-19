@@ -15,6 +15,39 @@ from .file_manager import OnePanelFileManager
 from .utils import _log, _provider_value, normalize_domain
 
 
+def _extract_wp_error(resp: httpx.Response) -> str:
+    """从 WordPress 错误页 HTML 中提取有意义的错误信息。
+
+    WordPress 的 wp_die 页面 CSS 很长（~2000 字符），直接截断会丢失实际报错。
+    此函数剥离 HTML 标签和 CSS，仅保留标题和正文文本。
+    """
+    status = resp.status_code
+    body = resp.text or ""
+
+    # 尝试提取 <title> 和 <p> 标签中的文本
+    title_m = re.search(r'<title>(.*?)<\/title>', body, re.IGNORECASE)
+    title = title_m.group(1) if title_m else ""
+
+    # 提取所有 <p> 标签内容（WP 错误信息在 <p> 中）
+    paragraphs = re.findall(r'<p[^>]*>(.*?)<\/p>', body, re.IGNORECASE)
+    msg_parts = [re.sub(r'<[^>]+>', '', p).strip() for p in paragraphs]
+    msg_parts = [p for p in msg_parts if p]
+
+    # 拼接结果
+    parts = [f"HTTP {status}"]
+    if title:
+        parts.append(title)
+    if msg_parts:
+        parts.append(" | ".join(msg_parts[:3]))
+    if not title and not msg_parts:
+        # 非 HTML 响应，直接截文本
+        plain = re.sub(r'<[^>]+>', ' ', body).strip()
+        plain = ' '.join(plain.split())[:300]
+        parts.append(plain)
+
+    return ": ".join(parts)
+
+
 class OnePanelWordPressRestorer:
     """WordPress 站点后处理 —— 文件恢复、域名替换、Woo Key/CTX 注入"""
 
@@ -325,9 +358,7 @@ echo json_encode([
                 try:
                     resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code != 200:
-                        # 保留响应体中的 PHP 报错信息（HTML/plain text）
-                        body = (resp.text or "")[:500]
-                        last_error = f"HTTP {resp.status_code}: {body}"
+                        last_error = _extract_wp_error(resp)
                         continue
                     if not resp.text or not resp.text.strip():
                         last_error = "empty response body"
