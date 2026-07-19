@@ -10,8 +10,8 @@ _log = logging.getLogger(__name__)
 async def safe_count(query) -> int:
     """MySQL / SQLite 兼容的 count 查询。
 
-    Tortoise ORM 的 .count() 在 MySQL 下从 asyncmy 驱动拿到的是字符串 COUNT 结果，
-    内部做 `str - int` 运算触发 TypeError。此函数绕过该 bug，直接用 CAST 转整数。
+    Tortoise ORM 的 .count() 在 MySQL asyncmy 驱动下可能返回字符串，
+    此函数统一转换为 int，并在所有路径失败时回退到全量 ID 计数。
 
     Args:
         query: Tortoise QuerySet 实例
@@ -19,44 +19,37 @@ async def safe_count(query) -> int:
     Returns:
         int: 记录总数
     """
-    # 先提取 SQL（只调用一次 .sql()，避免重复调用导致内部状态错误）
+    # 主路径：直接使用 Tortoise count，兼容 asyncmy 返回字符串的情况
+    try:
+        raw = await query.count()
+        return int(raw) if isinstance(raw, str) else raw
+    except Exception as exc:
+        _log.debug("safe_count Tortoise .count() 失败，尝试子查询: %s", exc)
+
+    # 路径二：构造 COUNT 子查询
     try:
         cache_sql, cache_params = query.query.sql()
     except Exception:
         cache_sql, cache_params = None, None
 
-    try:
-        conn = connections.get("default")
-        if not cache_sql:
-            raise ValueError("query.sql() 返回空")
+    if cache_sql:
+        try:
+            conn = connections.get("default")
+            upper = cache_sql.upper()
+            from_idx = upper.index(' FROM ')
+            tail = cache_sql[from_idx:]
+            tail = _strip_order_by(tail)
+            tail = re.sub(r'\s+LIMIT\s+\d+(\s*,\s*\d+)?', '', tail, flags=re.IGNORECASE)
+            tail = re.sub(r'\s+OFFSET\s+\d+', '', tail, flags=re.IGNORECASE)
+            count_sql = f'SELECT COUNT(1) as cnt {tail}'
+            result = await conn.execute_query_dict(count_sql, cache_params)
+            return int(list(result[0].values())[0])
+        except Exception as exc2:
+            _log.debug("safe_count 子查询失败，回退全量 ID: %s", exc2)
 
-        # 截取 FROM 及之后的部分作为子查询
-        upper = cache_sql.upper()
-        from_idx = upper.index(' FROM ')
-        tail = _strip_order_by(cache_sql[from_idx:])
-        tail = re.sub(r'\s+LIMIT\s+\d+(\s*,\s*\d+)?', '', tail, flags=re.IGNORECASE)
-        tail = re.sub(r'\s+OFFSET\s+\d+', '', tail, flags=re.IGNORECASE)
-
-        count_sql = f'SELECT CAST(COUNT(*) AS UNSIGNED) as cnt {tail}'
-        result = await conn.execute_query_dict(count_sql, cache_params)
-        return int(list(result[0].values())[0])
-    except Exception as e:
-        _log.warning("safe_count 降级: %s", e)
-        # 兜底：用缓存的 SQL 做 COUNT(1)，避免重复调用 query.query.sql()
-        if cache_sql:
-            try:
-                from_idx2 = cache_sql.upper().index(' FROM ')
-                sub_tail = _strip_order_by(cache_sql[from_idx2:])
-                sub_tail = re.sub(r'\s+LIMIT\s+\d+(\s*,\s*\d+)?', '', sub_tail, flags=re.IGNORECASE)
-                sub_tail = re.sub(r'\s+OFFSET\s+\d+', '', sub_tail, flags=re.IGNORECASE)
-                count_fallback_sql = f'SELECT COUNT(1) as cnt {sub_tail}'
-                result2 = await conn.execute_query_dict(count_fallback_sql, cache_params)
-                return int(list(result2[0].values())[0])
-            except Exception:
-                pass
-        # 最终兜底：全量加载 ID 计数
-        ids = await query.values_list('id', flat=True)
-        return len(ids)
+    # 路径三：最终兜底 — 全量加载 ID 计数
+    ids = await query.values_list('id', flat=True)
+    return len(ids)
 
 
 def _strip_order_by(tail: str) -> str:
