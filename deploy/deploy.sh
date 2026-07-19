@@ -150,6 +150,8 @@ init_deploy() {
         sed -i "s/^# DB_PASSWORD=.*/DB_PASSWORD=$DB_PW/" .env
         sed -i "s/^# DB_NAME=.*/DB_NAME=vue_fastapi_admin/" .env
         sed -i "s/^# MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
+        # 首次部署标记：强制 init_superuser() 用 DEFAULT_PASSWORD 重置 admin 密码
+        sed -i "s/^# RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=true/" .env
         log "已生成 .env（随机密钥，MySQL 模式）"
         echo ""
         echo -e "  ${YELLOW}管理员初始密码: ${DEFAULT_PW}${NC}"
@@ -193,6 +195,15 @@ init_deploy() {
             sed -i "s/^MYSQL_ROOT_PASSWORD=.*/MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PW/" .env
             log "已更新 MYSQL_ROOT_PASSWORD"
         fi
+        # init 命令始终标记强制重置 admin 密码
+        if grep -q "^# RESET_ADMIN_PASSWORD=" .env 2>/dev/null; then
+            sed -i "s/^# RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=true/" .env
+        elif ! grep -q "^RESET_ADMIN_PASSWORD=" .env 2>/dev/null; then
+            echo "RESET_ADMIN_PASSWORD=true" >> .env
+        else
+            sed -i "s/^RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=true/" .env
+        fi
+        log "已设置 RESET_ADMIN_PASSWORD=true（admin 密码将在启动时重置为 .env 中的值）"
         warn ".env 已存在，跳过创建"
     fi
 
@@ -292,6 +303,8 @@ update_deploy() {
     else
         rm -f .env.bak
     fi
+    # 确保 update 不会强制重置 admin 密码（保护用户自行修改的密码）
+    sed -i "s/^RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=false/" .env 2>/dev/null || true
 
     # 4. 构建新镜像（旧容器保持运行，用户不中断）
     step "构建新镜像（老服务继续运行）..."

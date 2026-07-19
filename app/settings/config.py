@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 30  # 30 day
     DEFAULT_PASSWORD: str = ""
     """新建用户/重置密码的默认密码，生产环境务必更换"""
+    RESET_ADMIN_PASSWORD: bool = False
+    """首次部署 / 强制重置时设为 true，init_superuser() 会用 DEFAULT_PASSWORD 覆盖 admin 密码"""
 
     # ── 限流 ──
     RATE_LIMIT_MAX_REQUESTS: int = 100  # 每分钟最大请求数

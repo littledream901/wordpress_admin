@@ -255,7 +255,28 @@ async def init_db():
 # ── 4.1 超级用户 ──
 
 async def init_superuser():
-    """首次启动创建默认超级管理员"""
+    """首次启动创建默认超级管理员；RESET_ADMIN_PASSWORD=true 时强制重置密码"""
+    from app.models.user import User
+    from app.utils.password import get_password_hash
+
+    if settings.RESET_ADMIN_PASSWORD:
+        admin = await User.filter(username="admin").first()
+        if admin:
+            admin.password = get_password_hash(settings.DEFAULT_PASSWORD)
+            await admin.save(update_fields=["password"])
+            logger.info("[init_superuser] RESET_ADMIN_PASSWORD=true，admin 密码已重置")
+        else:
+            await user_controller.create_user(
+                UserCreate(
+                    username="admin",
+                    email="admin@admin.com",
+                    password=settings.DEFAULT_PASSWORD,
+                    is_active=True,
+                    is_superuser=True,
+                )
+            )
+        return
+
     if await user_controller.model.exists():
         return
     await user_controller.create_user(
