@@ -124,7 +124,7 @@ class ProvisionTaskRunner(TaskRunner):
             await self._update_step(job, "replace_domain")
             old_domain = (
                 wp_restorer.old_source_domain
-                or ProviderResolver.sync_get_config('onepanel', 'old_source_domain', default='').strip()
+                or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
             )
             if not old_domain:
                 raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")

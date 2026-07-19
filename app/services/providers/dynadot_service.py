@@ -14,22 +14,29 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from app.utils.config_reader import get_config
+from app.utils.provider_resolver import ProviderResolver
 
 logger = logging.getLogger(__name__)
 
 
 class DynadotService:
-    """Dynadot JSON API 客户端（api3.json）"""
+    """Dynadot JSON API 客户端（api3.json）— 配置延迟加载"""
 
     def __init__(self):
-        self.api_key = get_config("DYNADOT_API_KEY")
-        self.base_url = get_config("DYNADOT_API_URL") or "https://api.dynadot.com/api3.json"
-        self.timeout_val = int(get_config("DYNADOT_TIMEOUT") or "30")
+        self._config_loaded = False
+
+    def _ensure_config(self):
+        if self._config_loaded:
+            return
+        self.api_key = ProviderResolver.sync_get_config('dynadot', 'api_key', '')
+        self.base_url = ProviderResolver.sync_get_config('dynadot', 'api_url', '') or "https://api.dynadot.com/api3.json"
+        self.timeout_val = int(ProviderResolver.sync_get_config('dynadot', 'timeout', '') or "30")
         self.timeout = httpx.Timeout(self.timeout_val)
+        self._config_loaded = True
 
     def _call(self, command: str, **params) -> Dict[str, Any]:
         """调用 Dynadot JSON API"""
+        self._ensure_config()
         params["key"] = self.api_key
         params["command"] = command
         logger.debug("Dynadot 请求: command=%s domain=%s", command, params.get("domain", ""))
