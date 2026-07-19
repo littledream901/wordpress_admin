@@ -183,14 +183,60 @@ async def init_db():
 
     # ── 后续增量字段补丁（部署后按需添加）──
     # 步骤：safe=False → safe=True，然后逐条添加 ALTER TABLE
+    # 2025-07-19 全量补全：通过模型 vs 补丁交叉对比，统一补齐所有缺失列
     patches = [
+        # -- site_pipeline_site --
         "ALTER TABLE site_pipeline_site ADD COLUMN woo_product_count INTEGER DEFAULT 0",
         "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_token VARCHAR(255) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN pipeline_log TEXT DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN hub_account_id VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN hub_last_action VARCHAR(64) DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN woo_import_status VARCHAR(64) DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_status VARCHAR(64) DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_data TEXT DEFAULT ''",
+        # -- user --
         "ALTER TABLE user ADD COLUMN is_superuser BOOLEAN DEFAULT 0",
         "ALTER TABLE user ADD COLUMN is_active BOOLEAN DEFAULT 1",
+        "ALTER TABLE user ADD COLUMN alias VARCHAR(30)",
+        "ALTER TABLE user ADD COLUMN avatar VARCHAR(512) DEFAULT ''",
+        "ALTER TABLE user ADD COLUMN last_login DATETIME",
+        "ALTER TABLE user ADD COLUMN dept_id INTEGER",
+        # -- operation_job --
+        "ALTER TABLE operation_job ADD COLUMN step VARCHAR(64) DEFAULT ''",
+        "ALTER TABLE operation_job ADD COLUMN total_steps INTEGER DEFAULT 1",
+        "ALTER TABLE operation_job ADD COLUMN worker_name VARCHAR(128) DEFAULT ''",
+        "ALTER TABLE operation_job ADD COLUMN last_heartbeat DATETIME",
+        "ALTER TABLE operation_job ADD COLUMN batch_id VARCHAR(64) DEFAULT ''",
+        "ALTER TABLE operation_job ADD COLUMN retry_count INTEGER DEFAULT 0",
+        "ALTER TABLE operation_job ADD COLUMN max_retry INTEGER DEFAULT 3",
+        "ALTER TABLE operation_job ADD COLUMN started_at DATETIME",
+        "ALTER TABLE operation_job ADD COLUMN finished_at DATETIME",
+        # -- site_pipeline_hubstudio_job --
+        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN provider_id INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN worker_name VARCHAR(128) DEFAULT ''",
+        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN retry_count INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN started_at DATETIME",
+        "ALTER TABLE site_pipeline_hubstudio_job ADD COLUMN finished_at DATETIME",
+        # -- site_pipeline_hubstudio_agent_heartbeat --
+        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN version VARCHAR(32) DEFAULT ''",
+        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN host_info VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_id INTEGER DEFAULT 0",
+        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_status VARCHAR(32) DEFAULT ''",
+        "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN total_tasks INTEGER DEFAULT 0",
+        # -- config --
+        "ALTER TABLE config ADD COLUMN is_secret BOOLEAN DEFAULT 0",
+        "ALTER TABLE config ADD COLUMN is_enabled BOOLEAN DEFAULT 1",
+        # -- account --
+        "ALTER TABLE account ADD COLUMN two_fa VARCHAR(500) DEFAULT ''",
+        "ALTER TABLE account ADD COLUMN provider_id INTEGER",
+        # -- config_provider --
+        "ALTER TABLE config_provider ADD COLUMN tags VARCHAR(500) DEFAULT ''",
+        # -- resource_provider_binding --
+        "ALTER TABLE resource_provider_binding ADD COLUMN remark VARCHAR(500) DEFAULT ''",
+        # -- site_pipeline_gmail_account --
+        "ALTER TABLE site_pipeline_gmail_account ADD COLUMN assigned_site_domain VARCHAR(255) DEFAULT ''",
     ]
     for sql in patches:
         try:
