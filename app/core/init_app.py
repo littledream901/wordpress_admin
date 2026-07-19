@@ -191,12 +191,12 @@ async def init_db():
         "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_token VARCHAR(255) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN pipeline_log TEXT DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN pipeline_log TEXT",
         "ALTER TABLE site_pipeline_site ADD COLUMN hub_account_id VARCHAR(255) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN hub_last_action VARCHAR(64) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN woo_import_status VARCHAR(64) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN gmc_status VARCHAR(64) DEFAULT ''",
-        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_data TEXT DEFAULT ''",
+        "ALTER TABLE site_pipeline_site ADD COLUMN gmc_data TEXT",
         # -- user --
         "ALTER TABLE user ADD COLUMN is_superuser BOOLEAN DEFAULT 0",
         "ALTER TABLE user ADD COLUMN is_active BOOLEAN DEFAULT 1",
@@ -227,7 +227,7 @@ async def init_db():
         "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_status VARCHAR(32) DEFAULT ''",
         "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN total_tasks INTEGER DEFAULT 0",
         # -- config --
-        "ALTER TABLE config ADD COLUMN value TEXT DEFAULT ''",
+        "ALTER TABLE config ADD COLUMN value TEXT",
         "ALTER TABLE config ADD COLUMN is_secret BOOLEAN DEFAULT 0",
         "ALTER TABLE config ADD COLUMN is_enabled BOOLEAN DEFAULT 1",
         # -- account --
