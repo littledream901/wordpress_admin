@@ -307,8 +307,8 @@ class SitePipelineController:
             q &= Q(create_by=assign_to)
         total, objs = await site_controller.list(page=page, page_size=page_size, search=q, order=['-id'])
 
-        dept_ids = {obj.dept_id for obj in objs if obj.dept_id}
-        user_ids = {obj.create_by for obj in objs if obj.create_by}
+        dept_ids = {d for obj in objs if (d := getattr(obj, 'dept_id', None))}
+        user_ids = {u for obj in objs if (u := getattr(obj, 'create_by', None))}
         site_ids_list = [obj.id for obj in objs]
         dept_map, user_map, gmail_map = {}, {}, {}
         if dept_ids:
@@ -325,8 +325,8 @@ class SitePipelineController:
             gmail = gmail_map.get(obj.id)
             d['gmail_username'] = gmail.username if gmail else ''
             d['gmail_status'] = gmail.status if gmail else ''
-            d['dept_name'] = dept_map.get(obj.dept_id, '')
-            d['assign_to_name'] = user_map.get(obj.create_by, '')
+            d['dept_name'] = dept_map.get(getattr(obj, 'dept_id', None), '')
+            d['assign_to_name'] = user_map.get(getattr(obj, 'create_by', None), '')
             data.append(d)
         return {"total": total, "data": data, "page": page, "page_size": page_size}
 
@@ -334,13 +334,15 @@ class SitePipelineController:
         """获取站点详情，附带部门/用户/Gmail/Provider 绑定信息"""
         obj = await site_controller.get(id=site_id)
         site_dict = await obj.to_dict()
-        if obj.dept_id:
-            dept = await Dept.get_or_none(id=obj.dept_id)
+        dept_id = getattr(obj, 'dept_id', None)
+        if dept_id:
+            dept = await Dept.get_or_none(id=dept_id)
             site_dict['dept_name'] = dept.name if dept else ''
         else:
             site_dict['dept_name'] = ''
-        if obj.create_by:
-            owner = await User.get_or_none(id=obj.create_by)
+        create_by = getattr(obj, 'create_by', None)
+        if create_by:
+            owner = await User.get_or_none(id=create_by)
             site_dict['assign_to_name'] = owner.username if owner else ''
         else:
             site_dict['assign_to_name'] = ''
