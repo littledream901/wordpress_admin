@@ -51,14 +51,20 @@ mkdir -p logs static/avatars uploads/feeds
 # =============================================
 if [ "$DB_ENGINE" = "mysql" ]; then
     echo "[INFO] 等待 MySQL 就绪..."
-    for i in $(seq 1 30); do
-        if mysqladmin ping -h"${DB_HOST:-db}" -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" --silent 2>/dev/null; then
+    MYSQL_READY=false
+    for i in $(seq 1 60); do
+        if mysql -h"${DB_HOST:-db}" -u"${DB_USER:-admin}" -p"${DB_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; then
             echo "[INFO] MySQL 已就绪"
+            MYSQL_READY=true
             break
         fi
-        echo "[INFO] 等待 MySQL... ($i/30)"
+        echo "[INFO] 等待 MySQL 认证就绪... ($i/60)"
         sleep 3
     done
+    if [ "$MYSQL_READY" = false ]; then
+        echo "[ERROR] MySQL 未能在 180 秒内就绪，退出"
+        exit 1
+    fi
 fi
 
 echo "[INFO] 同步数据库表结构..."
@@ -66,11 +72,26 @@ python -c "
 import asyncio
 import os
 import sys
+import time
 from tortoise import Tortoise
+from tortoise.exceptions import DBConnectionError
 from app.settings import TORTOISE_ORM
 
 async def upgrade():
-    await Tortoise.init(config=TORTOISE_ORM)
+    # ── 带重试的 Tortoise 初始化（MySQL 首次启动认证层可能滞后）──
+    max_retries = 3
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            await Tortoise.init(config=TORTOISE_ORM)
+            break
+        except DBConnectionError as e:
+            last_err = e
+            if attempt < max_retries:
+                print(f'[INFO] Tortoise 连接失败 (尝试 {attempt}/{max_retries})，10秒后重试...')
+                time.sleep(10)
+            else:
+                raise
 
     migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
 

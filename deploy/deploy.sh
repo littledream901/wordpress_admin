@@ -28,9 +28,9 @@ wait_healthy() {
     local last_error=""
     local status_code=""
 
-    step "等待应用健康检查 (${url})，最多 60 秒..."
+    step "等待应用健康检查 (${url})，最多 120 秒..."
 
-    for i in $(seq 1 30); do
+    for i in $(seq 1 40); do
         # 捕获 HTTP 状态码和响应体，区分不同错误情况
         local resp
         resp=$(curl -s -w "\n%{http_code}" --connect-timeout 3 "${url}" 2>&1) || true
@@ -52,9 +52,9 @@ wait_healthy() {
             last_error="HTTP ${status_code}: ${body:-无响应体}"
         fi
 
-        # 每 2 秒打印一个点表示等待中
+        # 每 3 秒打印一个点表示等待中
         printf "."
-        sleep 2
+        sleep 3
     done
 
     # ── 健康检查失败，输出详细诊断信息 ──
@@ -210,15 +210,17 @@ init_deploy() {
     DB_USER_VAL=$(grep -m1 "^DB_USER=" .env | cut -d= -f2 || echo "admin")
     # 等待 MySQL 完全就绪（用 mysql -e "SELECT 1" 而非 mysqladmin ping，确保认证层就绪）
     local mysql_ready=false
-    for i in $(seq 1 30); do
+    for i in $(seq 1 40); do
         if docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" -e "SELECT 1" >/dev/null 2>&1; then
             mysql_ready=true
             break
         fi
-        sleep 2
+        printf "."  # 每 3 秒输出一个点
+        sleep 3
     done
+    echo ""
     if [ "$mysql_ready" = false ]; then
-        warn "MySQL 未能在 60 秒内就绪，跳过远程访问配置（容器启动后可用 deploy.sh update 重试）"
+        warn "MySQL 未能在 120 秒内就绪，跳过远程访问配置（容器启动后可用 deploy.sh update 重试）"
     else
         # 允许 admin 用户远程连接（关闭 SSL 要求，解决客户端握手失败）
         docker compose exec -T db mysql -uroot -p"${MYSQL_ROOT_PW}" \
