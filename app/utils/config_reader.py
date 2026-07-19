@@ -4,6 +4,7 @@
 不再直接使用 raw SQLite 连接。
 """
 
+from app.models.config_provider import ConfigProvider, ProviderConfigItem
 from app.utils.provider_resolver import ProviderResolver, _run_sync
 
 # 旧 key 前缀 → provider_type
@@ -135,33 +136,38 @@ def get_provider_info(provider_type: str) -> dict:
 
 
 def get_config(name: str, default: str = "") -> str:
-    """同步获取单个配置值
-
-    优先级：
-    1. provider_config_item（通过 _KEY_MAP 转换旧 key → 新 key）
-    2. 旧 config 表（fallback）
-    3. 返回 default
-    """
+    """同步获取单个配置值（⚠ 仅在同步上下文中使用，async 中用 get_config_async）"""
     provider_type, new_key = _resolve_old_key(name)
 
     async def _fetch():
-        if provider_type:
-            p = await ConfigProvider.get_default(provider_type)
-            if p:
-                item = await ProviderConfigItem.filter(
-                    provider_id=p.id, config_key=new_key
-                ).first()
-                if item and item.config_value:
-                    return item.config_value.strip().strip('`')
-        # Fallback 到旧 config 表
-        from app.models.config import Config
-        row = await Config.filter(name=name, is_enabled=True).first()
-        return row.value if row else default
+        return await _get_config_async_impl(name, provider_type, new_key, default)
 
     try:
         return _run_sync(_fetch())
     except Exception:
         return default
+
+
+async def get_config_async(name: str, default: str = "") -> str:
+    """异步获取单个配置值（async handler 中使用）"""
+    provider_type, new_key = _resolve_old_key(name)
+    return await _get_config_async_impl(name, provider_type, new_key, default)
+
+
+async def _get_config_async_impl(name: str, provider_type, new_key: str, default: str) -> str:
+    """get_config 的异步实现核心"""
+    if provider_type:
+        p = await ConfigProvider.get_default(provider_type)
+        if p:
+            item = await ProviderConfigItem.filter(
+                provider_id=p.id, config_key=new_key
+            ).first()
+            if item and item.config_value:
+                return item.config_value.strip().strip('`')
+    # Fallback 到旧 config 表
+    from app.models.config import Config
+    row = await Config.filter(name=name, is_enabled=True).first()
+    return row.value if row else default
 
 
 def get_config_map(category: str) -> dict:

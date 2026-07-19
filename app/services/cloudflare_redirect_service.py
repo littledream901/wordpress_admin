@@ -4,7 +4,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from app.utils.config_reader import get_config, get_provider_info
+from app.utils.config_reader import get_provider_info
+from app.utils.provider_resolver import ProviderResolver
 from app.models.site_pipeline import Site
 from app.core.exceptions import CloudflareError
 
@@ -20,12 +21,27 @@ class CloudflareRedirectService:
 
     def __init__(self):
         self.base = 'https://api.cloudflare.com/client/v4'
-        self.session = httpx.Client(http2=True)
-        self.session.headers.update({
-            'Authorization': f'Bearer {get_config("CF_API_TOKEN")}',
-            'Content-Type': 'application/json',
-        })
-        self.timeout = httpx.Timeout(int(get_config('CF_TIMEOUT') or '20'))
+        self._session = None
+        self._config_loaded = False
+
+    def _ensure_config(self):
+        if self._config_loaded:
+            return
+        self.timeout = httpx.Timeout(int(ProviderResolver.sync_get_config('cloudflare', 'timeout', '') or '20'))
+        self._config_loaded = True
+
+    @property
+    def session(self):
+        if self._session is None:
+            self._ensure_config()
+            token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+            s = httpx.Client(http2=True)
+            s.headers.update({
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            })
+            self._session = s
+        return self._session
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, **params) -> Dict[str, Any]:
         try:

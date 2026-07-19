@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.utils.config_reader import get_config, get_provider_info
+from app.utils.config_reader import get_provider_info
+from app.utils.provider_resolver import ProviderResolver
 from app.models.site_pipeline import Site
 from app.core.exceptions import CloudflareError
 
@@ -13,18 +14,36 @@ logger = logging.getLogger(__name__)
 
 
 class CloudflareService:
+    """Cloudflare API 客户端 — 配置延迟加载，避免模块导入时 Tortoise 未初始化"""
+
     def __init__(self):
         self.base = 'https://api.cloudflare.com/client/v4'
-        self.session = httpx.Client(http2=True)
-        self.session.headers.update({
-            'Authorization': f'Bearer {get_config("CF_API_TOKEN")}',
-            'Content-Type': 'application/json',
-        })
-        self.account_id = get_config('CF_ACCOUNT_ID')
-        self.proxied = get_config('CF_PROXIED', 'false').lower() == 'true'
-        self.ttl = int(get_config('CF_TTL') or '1')
-        self.timeout_val = int(get_config('CF_TIMEOUT') or '20')
+        self._session = None
+        self._config_loaded = False
+
+    def _ensure_config(self):
+        """延迟加载配置（首次 API 调用时触发）"""
+        if self._config_loaded:
+            return
+        self.account_id = ProviderResolver.sync_get_config('cloudflare', 'account_id', '')
+        self.proxied = ProviderResolver.sync_get_config('cloudflare', 'proxied', 'false').lower() == 'true'
+        self.ttl = int(ProviderResolver.sync_get_config('cloudflare', 'ttl', '') or '1')
+        self.timeout_val = int(ProviderResolver.sync_get_config('cloudflare', 'timeout', '') or '20')
         self.timeout = httpx.Timeout(self.timeout_val)
+        self._config_loaded = True
+
+    @property
+    def session(self):
+        if self._session is None:
+            self._ensure_config()
+            token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+            s = httpx.Client(http2=True)
+            s.headers.update({
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            })
+            self._session = s
+        return self._session
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, **params) -> Dict[str, Any]:
         try:

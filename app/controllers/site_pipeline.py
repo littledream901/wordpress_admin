@@ -28,7 +28,7 @@ from app.services.providers.dynadot_service import DynadotService
 from app.services.tasks.runner import task_runner
 from app.services.woo_import_service import WooImportService
 from app.services.importers import get_importer
-from app.utils.config_reader import get_config
+from app.utils.config_reader import get_config, get_config_async
 from app.utils.provider_resolver import ProviderResolver
 
 _log = logging.getLogger(__name__)
@@ -612,8 +612,8 @@ class SitePipelineController:
 
     # ── DNS ──
     async def provision_dns(self, site_id: int) -> dict:
-        cf_token = get_config("CF_API_TOKEN")
-        cf_account = get_config("CF_ACCOUNT_ID")
+        cf_token = await get_config_async("CF_API_TOKEN")
+        cf_account = await get_config_async("CF_ACCOUNT_ID")
         if not cf_token or not cf_account:
             return {"ok": False, "error": "Cloudflare 未配置：请在 系统管理 → 提供商管理 中配置 Cloudflare API Token 和 Account ID", "code": 400}
         site = await site_controller.get(id=site_id)
