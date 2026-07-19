@@ -325,7 +325,9 @@ echo json_encode([
                 try:
                     resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code != 200:
-                        last_error = f"HTTP {resp.status_code}"
+                        # 保留响应体中的 PHP 报错信息（HTML/plain text）
+                        body = (resp.text or "")[:500]
+                        last_error = f"HTTP {resp.status_code}: {body}"
                         continue
                     if not resp.text or not resp.text.strip():
                         last_error = "empty response body"
