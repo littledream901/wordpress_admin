@@ -23,7 +23,40 @@ from app.core.exceptions import OnePanelError, ProviderConfigError
 from .utils import _log, _provider_value, safe_log_data
 
 
-class OnePanelAPI:
+def _parse_concatenated_json(text: str) -> dict | None:
+    """解析 1Panel 可能返回的多个拼接 JSON 对象。
+
+    1Panel 批量操作（如 /files/batch/role）可能为多个路径各返回一个 JSON，
+    导致响应体形如 `{...}{...}`，无法被 json.loads 整体解析。
+
+    返回第一个 code==200 的结果；若没有成功的则返回第一个对象；解析失败返回 None。
+    """
+    import json as _json
+    text = text.strip()
+    if not text:
+        return None
+    decoder = _json.JSONDecoder()
+    objects: list[dict] = []
+    idx = 0
+    while idx < len(text):
+        while idx < len(text) and text[idx] in ' \t\n\r':
+            idx += 1
+        if idx >= len(text):
+            break
+        try:
+            obj, end = decoder.raw_decode(text, idx)
+            if isinstance(obj, dict):
+                objects.append(obj)
+            idx = end
+        except _json.JSONDecodeError:
+            break
+    if not objects:
+        return None
+    # 优先返回成功的，否则返回第一个
+    for obj in objects:
+        if obj.get('code') == 200:
+            return obj
+    return objects[0]
     def __init__(self):
         cfgs = ProviderResolver.sync_get_config_map('onepanel')
         url = str(_provider_value(cfgs, 'OP_URL', 'url', '')).strip()
@@ -74,11 +107,14 @@ class OnePanelAPI:
                 try:
                     data = resp.json()
                 except Exception:
-                    last_err = f'HTTP {resp.status_code}: invalid JSON'
-                    _log.warning("1Panel %s %s 第 %s/%s 次非 JSON 响应：%s",
-                                 method, endpoint, attempt, self.max_retries, text[:200])
-                    time.sleep(self.retry_interval)
-                    continue
+                    # 1Panel 批量操作可能返回多个拼接的 JSON 对象
+                    data = _parse_concatenated_json(text)
+                    if data is None:
+                        last_err = f'HTTP {resp.status_code}: invalid JSON'
+                        _log.warning("1Panel %s %s 第 %s/%s 次非 JSON 响应：%s",
+                                     method, endpoint, attempt, self.max_retries, text[:200])
+                        time.sleep(self.retry_interval)
+                        continue
 
                 if data.get('code') == 200:
                     _log.debug("1Panel %s %s success", method, endpoint)
