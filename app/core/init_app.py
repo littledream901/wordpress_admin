@@ -913,6 +913,9 @@ async def init_essential():
             await init_providers()
         finally:
             await _release_init_lock("init_providers")
+    # Provider 初始化后立即加载到线程安全缓存（CloudflareService 等同步读取依赖此缓存）
+    from app.utils.provider_resolver import _load_configs_to_cache
+    await _load_configs_to_cache()
     steps.append(("Provider 同步", time.perf_counter() - t))
 
     total = time.perf_counter() - t0
