@@ -3,17 +3,19 @@
 
 独立的执行器层，不依赖 API 层（site_pipeline.py）。
 
-流程步骤（10 步）：
-  1. create_site        - 创建 WordPress 网站
-  2. apply_ssl          - 申请/绑定 SSL 证书
-  3. restore_db         - 恢复数据库
-  4. restore_files      - 恢复模板文件
-  5. rebuild_after_files- 重建容器
-  6. replace_domain     - 域名替换
-  7. patch_wp_config    - wp-config.php 配置
-  8. rebuild_after_patch- 重建容器
-  9. health_check       - 健康检查
-  10. create_woo_ctx    - WooCommerce Key + CTX 刷新
+流程步骤（12 步，对齐单脚本 1panel_create_wp_final.py 的顺序）：
+  1. create_site         - 创建 WordPress 网站
+  2. restore_db          - 恢复数据库
+  3. restore_files       - 恢复模板文件
+  4. rebuild_after_files - 重建容器
+  5. replace_domain      - 域名替换
+  6. apply_ssl           - 申请/绑定 SSL 证书（域名替换后申请）
+  7. patch_wp_config     - wp-config.php 配置
+  8. inject_woo_ctx      - 注入 WooCommerce + CTX PHP 脚本
+  9. rebuild_after_patch - 重建容器（脚本注入后 rebuild）
+  10. fetch_woo_keys     - 获取 WooCommerce API Key
+  11. health_check       - 健康检查
+  12. fetch_feed_link    - 获取 Feed 链接
 """
 
 import asyncio
@@ -50,9 +52,9 @@ class ProvisionTaskRunner(TaskRunner):
         if blocked:
             return {"ok": False, "code": 400, "msg": "该站点已有建站任务执行中，请勿重复触发"}
 
-        job = await self._create_job(site_id, site.domain, "provision", total_steps=10)
+        job = await self._create_job(site_id, site.domain, "provision", total_steps=12)
         asyncio.create_task(self._run(job, site))
-        return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 10}
+        return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 12}
 
     async def _run(self, job: OperationJob, site):
         # 从 onepanel Provider 读取 max_concurrent
@@ -93,7 +95,46 @@ class ProvisionTaskRunner(TaskRunner):
             site.pipeline_status = 'onepanel:site_created'
             await site.save()
 
-            # Step 2: apply_ssl
+            # Step 2: restore_db（对齐单脚本：建站后先恢复 DB）
+            await self._update_step(job, "restore_db")
+            await self._exec(lambda: db_restorer.restore(db_name))
+
+            # Step 3: restore_files
+            await self._update_step(job, "restore_files")
+            await self._exec(lambda: wp_restorer.restore_files(service_name))
+
+            # Step 4: rebuild_after_files
+            await self._update_step(job, "rebuild_after_files")
+            await self._exec(lambda: site_manager.rebuild_app(app_id))
+
+            # Step 5: replace_domain（对齐单脚本：域名替换在 rebuild 后、SSL 前）
+            await self._update_step(job, "replace_domain")
+            old_domain = (
+                wp_restorer.old_source_domain
+                or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
+            )
+            if not old_domain:
+                raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
+            # 域名替换使用目标协议（对齐单脚本：https if force_https else http）
+            replace_protocol = 'https' if ssl_manager.force_https else 'http'
+            replace_token = ''
+            try:
+                replace_token = await self._exec(
+                    lambda: wp_restorer.inject_domain_replace_script(
+                        service_name=service_name, old_domain=old_domain,
+                        new_domain=site.domain, target_protocol=replace_protocol,
+                    )
+                )
+                await self._exec(
+                    lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token)
+                )
+            finally:
+                if replace_token:
+                    await self._exec(
+                        lambda: wp_restorer.remove_domain_replace_script(service_name)
+                    )
+
+            # Step 6: apply_ssl（对齐单脚本：域名替换后申请 SSL）
             await self._update_step(job, "apply_ssl")
             protocol = 'http'
             if not onepanel_site_id:
@@ -108,54 +149,41 @@ class ProvisionTaskRunner(TaskRunner):
             if protocol not in ('http', 'https'):
                 protocol = 'http'
 
-            # Step 3: restore_db
-            await self._update_step(job, "restore_db")
-            await self._exec(lambda: db_restorer.restore(db_name))
-
-            # Step 4: restore_files
-            await self._update_step(job, "restore_files")
-            await self._exec(lambda: wp_restorer.restore_files(service_name))
-
-            # Step 5: rebuild
-            await self._update_step(job, "rebuild_after_files")
-            await self._exec(lambda: site_manager.rebuild_app(app_id))
-
-            # Step 6: replace_domain
-            await self._update_step(job, "replace_domain")
-            old_domain = (
-                wp_restorer.old_source_domain
-                or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
-            )
-            if not old_domain:
-                raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
-            replace_token = ''
-            try:
-                replace_token = await self._exec(
-                    lambda: wp_restorer.inject_domain_replace_script(
-                        service_name=service_name, old_domain=old_domain,
-                        new_domain=site.domain, target_protocol=protocol,
-                    )
-                )
-                await self._exec(
-                    lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token)
-                )
-            finally:
-                if replace_token:
-                    await self._exec(
-                        lambda: wp_restorer.remove_domain_replace_script(service_name)
-                    )
-
-            # Step 7: patch_wp_config
+            # Step 7: patch_wp_config（使用 SSL 后的实际协议）
             await self._update_step(job, "patch_wp_config")
             await self._exec(
                 lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol)
             )
 
-            # Step 8: rebuild
+            # Step 8: inject_woo_ctx（对齐单脚本：rebuild 前注入 PHP 脚本）
+            await self._update_step(job, "inject_woo_ctx")
+            woo_token = await self._exec(
+                lambda: wp_restorer.inject_woo_script(service_name)
+            )
+            ctx_refresh_url = await self._exec(
+                lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol)
+            )
+
+            # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）
             await self._update_step(job, "rebuild_after_patch")
             await self._exec(lambda: site_manager.rebuild_app(app_id))
 
-            # Step 9: health_check
+            # Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
+            await self._update_step(job, "fetch_woo_keys")
+            woo_ck, woo_cs = '', ''
+            try:
+                woo_ck, woo_cs = await self._exec(
+                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol)
+                )
+            except Exception as exc:
+                _log.warning("WooCommerce Key 获取失败（非阻断）：%s", exc)
+            finally:
+                try:
+                    await self._exec(lambda: wp_restorer.remove_woo_script(service_name))
+                except Exception:
+                    pass
+
+            # Step 11: health_check
             await self._update_step(job, "health_check")
             health_ok = await self._exec(
                 lambda: wp_restorer.health_check(site.domain, protocol)
@@ -163,24 +191,8 @@ class ProvisionTaskRunner(TaskRunner):
             if not health_ok:
                 raise WordPressOperationError("health check", domain=site.domain, detail=f"协议={protocol}")
 
-            # Step 10: create_woo_ctx
-            await self._update_step(job, "create_woo_ctx")
-            woo_token = ''
-            woo_ck, woo_cs = '', ''
-            try:
-                woo_token = await self._exec(
-                    lambda: wp_restorer.inject_woo_script(service_name)
-                )
-                woo_ck, woo_cs = await self._exec(
-                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol)
-                )
-            finally:
-                if woo_token:
-                    await self._exec(lambda: wp_restorer.remove_woo_script(service_name))
-
-            ctx_refresh_url = await self._exec(
-                lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol)
-            )
+            # Step 12: fetch_feed_link
+            await self._update_step(job, "fetch_feed_link")
             feed_link = await self._exec(
                 lambda: wp_restorer.fetch_last_feed_link(ctx_refresh_url)
             ) or ''
