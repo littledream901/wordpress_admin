@@ -95,25 +95,30 @@ async def upgrade():
 
     migrations_dir = os.path.join(os.path.dirname(os.path.abspath('app')), 'migrations')
 
-    # 优先使用 Aerich 迁移
-    # aerich.ini 由项目根目录提供，也可回退 pyproject.toml
-    aerich_config = None
-    if os.path.exists('aerich.ini'):
-        aerich_config = 'aerich.ini'
-    elif os.path.exists('pyproject.toml'):
-        aerich_config = 'pyproject.toml'
+    # ── Aerich 迁移仅 SQLite 使用（迁移文件为 SQLite 语法，MySQL 会报语法错误）──
+    db_engine = os.environ.get('DB_ENGINE', 'sqlite')
+    if db_engine != 'mysql':
+        # 优先使用 Aerich 迁移
+        # aerich.ini 由项目根目录提供，也可回退 pyproject.toml
+        aerich_config = None
+        if os.path.exists('aerich.ini'):
+            aerich_config = 'aerich.ini'
+        elif os.path.exists('pyproject.toml'):
+            aerich_config = 'pyproject.toml'
 
-    if aerich_config and os.path.isdir(migrations_dir):
-        try:
-            from aerich import Command
-            command = Command(tortoise_config=TORTOISE_ORM, app='models', location=migrations_dir)
-            await command.init()
-            await command.upgrade(run_in_transaction=True)
-            print(f'[INFO] 数据库迁移完成 (Aerich, 配置来源: {aerich_config})')
-            return
-        except Exception as e:
-            print(f'[WARN] Aerich 迁移失败: {e}')
-            print('[WARN] 回退到 generate_schemas (safe mode)')
+        if aerich_config and os.path.isdir(migrations_dir):
+            try:
+                from aerich import Command
+                command = Command(tortoise_config=TORTOISE_ORM, app='models', location=migrations_dir)
+                await command.init()
+                await command.upgrade(run_in_transaction=True)
+                print(f'[INFO] 数据库迁移完成 (Aerich, 配置来源: {aerich_config})')
+                return
+            except Exception as e:
+                print(f'[WARN] Aerich 迁移失败: {e}')
+                print('[WARN] 回退到 generate_schemas (safe mode)')
+    else:
+        print('[INFO] MySQL 模式，跳过 Aerich 迁移（迁移文件为 SQLite 语法），使用 generate_schemas')
 
     # 回退：使用 generate_schemas 自动建表（safe=True 不删除已有表）
     await Tortoise.generate_schemas(safe=True)

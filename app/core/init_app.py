@@ -256,7 +256,7 @@ async def init_db():
 
 async def init_superuser():
     """首次启动创建默认超级管理员；RESET_ADMIN_PASSWORD=true 时强制重置密码"""
-    from app.models.user import User
+    from app.models.admin import User
     from app.utils.password import get_password_hash
 
     if settings.RESET_ADMIN_PASSWORD:
