@@ -50,6 +50,7 @@ _register_module("hubstudio.tasks.update_env",       os.path.join(_BASE, "hubstu
 _register_module("hubstudio.tasks.create_account",   os.path.join(_BASE, "hubstudio", "tasks", "create_account.py"))
 _register_module("hubstudio.tasks.wp_login",  os.path.join(_BASE, "hubstudio", "tasks", "wp_login.py"))
 _register_module("hubstudio.tasks.gmc_check",        os.path.join(_BASE, "hubstudio", "tasks", "gmc_check.py"))
+_register_module("hubstudio.tasks.open_env",       os.path.join(_BASE, "hubstudio", "tasks", "open_env.py"))
 _register_module("hubstudio.executor",         os.path.join(_BASE, "hubstudio", "executor.py"))
 
 # ── Re-export 全部公开接口（与原单体文件完全一致） ──

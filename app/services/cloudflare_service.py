@@ -54,8 +54,18 @@ class CloudflareService:
             resp.raise_for_status()
             return resp.json()
         except (httpx.HTTPError, OSError) as exc:
-            logger.error("Cloudflare API error: %s %s -> %s", method, path, str(exc))
-            return {"success": False, "errors": [{"message": str(exc)}]}
+            err_detail = str(exc)
+            # 尝试提取 Cloudflare 返回的错误详情
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    cf_body = exc.response.json()
+                    cf_errors = cf_body.get('errors', [])
+                    if cf_errors:
+                        err_detail = '; '.join(e.get('message', str(e)) for e in cf_errors)
+                except Exception:
+                    pass
+            logger.error("Cloudflare API error: %s %s -> %s", method, path, err_detail)
+            return {"success": False, "errors": [{"message": err_detail}]}
 
     def _get(self, path: str, **params) -> Dict[str, Any]:
         return self._request("GET", path, payload=None, **params)

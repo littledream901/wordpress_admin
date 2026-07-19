@@ -117,7 +117,7 @@ const batchJobTypeOptions = [
   { label: '创建环境', value: 'create_env' },
   { label: '创建账号', value: 'create_account' },
   { label: '更新环境', value: 'update_env' },
-  { label: '登录WP', value: 'website_control' },
+  { label: '登录WP', value: 'wp_login' },
   { label: 'GMC检查', value: 'gmc_check' },
 ]
 
@@ -169,11 +169,11 @@ const columns = [
     title: '操作', key: 'actions', width: 440, fixed: 'right',
     render: (r) => {
         const buttons = [
-        { label: '创建环境', type: 'primary', action: 'create_env', ghost: !r.hub_env_id },
-        { label: '创建账号', type: 'info', action: 'create_account', ghost: !r.hub_env_id },
+        { label: '创建环境', type: 'primary', action: 'create_env', ghost: !!r.hub_env_id },
+        { label: '创建账号', type: 'info', action: 'create_account', ghost: !!r.hub_account_id },
         { label: '更新环境', type: 'warning', action: 'update_env', ghost: !r.hub_env_id },
-        { label: '登录WP', type: 'success', action: 'website_control', ghost: !r.hub_env_id, disabled: r.platform === 'shopify' },
-        { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !r.hub_env_id },
+        { label: '登录WP', type: 'success', action: 'wp_login', ghost: !r.hub_env_id, disabled: r.platform === 'shopify' },
+        { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !!r.gmc_status },
         { label: '打开环境', type: 'error', action: 'open_env', ghost: !r.hub_env_id },
       ]
       return h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, buttons.map(btn =>
@@ -235,7 +235,7 @@ function handleAction(row, action) {
 async function openEnvironment(row) {
   try {
     await api.triggerHubOpenEnv(row.id, 0)
-    message.success(`站点 ${row.domain} 浏览器环境已打开`)
+    message.success(`站点 ${row.domain} 打开环境任务已派发（等待 Agent）`)
   } catch (e) {
     message.error(`打开环境失败: ${e}`)
   }
@@ -245,7 +245,7 @@ const fnMap = {
   create_env: api.triggerHubEnv,
   create_account: api.triggerHubAccount,
   update_env: api.triggerHubUpdate,
-  website_control: api.triggerHubControl,
+  wp_login: api.triggerHubControl,
   gmc_check: api.triggerHubGmcCheck,
 }
 

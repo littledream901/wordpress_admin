@@ -124,7 +124,7 @@ const jobTypeOptions = [
   { value: 'create_env', label: '创建环境' },
   { value: 'create_account', label: '创建账号' },
   { value: 'update_env', label: '更新环境' },
-  { value: 'website_control', label: '登录WP' },
+  { value: 'wp_login', label: '登录WP' },
   { value: 'gmc_check', label: 'GMC检查' },
 ]
 const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]))

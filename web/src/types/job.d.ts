@@ -17,7 +17,7 @@ export type JobActionType =
   | 'hub_create_env'
   | 'hub_create_account'
   | 'hub_update_env'
-  | 'hub_website_control'
+  | 'hub_wp_login'
   | 'hub_gmc_check'
 
 /** 操作任务实体 */

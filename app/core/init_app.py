@@ -164,10 +164,11 @@ async def init_db():
     from tortoise import Tortoise, connections
 
     # 确保 Tortoise 已初始化
+    from tortoise.exceptions import ConfigurationError
     try:
         await Tortoise.init(config=settings.TORTOISE_ORM)
-    except Exception:
-        pass
+    except ConfigurationError:
+        pass  # 已经初始化，忽略
 
     # 安全建表：仅创建不存在的表，已有表跳过
     await Tortoise.generate_schemas(safe=True)
@@ -849,8 +850,9 @@ async def _release_init_lock(lock_key: str):
     try:
         from tortoise import connections
         conn = connections.get("default")
+        placeholder = "?" if settings.DB_ENGINE == "sqlite" else "%s"
         await conn.execute_query(
-            "DELETE FROM system_init_lock WHERE lock_key = ? AND instance_id = ?",
+            f"DELETE FROM system_init_lock WHERE lock_key = {placeholder} AND instance_id = {placeholder}",
             [lock_key, _INSTANCE_ID]
         )
     except Exception:

@@ -15,8 +15,8 @@ class WooCommerceProductImporter(BaseProductImporter):
         self._service = WooImportService()
 
     async def import_products(self, site, shopify_products: list) -> dict:
-        """委托到 WooImportService._do_import。"""
-        return await self._service._do_import(site, shopify_products)
+        """委托到 WooImportService.import_for_site。"""
+        return await self._service.import_for_site(site, pre_selected_rows=shopify_products)
 
 
 woocommerce_importer = WooCommerceProductImporter()

@@ -102,7 +102,7 @@ const actionOptions = [
   { value: 'hub_create_env', label: 'Hub创建环境' },
   { value: 'hub_create_account', label: 'Hub创建账号' },
   { value: 'hub_update_env', label: 'Hub更新环境' },
-  { value: 'hub_website_control', label: 'Hub登录WP' },
+  { value: 'hub_wp_login', label: 'Hub登录WP' },
   { value: 'hub_gmc_check', label: 'Hub GMC检查' },
 ]
 const actionTypeLabel = Object.fromEntries(actionOptions.map(o => [o.value, o.label]))

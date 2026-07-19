@@ -41,7 +41,7 @@ _ACTION_PROVIDER: dict[str, str] = {
     "hub_create_env": "hubstudio",
     "hub_create_account": "hubstudio",
     "hub_update_env": "hubstudio",
-    "hub_website_control": "hubstudio",
+    "hub_wp_login": "hubstudio",
 }
 
 

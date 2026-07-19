@@ -33,7 +33,7 @@ _SITE_STATUS_MAP: dict[str, tuple[str, str]] = {
     "hub_create_env": ("hub_status", "hubstudio"),
     "hub_create_account": ("hub_status", "hubstudio"),
     "hub_update_env": ("hub_status", "hubstudio"),
-    "hub_website_control": ("hub_status", "hubstudio"),
+    "hub_wp_login": ("hub_status", "hubstudio"),
     "hub_gmc_check": ("gmc_status", "hubstudio"),
 }
 
@@ -45,7 +45,7 @@ _ACTION_PROVIDER_MAP: dict[str, str] = {
     "provision": "onepanel",
     "woo_import": "woo",
 }
-for _hub_key in ["hub_create_env", "hub_create_account", "hub_update_env", "hub_website_control", "hub_gmc_check"]:
+for _hub_key in ["hub_create_env", "hub_create_account", "hub_update_env", "hub_wp_login", "hub_gmc_check"]:
     _ACTION_PROVIDER_MAP[_hub_key] = "hubstudio"
 
 

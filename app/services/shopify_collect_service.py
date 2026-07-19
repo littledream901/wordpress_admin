@@ -8,6 +8,7 @@
 支持自定义域名和 .myshopify.com 域名。
 """
 import json
+import random
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -16,6 +17,12 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from app.core.exceptions import ExternalAPIError
+
+
+def _status_failed(msg: str) -> str:
+    """截断错误信息到 64 字符以内（status 字段 max_length=64）"""
+    prefix = "collect_failed:"
+    return f"{prefix}{msg[:64 - len(prefix)]}"
 
 
 class ShopifyCollectService:
@@ -30,8 +37,10 @@ class ShopifyCollectService:
         "Accept": "application/json,text/html,*/*",
     }
 
-    def __init__(self, timeout: int = None):
+    def __init__(self, timeout: int = None, max_retries: int = None, retry_base_delay: float = None):
         self.timeout = timeout if timeout is not None else self._read_default_timeout()
+        self.max_retries = max_retries if max_retries is not None else self._read_default_config_int("max_retries", 3)
+        self.retry_base_delay = retry_base_delay if retry_base_delay is not None else self._read_default_config_float("retry_base_delay", 5.0)
         self.session = httpx.Client(http2=True)
         self.session.headers.update(self.REQUEST_HEADERS)
 
@@ -42,6 +51,22 @@ class ShopifyCollectService:
             return int(ProviderResolver.sync_get_config("shopify", "request_timeout", "30"))
         except Exception:
             return 30
+
+    @staticmethod
+    def _read_default_config_int(key: str, default: int) -> int:
+        try:
+            from app.utils.provider_resolver import ProviderResolver
+            return int(ProviderResolver.sync_get_config("shopify", key, str(default)))
+        except Exception:
+            return default
+
+    @staticmethod
+    def _read_default_config_float(key: str, default: float) -> float:
+        try:
+            from app.utils.provider_resolver import ProviderResolver
+            return float(ProviderResolver.sync_get_config("shopify", key, str(default)))
+        except Exception:
+            return default
 
     # ── URL 工具 ──────────────────────────────────────────────
 
@@ -83,13 +108,18 @@ class ShopifyCollectService:
     # ── API 请求 ──────────────────────────────────────────────
 
     def _request_json(self, api_url: str) -> Dict[str, Any]:
-        """请求 JSON API"""
-        try:
-            resp = self.session.get(api_url, timeout=httpx.Timeout(self.timeout))
-            resp.raise_for_status()
-            return resp.json()
-        except (httpx.HTTPError, OSError) as exc:
-            raise ExternalAPIError("Shopify", "fetch products", detail=str(exc)) from exc
+        """请求 JSON API，429 自动指数退避重试"""
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = self.session.get(api_url, timeout=httpx.Timeout(self.timeout))
+                if resp.status_code == 429 and attempt < self.max_retries:
+                    delay = self.retry_base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return resp.json()
+            except (httpx.HTTPError, OSError) as exc:
+                raise ExternalAPIError("Shopify", "fetch products", detail=str(exc)) from exc
 
     def _fetch_collection_page(self, source_url: str, page: int) -> List[Dict[str, Any]]:
         """获取一页产品列表"""
@@ -185,7 +215,7 @@ class ShopifyCollectService:
 
         except Exception as e:
             return {"ok": False, "error": str(e), "source_id": source.id, "count": collected,
-                    "source_status": f"collect_failed:{str(e)[:80]}", "last_collect_count": collected}
+                    "source_status": _status_failed(str(e)), "last_collect_count": collected}
 
         return {
             "ok": True, "source_id": source.id, "count": collected,
@@ -219,9 +249,7 @@ class ShopifyCollectService:
                     product_type=product_data.get("product_type", ""),
                     tags=product_data.get("tags", ""),
                     prod_info_json=product_data.get("prod_info_json", "{}"),
-                    status="pending",
-                    assigned_status="unassigned",
-                    imported_status="unimported",
+                    status="ready",
                     imported_result="{}",
                 )
                 return True

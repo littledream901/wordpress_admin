@@ -118,7 +118,7 @@ HUB_CONNECTOR_DIR=D:\Hubstudio
 - 启动后自动登录后端，获取 JWT Token
 - **登录后立即从服务端拉取 Provider 配置**（DB > .env），服务端不可达时降级
 - 每 `POLL_INTERVAL` 秒轮询后端领取待执行任务
-- 支持的任务类型：`create_env`、`create_account`、`update_env`、`website_control`、`gmc_check`（`website_control` 模块已重命名为 `wp_login`）
+- 支持的任务类型：`create_env`、`create_account`、`update_env`、`wp_login`、`gmc_check`
 - 每 `HEARTBEAT_INTERVAL` 秒向后端发送心跳
 - 网络异常时自动指数退避重连
 - Token 过期自动刷新

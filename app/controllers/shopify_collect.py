@@ -13,8 +13,21 @@ from app.services.shopify_collect_service import ShopifyCollectService
 from app.services.woo_import_service import WooImportService
 from app.services.importers import get_importer
 
-shopify_collect_service = ShopifyCollectService()
+_shopify_collect_service = None
 woo_import_service = WooImportService()
+
+
+def _get_shopify_collect_service():
+    global _shopify_collect_service
+    if _shopify_collect_service is None:
+        _shopify_collect_service = ShopifyCollectService()
+    return _shopify_collect_service
+
+
+def _status_failed(msg: str) -> str:
+    """截断错误信息到 64 字符以内（status 字段 max_length=64）"""
+    prefix = "collect_failed:"
+    return f"{prefix}{msg[:64 - len(prefix)]}"
 
 
 def _detect_source_type(url: str) -> str:
@@ -68,12 +81,12 @@ class ShopifyCollectController:
             return {"ok": False, "error": "source not found"}
         job = await self._create_job(0, source.source_url, "collect_shopify", {"source_id": source_id})
         try:
-            result = await asyncio.to_thread(shopify_collect_service.collect_source, source)
+            result = await asyncio.to_thread(_get_shopify_collect_service().collect_source, source)
             await self._update_source_status(source, result)
             await self._complete_job(job, ok=result.get('ok', False), result=result, error=result.get('error', ''))
             return {"ok": result.get('ok', False), "result": result, "job_id": job.id}
         except Exception as e:
-            source.status = f"collect_failed:{str(e)[:80]}"
+            source.status = _status_failed(str(e))
             source.last_collect_at = datetime.now()
             await source.save()
             await self._complete_job(job, ok=False, error=str(e))
@@ -211,7 +224,7 @@ class ShopifyCollectController:
             if not source:
                 await self._complete_job(await OperationJob.get(id=job_id), ok=False, error='source not found')
                 return
-            result = await asyncio.to_thread(shopify_collect_service.collect_source, source)
+            result = await asyncio.to_thread(_get_shopify_collect_service().collect_source, source)
             await self._update_source_status(source, result)
             if result.get('ok'):
                 await self._complete_job(await OperationJob.get(id=job_id), ok=True, result=result)
@@ -221,7 +234,7 @@ class ShopifyCollectController:
             try:
                 source = await shopify_source_controller.get(id=source_id)
                 if source:
-                    source.status = f"collect_failed:{str(e)[:80]}"
+                    source.status = _status_failed(str(e))
                     source.last_collect_at = datetime.now()
                     await source.save()
             except Exception:
@@ -271,6 +284,11 @@ class ShopifyCollectController:
             except Exception:
                 pass
         return {'deleted': count}
+
+    async def batch_set_max_products(self, ids: List[int], max_products: int) -> dict:
+        """批量设置最大采集数量"""
+        updated = await shopify_source_controller.model.filter(id__in=ids).update(max_products=max_products)
+        return {'updated': updated}
 
     async def batch_delete_products(self, ids: List[int]) -> dict:
         """批量删除产品"""

@@ -52,13 +52,24 @@ cloudflare_redirect_service = CloudflareRedirectService()
 hubstudio_service = HubStudioService()
 dynadot_service = DynadotService()
 
-onepanel_api = OnePanelAPI()
-onepanel_files = OnePanelFileManager(onepanel_api)
-onepanel_site_manager = OnePanelSiteManager(onepanel_api)
-onepanel_ssl_manager = OnePanelSSLManager(onepanel_api)
-onepanel_db_restorer = OnePanelDatabaseRestorer(onepanel_api)
-onepanel_wp_restorer = OnePanelWordPressRestorer(onepanel_api, onepanel_files)
 woo_import_service = WooImportService()
+
+_onepanel_api = None
+_onepanel_files = None
+
+
+def _get_onepanel_api():
+    global _onepanel_api
+    if _onepanel_api is None:
+        _onepanel_api = OnePanelAPI()
+    return _onepanel_api
+
+
+def _get_onepanel_files():
+    global _onepanel_files
+    if _onepanel_files is None:
+        _onepanel_files = OnePanelFileManager(_get_onepanel_api())
+    return _onepanel_files
 
 _provision_semaphore = asyncio.Semaphore(_load_max_concurrent())
 _import_semaphore = asyncio.Semaphore(_load_max_concurrent())
@@ -98,16 +109,87 @@ def _onepanel_request(method: str, url: str, payload: dict, headers: dict):
     return False, f"code={data.get('code')} message={data.get('message')}"
 
 
+def _apply_dns_result_to_site(site, result: dict):
+    """将 DNS 结果写入 site 对象（不 save，由调用方在 async 上下文中 save）"""
+    now = datetime.now()
+
+    root_ok = result.get('root_ok', True)
+    www_ok = result.get('www_ok', True)
+    site.cloudflare_status = '已解析' if (root_ok and www_ok) else '部分失败'
+
+    dynadot_r = result.get('dynadot_result')
+    if dynadot_r is not None:
+        ok = dynadot_r.get("success", False) if isinstance(dynadot_r, dict) else False
+        site.dynadot_status = "ns_updated" if ok else f"ns_failed:{json.dumps(dynadot_r)[:80]}"
+    else:
+        site.dynadot_status = f'zone_{result.get("zone_status", "unknown")}'
+
+    log_entry = json.dumps({
+        "ts": now.isoformat(),
+        "source": "cloudflare_dns_ns",
+        "action": "Cloudflare DNS解析 + NS配置",
+        "status": "success" if (root_ok and www_ok) else "partial_fail",
+        "completed_at": now.isoformat(),
+        "zone_id": result.get('zone_id'),
+        "zone_status": result.get('zone_status'),
+        "name_servers": result.get('name_servers'),
+        "root_ok": root_ok,
+        "www_ok": www_ok,
+        "dynadot_result": dynadot_r,
+    }, ensure_ascii=False)
+    site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
+
+
 def _run_dns_sync(site):
-    """在线程池中同步执行 DNS + NS 操作（避免阻塞事件循环）"""
-    loop = asyncio.new_event_loop()
-    try:
-        asyncio.set_event_loop(loop)
-        if site.platform == 'shopify':
-            return loop.run_until_complete(cloudflare_service.provision_shopify_dns(site))
-        return loop.run_until_complete(cloudflare_service.provision_dns(site))
-    finally:
-        loop.close()
+    """在线程池中同步执行 DNS + NS 操作（避免阻塞事件循环）
+    注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB"""
+    from app.services.providers.dynadot_service import DynadotService
+
+    cf = cloudflare_service
+
+    if site.platform == 'shopify':
+        SHOPIFY_IP = '23.227.38.65'
+        SHOPIFY_CNAME = 'shops.myshopify.com.'
+        zone_id, ns, status = cf.get_or_create_zone(site.domain)
+        if not zone_id:
+            return {'ok': False, 'error': f'Shopify zone 创建失败: domain={site.domain}'}
+        dynadot_result = None
+        if status in ('pending', 'invalid_nameservers'):
+            try:
+                dynadot_svc = DynadotService()
+                dynadot_result = dynadot_svc.set_nameserver(site.domain, ns)
+            except Exception as e:
+                dynadot_result = {"success": False, "error": str(e)}
+        cf.delete_records_by_type(zone_id, 'A')
+        cf.delete_records_by_type(zone_id, 'AAAA')
+        root_ok = cf.add_or_update_a_record(zone_id, site.domain, SHOPIFY_IP)
+        www_ok = cf.add_or_update_cname_record(zone_id, 'www', SHOPIFY_CNAME)
+        return {
+            'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
+            'root_ok': root_ok, 'www_ok': www_ok,
+            'dynadot_result': dynadot_result,
+        }
+    else:
+        zone_id, ns, status = cf.get_or_create_zone(site.domain)
+        if not zone_id:
+            return {'ok': False, 'error': f'Zone 创建失败: domain={site.domain}'}
+
+        dynadot_result = None
+        if status in ('pending', 'invalid_nameservers'):
+            try:
+                dynadot_svc = DynadotService()
+                dynadot_result = dynadot_svc.set_nameserver(site.domain, ns)
+            except Exception as e:
+                dynadot_result = {"success": False, "error": str(e)}
+
+        root_ok = cf.add_or_update_a_record(zone_id, site.domain, site.server_ip)
+        www_ok = cf.add_or_update_a_record(zone_id, f'www.{site.domain}', site.server_ip)
+
+        return {
+            'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
+            'root_ok': root_ok, 'www_ok': www_ok,
+            'dynadot_result': dynadot_result,
+        }
 
 
 # ── CRUD ──
@@ -320,6 +402,8 @@ class SitePipelineController:
         """创建站点并设置数据权限字段"""
         existed = await site_controller.get_by_domain(site_in.domain)
         if existed:
+            if existed.is_deleted:
+                return {"ok": False, "error": f"域名 {site_in.domain} 已在回收站中，请先从回收站恢复后再创建", "code": 409, "in_recycle_bin": True}
             await self._sync_onepanel_status(existed)
             return {"ok": False, "error": "域名已存在", "code": 400}
         site = await site_controller.create(site_in)
@@ -341,7 +425,7 @@ class SitePipelineController:
         loop = asyncio.get_event_loop()
         try:
             ok, data = await loop.run_in_executor(
-                None, lambda: onepanel_api.post(
+                None, lambda: _get_onepanel_api().post(
                     '/websites/search',
                     {'page': 1, 'pageSize': 200, 'OrderBy': 'created_at', 'Order': 'descending'}
                 )
@@ -447,8 +531,11 @@ class SitePipelineController:
             try:
                 existed = await site_controller.get_by_domain(item.domain)
                 if existed:
-                    await self._sync_onepanel_status(existed)
-                    results.append({"domain": item.domain, "ok": False, "error": "already exists"})
+                    if existed.is_deleted:
+                        results.append({"domain": item.domain, "ok": False, "error": "in_recycle_bin"})
+                    else:
+                        await self._sync_onepanel_status(existed)
+                        results.append({"domain": item.domain, "ok": False, "error": "already exists"})
                     continue
                 site = await site_controller.create(item)
                 item_assign_to = getattr(item, 'assign_to', None)
@@ -628,6 +715,8 @@ class SitePipelineController:
         try:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, _run_dns_sync, site)
+            _apply_dns_result_to_site(site, result)
+            await site.save()
             await self._complete_job(job, ok=True, result=result)
         except Exception as e:
             await self._complete_job(job, ok=False, error=str(e))
@@ -660,6 +749,8 @@ class SitePipelineController:
                     try:
                         loop = asyncio.get_event_loop()
                         r = await loop.run_in_executor(None, _run_dns_sync, site)
+                        _apply_dns_result_to_site(site, r)
+                        await site.save()
                         results.append({"site_id": site.id, "domain": site.domain, "ok": True, "result": r})
                     except Exception as e:
                         results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": str(e)})
@@ -674,7 +765,11 @@ class SitePipelineController:
             job.finished_at = datetime.now()
             await job.save()
         asyncio.create_task(_bg_dns())
-        return {"ok": True, "data": {"batch_id": batch_id, "job_id": job.id, "total": len(valid_sites), "invalid": len(invalid)}}
+        return {"ok": True, "data": {
+            "batch_id": batch_id, "job_id": job.id, "total": len(valid_sites),
+            "invalid": len(invalid),
+            "results": [{"site_id": s.id, "domain": s.domain, "ok": True} for s in valid_sites] + invalid,
+        }}
 
     # ── Dynadot NS ──
     async def set_dynadot_ns(self, site_id: int, ns_list: List[str] = None) -> dict:

@@ -45,14 +45,14 @@ def execute_gmc_check(executor, job: dict, payload: dict) -> dict:
             return result
 
         browser = None
-        for i in range(10):
+        for i in range(5):
             try:
                 browser = Chromium(addr_or_opts=f"http://127.0.0.1:{debug_port}")
                 browser.set.auto_handle_alert()
                 executor.logger.info(f"[gmc_check] DrissionPage 连接成功 (尝试 {i + 1} 次)")
                 break
             except Exception:
-                if i < 9:
+                if i < 4:
                     executor.logger.info(f"[gmc_check] 端口 {debug_port} 未就绪，2s 后重试...")
                     time.sleep(2)
                 else:
@@ -151,10 +151,19 @@ def _query_gmc_status(browser, executor) -> dict:
         pass
 
     if not tab_gmc:
-        tab_gmc = browser.new_tab(gmc_url)
+        tab_gmc = browser.new_tab()
+        tab_gmc.get(gmc_url,retry=3)
         executor.logger.info(f"[GMC] 新建 tab: {gmc_url}")
 
-    # ── 等待 Angular 渲染完成（DrissionPage 原生等待，基础超时 10s） ──
+    # ── 检查是否重定向到 business.google.com（无 GMC 权限） ──
+    current_url = tab_gmc.url or ""
+    if "business.google.com" in current_url:
+        executor.logger.warning(f"[GMC] 重定向到 Business Profile，跳过: {current_url[:80]}")
+        result["status"] = "Uncreated"
+        result["error"] = "GMC 不可用，已重定向到 Business Profile"
+        return result
+
+    # ── 等待 Angular 渲染完成 ──
     try:
         tab_gmc.wait.ele_displayed("tag:tab-scorecard", timeout=90)
         executor.logger.info("[GMC] tab-scorecard 已渲染")
@@ -163,7 +172,10 @@ def _query_gmc_status(browser, executor) -> dict:
             tab_gmc.wait.ele_displayed("tag:product-status-chart", timeout=20)
             executor.logger.info("[GMC] product-status-chart 已渲染")
         except Exception:
-            executor.logger.warning("[GMC] 关键元素未在超时内出现，继续尝试解析")
+            executor.logger.warning("[GMC] 关键元素未出现，放弃")
+            result["status"] = "failed"
+            result["error"] = "GMC 页面元素未渲染"
+            return result
     # Angular 数据绑定需要额外等待
     time.sleep(1)
 
@@ -214,9 +226,15 @@ def _query_gmc_status(browser, executor) -> dict:
             else:
                 executor.logger.warning("[GMC] Not approved / Disapproved 文本模式未匹配")
         else:
-            executor.logger.warning("[GMC] 未找到 product-status-chart 元素")
+            executor.logger.warning("[GMC] 未找到 product-status-chart 元素，放弃")
+            result["status"] = "failed"
+            result["error"] = "GMC product-status-chart 元素未渲染"
+            return result
     except Exception as e:
-        executor.logger.warning(f"[GMC] 解析 product-status-chart 失败: {e}")
+        executor.logger.warning(f"[GMC] 解析 product-status-chart 失败，放弃: {e}")
+        result["status"] = "failed"
+        result["error"] = f"GMC product-status-chart 解析异常: {str(e)[:100]}"
+        return result
 
     # ── 2b. 归一化：单个状态数量不超过 product_count（K/M 取整可能略大） ──
     pc = result["product_count"]

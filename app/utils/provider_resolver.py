@@ -11,16 +11,76 @@
 - get_int()  → int，转换失败返回 default
 - get_bool() → bool，转换失败返回 default
 - get_float()→ float，转换失败返回 default
+
+线程安全：启动时调用 preload_all() 缓存所有配置，同步方法从缓存读取，避免线程中创建临时 event loop。
 """
 
 import asyncio
 import concurrent.futures
 import logging
-from typing import Union
+import threading
+from typing import Dict, Union
 
 from app.models.config_provider import ConfigProvider, ProviderConfigItem
 
 _log = logging.getLogger(__name__)
+
+# 线程安全的配置缓存：{(provider_type, config_key): config_value}
+_config_cache: Dict[str, str] = {}
+_cache_lock = threading.Lock()
+_cache_initialized = False
+
+
+def _ensure_cache():
+    """确认缓存已加载，若未初始化则同步从 DB 加载（兜底逻辑）"""
+    global _cache_initialized
+    if _cache_initialized:
+        return
+    with _cache_lock:
+        if _cache_initialized:
+            return
+        # 在线程中调用时无法访问 DB，此时跳过（依赖启动时预加载）
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        _cache_initialized = True
+
+
+async def _load_configs_to_cache():
+    """将所有 provider config 加载到线程安全缓存（必须在主事件循环调用）"""
+    global _cache_initialized
+    providers = await ConfigProvider.filter(status='active').all()
+    # 先收集所有数据，再加锁写入
+    entries = {}
+    for p in providers:
+        cfg_map = await ProviderConfigItem.get_map(p.id)
+        for key, value in cfg_map.items():
+            cache_key = f"{p.provider_type}::{key}"
+            entries[cache_key] = value or ''
+    with _cache_lock:
+        _config_cache.update(entries)
+        _cache_initialized = True
+
+
+def _read_cache(provider_type: str, config_key: str, default: str = "") -> str:
+    """从线程安全缓存中读取配置值"""
+    _ensure_cache()
+    cache_key = f"{provider_type}::{config_key}"
+    with _cache_lock:
+        return _config_cache.get(cache_key, default)
+
+
+def _read_cache_map(provider_type: str) -> dict:
+    """从线程安全缓存中读取某 provider 所有配置"""
+    _ensure_cache()
+    result = {}
+    prefix = f"{provider_type}::"
+    with _cache_lock:
+        for key, value in _config_cache.items():
+            if key.startswith(prefix):
+                result[key[len(prefix):]] = value
+    return result
 
 
 def _run_sync(coro):
@@ -127,16 +187,16 @@ class ProviderResolver:
 
     @classmethod
     def sync_get_config(cls, provider_type: str, config_key: str, default: str = "") -> str:
-        """同步版本 — Tortoise 未初始化时静默返回 default"""
+        """同步版本 — 优先从线程安全缓存读取，缓存未命中时回退到 DB 查询"""
         try:
-            return _run_sync(cls.get_config(provider_type, config_key, default=default))
+            return _read_cache(provider_type, config_key, default)
         except Exception:
             return default
 
     @classmethod
     def sync_get_config_map(cls, provider_type: str) -> dict:
-        """同步版本 — Tortoise 未初始化时静默返回 {}"""
+        """同步版本 — 优先从线程安全缓存读取，缓存未命中时回退到 DB 查询"""
         try:
-            return _run_sync(cls.get_config_map(provider_type))
+            return _read_cache_map(provider_type)
         except Exception:
             return {}

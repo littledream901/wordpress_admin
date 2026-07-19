@@ -204,7 +204,9 @@ class HubStudioAgent:
             "admin_account_password": "admin_account_password",
         }
         for config_key, attr_name in _CONFIG_ATTR_MAP.items():
-            setattr(self.executor, attr_name, self.config.get(config_key))
+            value = self.config.get(config_key)
+            if value is not None:
+                setattr(self.executor, attr_name, value)
 
     # ── 认证 ──
 
@@ -524,6 +526,9 @@ class HubStudioAgent:
                 )
 
         # 启动前检查 Connector
+        connector_dir = self.config.get("connector_dir", "")
+        exe_name = self.config.get("exe_name", "")
+        self.logger.info(f"检查 Connector: dir={connector_dir}, exe={exe_name}, port={self.config.get('http_port')}")
         try:
             self.runtime.start_connector()
             self.logger.info("Connector 启动检查通过")

@@ -31,7 +31,7 @@ class OperationJob(BaseModel, TimestampMixin):
         ("hub_create_env", "Hub创建环境"),
         ("hub_create_account", "Hub创建账号"),
         ("hub_update_env", "Hub更新环境"),
-        ("hub_website_control", "Hub登录WP"),
+        ("hub_wp_login", "Hub登录WP"),
         ("hub_gmc_check", "Hub GMC检查"),
         ("import_sites", "导入站点"),
         ("import_gmail", "导入Gmail"),

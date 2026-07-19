@@ -369,9 +369,11 @@ async def trigger_hub_gmc_check(site_id: int, provider_id: int = Body(0, embed=T
 
 
 @router.post('/site/{site_id}/hub-open-env', summary='打开 Hub 浏览器环境')
-async def trigger_hub_open_env(site_id: int, provider_id: int = Body(0, embed=True)):
-    result = await hubstudio_service.trigger_hub_open_env(site_id, provider_id=provider_id)
-    return Success(data=result, msg=f'浏览器环境已打开')
+async def trigger_hub_open_env(site_id: int, provider_id: int = Body(0, embed=True),
+                                execute_now: bool = Body(False, embed=True)):
+    job, result = await hubstudio_service.trigger_hub_open_env(site_id, provider_id=provider_id, execute_now=execute_now)
+    return Success(data={"job": await job.to_dict(), "result": result},
+                   msg='浏览器环境已打开' if result else '打开环境任务已派发（等待 Agent）')
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -140,6 +140,12 @@ async def batch_collect_sources(source_ids: list[int] = Body(...)):
     return Success(data=data)
 
 
+@router.post('/source/batch-set-max-products', summary='批量设置最大采集数量')
+async def batch_set_max_products(ids: list[int] = Body(..., embed=True), max_products: int = Body(..., embed=True)):
+    data = await shopify_collect_controller.batch_set_max_products(ids, max_products)
+    return Success(data=data)
+
+
 @router.post('/product/batch-random-assign', summary='批量随机分配产品到站点')
 async def batch_random_assign(site_ids: list[int] = Body(...), count: int = Body(6)):
     result = await shopify_collect_controller.batch_random_assign(site_ids, count)

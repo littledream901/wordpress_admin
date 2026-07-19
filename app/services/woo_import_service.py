@@ -200,7 +200,14 @@ class WooRequestLimiter:
         raise ExternalAPIError("WooCommerce", f"{method} {url}", detail=str(last_error))
 
 
-GLOBAL_WOO_LIMITER = WooRequestLimiter()
+_global_woo_limiter = None
+
+
+def _get_global_woo_limiter():
+    global _global_woo_limiter
+    if _global_woo_limiter is None:
+        _global_woo_limiter = WooRequestLimiter()
+    return _global_woo_limiter
 
 
 async def _fetch_and_update_feed_link(site: Site) -> None:
@@ -288,7 +295,7 @@ class WooCommerceSyncer:
         elif use_isolated_limiter:
             self.limiter = WooRequestLimiter()
         else:
-            self.limiter = GLOBAL_WOO_LIMITER
+            self.limiter = _get_global_woo_limiter()
 
     def normalize_price(self, value: Any) -> str:
         try:

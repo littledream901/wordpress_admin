@@ -54,7 +54,7 @@ export interface UpdateSiteParams extends Partial<CreateSiteParams> {
 /** 批量 HubStudio 分发参数 */
 export interface HubDispatchParams {
   site_ids: number[]
-  job_type: 'create_env' | 'create_account' | 'update_env' | 'website_control' | 'gmc_check'
+  job_type: 'create_env' | 'create_account' | 'update_env' | 'wp_login' | 'gmc_check'
 }
 
 /** 批量重定向参数 */

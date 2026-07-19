@@ -64,10 +64,12 @@ class OnePanelSiteManager:
         if self._wp_app_detail_cache:
             return self._wp_app_detail_cache
         if self.wp_app_detail_id > 0:
+            _log.info("resolve_wp_app 使用手动配置: app_id=%s app_detail_id=%s version=%s", self.wp_app_id, self.wp_app_detail_id, self.wp_version)
             result = {'app_id': self.wp_app_id, 'app_detail_id': self.wp_app_detail_id, 'version': self.wp_version, 'app_type': self.wp_app_type, 'app_key': self.wp_app_key}
             self._wp_app_detail_cache = result
             return result
         # /apps/:key 是 GET 端点，不是 POST（参考 doc.json 中 request.AppSearch）
+        _log.info("resolve_wp_app 自动检测模式: wp_app_key=%s 目标版本=%s", self.wp_app_key, self.wp_version)
         ok, app_data = self.api.get(f'/apps/{self.wp_app_key}')
         if not ok or not isinstance(app_data, dict):
             raise OnePanelError("get app info", detail=str(app_data))
@@ -81,10 +83,12 @@ class OnePanelSiteManager:
             versions = [app_data.get('version') or self.wp_version or 'latest']
         if self.wp_version != 'latest' and self.wp_version not in versions:
             versions.insert(0, self.wp_version)
+        _log.info("resolve_wp_app 尝试版本列表: %s (app_id=%s app_type=%s)", versions, app_id, app_type)
         for v in versions:
             ok, detail = self.api.get(f'/apps/detail/{app_id}/{v}/{app_type}')
             if ok and isinstance(detail, dict) and detail.get('id'):
                 result = {'app_id': app_id, 'app_detail_id': int(detail['id']), 'version': v, 'app_type': app_type, 'app_key': self.wp_app_key}
+                _log.info("resolve_wp_app 自动检测成功: app_id=%s app_detail_id=%s version=%s", app_id, result['app_detail_id'], v)
                 self._wp_app_detail_cache = result
                 return result
         raise OnePanelError("get app detail", detail=f"已尝试版本 {versions}")
@@ -194,6 +198,11 @@ class OnePanelSiteManager:
                 raise DomainAlreadyExistsError(domain=domain, onepanel_site_id=existed)
             self.delete_site_by_id(existed, True, True)
         wp_app = self.resolve_wp_app()
+        _log.info(
+            "建站诊断: domain=%s group_id=%s app_id=%s app_detail_id=%s app_type=%s app_key=%s version=%s",
+            domain, self.website_group_id, wp_app['app_id'], wp_app['app_detail_id'],
+            wp_app['app_type'], wp_app['app_key'], wp_app['version'],
+        )
         alias = safe_alias(domain)
         app_port = random.randint(10000, 60000)
         db_suffix = hashlib.md5(f'{domain}-{time.time()}'.encode('utf-8')).hexdigest()[:8]
@@ -259,7 +268,8 @@ class OnePanelSiteManager:
             payload['appInstall']['params']['PANEL_APP_PORT_HTTP'] = str(app_port)
             ok, msg = self.api.post('/websites', payload)
         if not ok:
-            raise OnePanelError("create site", detail=str(msg))
+            diag = f"group_id={self.website_group_id} app_id={wp_app['app_id']} app_detail_id={wp_app['app_detail_id']}"
+            raise OnePanelError("create site", detail=f"{msg} | {diag}")
         app_info = self.wait_app_ready(alias=alias, domain=domain)
         app_info['site_id'] = self.wait_site_id(domain)
         app_info['params'] = app_info.get('params') or {}

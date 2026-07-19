@@ -58,7 +58,15 @@ class OnePanelSSLManager:
                     return 'http'
                 ssl_id = int(data['id'])
 
-                self.api.post('/websites/ssl/obtain', {'ID': ssl_id, 'skipDNSCheck': False})
+                ok, msg = self.api.post('/websites/ssl/obtain', {'ID': ssl_id, 'skipDNSCheck': False})
+                # 1Panel 可能返回 500 "任务执行中" — SSL 已在签发中，继续轮询等待即可
+                if not ok:
+                    msg_str = str(msg)
+                    if '任务执行中' in msg_str or '重复执行' in msg_str:
+                        _log.info("SSL 已在签发中（1Panel 正在执行），继续等待: id=%s", ssl_id)
+                    else:
+                        _log.warning("SSL 签发请求失败: %s，回退 HTTP", msg_str)
+                        return 'http'
 
                 # 轮询等待证书就绪
                 start = time.time()

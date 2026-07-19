@@ -28,6 +28,7 @@
           <n-divider vertical />
           <span style="white-space: nowrap; font-size: 14px">已选 {{ checkedRowKeys.length }} 项</span>
           <n-button type="primary" size="small" @click="handleBatchCollect">批量采集</n-button>
+          <n-button type="warning" size="small" @click="showBatchMaxProducts = true">批量设置最大数量</n-button>
           <n-button type="error" size="small" @click="handleBatchDelete">批量删除</n-button>
         </template>
       </template>
@@ -107,6 +108,19 @@
         <n-space justify="end">
           <n-button type="primary" size="small" @click="showBatchCollectResult=false;router.push('/operation-jobs/job-list')">查看任务中心</n-button>
           <n-button @click="showBatchCollectResult=false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 批量设置最大数量弹窗 -->
+    <n-modal v-model:show="showBatchMaxProducts" preset="card" title="批量设置最大采集数量" style="max-width: 420px">
+      <n-form-item label="最大数量" label-placement="left">
+        <n-input-number ref="maxProductsInputRef" v-model:value="batchMaxProductsVal" :min="0" placeholder="0=不限制" />
+      </n-form-item>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showBatchMaxProducts = false">取消</n-button>
+          <n-button type="primary" @click="handleBatchSetMaxProducts">确定</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -345,6 +359,26 @@ async function handleBatchDelete() {
     crudRef.value?.handleSearch()
   } catch (e) {
     message.error(e?.response?.data?.msg || '批量删除失败')
+  }
+}
+
+// ─── 批量设置最大数量 ───
+const showBatchMaxProducts = ref(false)
+const batchMaxProductsVal = ref(0)
+
+async function handleBatchSetMaxProducts() {
+  if (!checkedRowKeys.value.length) return
+  try {
+    const res = await api.batchSetMaxProducts({
+      ids: checkedRowKeys.value,
+      max_products: batchMaxProductsVal.value,
+    })
+    message.success(`已更新 ${res?.data?.updated ?? 0} 条采集源的最大数量`)
+    showBatchMaxProducts.value = false
+    checkedRowKeys.value = []
+    crudRef.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.message || e?.response?.data?.msg || '批量设置失败')
   }
 }
 

@@ -55,6 +55,14 @@ if _HAS_FASTAPI:
         await init_essential()
         await init_superuser()
 
+        # 将所有 Provider 配置加载到线程安全缓存，避免 run_in_executor 线程中
+        # 通过 asyncio.run 访问 Tortoise 导致 event loop 绑定冲突
+        try:
+            from app.utils.provider_resolver import _load_configs_to_cache
+            await _load_configs_to_cache()
+        except Exception:
+            pass
+
         # 后台任务：每小时清理过期的 Feed 文件
         async def _cleanup_loop():
             while True:

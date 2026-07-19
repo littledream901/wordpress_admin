@@ -30,7 +30,7 @@ from app.utils.config_reader import get_provider_info
 
 
 # 任务类型定义
-JOB_TYPES = ["create_env", "create_account", "update_env", "website_control", "gmc_check"]
+JOB_TYPES = ["create_env", "create_account", "update_env", "wp_login", "gmc_check", "open_env"]
 
 # Agent 心跳超时阈值（秒）
 AGENT_HEARTBEAT_TIMEOUT = int(os.getenv("HUB_AGENT_HEARTBEAT_TIMEOUT", "120"))
@@ -106,21 +106,24 @@ class HubStudioOrchestrationService:
         if not provider_id:
             provider_id = await self._resolve_provider_id(site_id)
 
-        # update_env / create_account / wp_login / gmc_check 必须有 hub_env_id
-        if job_type in ("update_env", "create_account", "website_control", "gmc_check") and not site.hub_env_id:
+        # update_env / create_account / wp_login / gmc_check / open_env 必须有 hub_env_id
+        if job_type in ("update_env", "create_account", "wp_login", "gmc_check", "open_env") and not site.hub_env_id:
             raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行 create_env")
 
-        # update_env: 从 provider 配置中读取代理/备注配置，写入 payload
+        # create_env / update_env: 从 Gmail 构建备注字段写入 payload
+        if job_type in ("create_env", "update_env"):
+            payload = await self._enrich_remark_from_gmail(payload, site)
+
+        # update_env: 从 provider 配置中读取代理配置，写入 payload
         if job_type == "update_env":
             payload = await self._enrich_update_env_payload(payload, provider_id)
-            payload = await self._enrich_update_env_remark(payload, site)
 
         # create_account: 自动分配 Gmail 并将凭证写入 payload
         if job_type == "create_account":
             payload = await self._enrich_create_account_payload(payload, site)
 
         # wp_login: 注入 Gmail + WordPress 凭证，供 executor 自动登录
-        if job_type == "website_control":
+        if job_type == "wp_login":
             payload = await self._enrich_wp_login_payload(payload, site)
 
         job = await self.create_job(
@@ -482,7 +485,7 @@ class HubStudioOrchestrationService:
 
         # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
-        if job.job_type in ("create_account", "update_env", "website_control", "gmc_check"):
+        if job.job_type in ("create_account", "update_env", "wp_login", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
             if site and site.hub_env_id:
                 try:
@@ -568,49 +571,31 @@ class HubStudioOrchestrationService:
 
     async def trigger_hub_control(self, site_id: int, provider_id: int = 0,
                                    execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
-        return await self.dispatch_for_site(site_id, "website_control", provider_id=provider_id, execute_now=execute_now)
+        return await self.dispatch_for_site(site_id, "wp_login", provider_id=provider_id, execute_now=execute_now)
 
     async def trigger_hub_gmc_check(self, site_id: int, provider_id: int = 0,
                                      execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
         return await self.dispatch_for_site(site_id, "gmc_check", provider_id=provider_id, execute_now=execute_now)
 
-    async def trigger_hub_open_env(self, site_id: int, provider_id: int = 0) -> dict:
-        """直接打开 HubStudio 浏览器环境（不创建任务，同步执行）
+    async def trigger_hub_open_env(self, site_id: int, provider_id: int = 0,
+                                    execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
+        """通过 Agent 打开 HubStudio 浏览器环境
 
-        调用 HubStudio Connector 的 browser/start API 启动浏览器窗口。
-        仅当后端与 Connector 运行在同一台机器时可用。
+        只派发任务不执行同步（打开浏览器讲究时效，避免服务端直连 Connector）。
+        Agent 离线时直接拒绝，不滞留待执行任务。
         """
+        if not execute_now and not await self.is_any_agent_online():
+            raise ValueError("没有在线的 HubStudio Agent，无法打开浏览器环境")
+
         site = await Site.filter(id=site_id).first()
         if not site:
             raise SiteNotFoundError(site_id=site_id)
         if not site.hub_env_id:
             raise ValueError(f"站点 {site.domain} 尚未创建环境（hub_env_id 为空），请先执行创建环境")
 
-        # 获取 provider 配置并启动 runtime
-        provider_config = await self._get_provider_config(provider_id)
-        if not provider_config.get("connector_path"):
-            raise ValueError("Provider 未配置 connector_path，无法直接打开浏览器")
-
-        from app.services.hubstudio.runtime import HubStudioRuntime
-        from app.services.hubstudio.client import HubStudioClient
-
-        runtime = HubStudioRuntime(
-            connector_path=provider_config["connector_path"],
-            http_port=provider_config.get("http_port", 6873),
-        )
-
-        if not runtime.is_port_open():
-            runtime.start()
-            import time
-            for _ in range(10):
-                if runtime.is_port_open():
-                    break
-                time.sleep(1)
-
-        client = HubStudioClient(base_url=f"http://localhost:{runtime.http_port}")
-        client.start_browser(int(site.hub_env_id), isHeadless=False)
-
-        return {"status": "success", "message": f"浏览器已启动: {site.domain}"}
+        logger.info(f"[open_env] 派发任务: site_id={site_id}, domain={site.domain}, "
+                    f"env_id={site.hub_env_id}, provider_id={provider_id}")
+        return await self.dispatch_for_site(site_id, "open_env", provider_id=provider_id, execute_now=execute_now)
 
     # ── 内部辅助 ──
 
@@ -657,10 +642,10 @@ class HubStudioOrchestrationService:
 
         return payload
 
-    async def _enrich_update_env_remark(self, payload: dict, site: Site) -> dict:
+    async def _enrich_remark_from_gmail(self, payload: dict, site: Site) -> dict:
         """从已分配的 Gmail 中提取地址/邮箱信息，写入 remark_fields
 
-        用于 _build_remark 按 REMARK_FIELD_MAP 顺序拼接备注：
+        供 create_env / update_env 使用，按 REMARK_FIELD_MAP 顺序拼接备注：
         ShippingAddress_1 → City → Province/State → Zip_code → Country → Recovery_Email
         """
         if payload.get("remark_fields"):
@@ -670,7 +655,7 @@ class HubStudioOrchestrationService:
 
         gmail = await GmailAccount.filter(assigned_site_id=site.id).first()
         if not gmail:
-            logger.info(f"[update_env] 站点无 Gmail，跳过备注构建")
+            logger.info(f"[remark] 站点无 Gmail，跳过备注构建")
             return payload
 
         remark_fields = {}
@@ -689,11 +674,14 @@ class HubStudioOrchestrationService:
 
         if remark_fields:
             payload["remark_fields"] = remark_fields
-            logger.info(f"[update_env] 已从 Gmail 构建备注字段: {list(remark_fields.keys())}")
+            logger.info(f"[remark] 已从 Gmail 构建备注字段: {list(remark_fields.keys())}")
         else:
-            logger.info(f"[update_env] Gmail 无地址/邮箱字段，备注为空")
+            logger.info(f"[remark] Gmail 无地址/邮箱字段，备注为空")
 
         return payload
+
+    # 旧方法名保留别名
+    _enrich_update_env_remark = _enrich_remark_from_gmail
 
     async def _enrich_create_account_payload(self, payload: dict, site: Site) -> dict:
         """为 create_account 任务自动分配 Gmail 并写入凭证 + 备注字段
@@ -788,9 +776,11 @@ class HubStudioOrchestrationService:
                 **base,
                 "hub_env_id": site.hub_env_id,
             }
-        elif job_type == "website_control":
+        elif job_type == "wp_login":
             return {**base, "hub_env_id": site.hub_env_id, "login_url": site.login_url, "feed_link": site.feed_link}
         elif job_type == "gmc_check":
+            return {**base, "hub_env_id": site.hub_env_id}
+        elif job_type == "open_env":
             return {**base, "hub_env_id": site.hub_env_id}
         return base
 
@@ -840,7 +830,7 @@ class HubStudioOrchestrationService:
                             logger.info(f"[create_account] Gmail 已自动分配: {gmail.username} -> site={job.site_id}")
                         else:
                             logger.warning(f"[create_account] 无可用的 Gmail 账号分配给 site={job.site_id}")
-                elif job.job_type == "website_control":
+                elif job.job_type == "wp_login":
                     gmc_status = result.get("gmc_status", "")
                     if gmc_status:
                         site.gmc_status = gmc_status

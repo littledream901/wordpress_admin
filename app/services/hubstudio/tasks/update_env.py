@@ -121,18 +121,20 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
 
     result = {"status": "success", "env_id": hub_env_id, "domain": domain, "actions": {}}
 
-    # ── 步骤 1：更新容器名称（暂时不更新备注） ──
+    # ── 步骤 1：更新容器名称 + 备注 ──
     container_name = build_container_name(domain)
+    remark = build_remark(payload)
 
     try:
         update_params = {
             "containerCode": int(hub_env_id),
             "containerName": container_name,
+            "remark": remark,
         }
 
         resp = client.update_env(**update_params)
-        result["actions"]["remark"] = "skipped (remark disabled)"
-        executor.logger.info(f"[update_env] 容器名称更新成功（备注已跳过）")
+        result["actions"]["remark"] = "ok"
+        executor.logger.info(f"[update_env] 容器名称+备注更新成功: remark={remark}")
     except Exception as e:
         result["actions"]["remark"] = f"failed: {str(e)[:100]}"
         executor.logger.warning(f"[update_env] 容器名称更新失败: {e}")

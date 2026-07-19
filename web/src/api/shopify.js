@@ -9,6 +9,7 @@ export default {
   batchCreateSource: (items = []) => request.post('/shopify/source/batch-create', items),
   batchDeleteSource: (ids = []) => request.post('/shopify/source/batch-delete', ids),
   batchCollectSource: (ids = []) => request.post('/shopify/source/batch-collect', ids),
+  batchSetMaxProducts: (data = {}) => request.post('/shopify/source/batch-set-max-products', data),
 
   getProductList: (params = {}) => request.get('/shopify/product/list', { params }),
   updateProduct: (data = {}) => request.post('/shopify/product/update', data),

@@ -6,15 +6,44 @@ from app.core.exceptions import HubStudioError
 from ..runtime import HubStudioRuntime
 
 
+# ── 备注来源字段 ──
+REMARK_FIELD_MAP = [
+    ("Address", "ShippingAddress_1"),
+    ("City", "City"),
+    ("State", "Province/State"),
+    ("Zip", "Zip_code"),
+    ("Country", "Country"),
+    ("Email", "Recovery_Email"),
+]
+
+
+def build_remark(payload: dict) -> str:
+    """构建环境备注文本"""
+    remark_fields = payload.get("remark_fields", {})
+    if not remark_fields:
+        return ""
+
+    parts = []
+    for _label, field_key in REMARK_FIELD_MAP:
+        val = remark_fields.get(field_key, "")
+        if val:
+            val_str = str(val).strip()
+            if val_str:
+                parts.append(val_str)
+
+    return " , ".join(parts) if parts else ""
+
+
 def build_container_name(domain: str) -> str:
     return f"{domain}/wp-admin"
 
 
-def get_tag_code_by_name(runtime: HubStudioRuntime, target_tag_name: str) -> str:
+def get_tag_code_by_name(runtime: HubStudioRuntime, target_tag_name: str) -> tuple:
+    """返回 (tagCode, tagName)"""
     resp = runtime.ensure_client().get_group_list()
     for item in resp.get("data", []):
         if item.get("tagName") == target_tag_name:
-            return item["tagCode"]
+            return item["tagCode"], item["tagName"]
     raise HubStudioError("get group", detail=f"tag not found: {target_tag_name}")
 
 
@@ -51,9 +80,10 @@ def execute_create_env(executor, job: dict, payload: dict) -> dict:
     # 获取分组 code
     target_tag_name = os.getenv("HUB_BUSINESS_GROUP_NAME", "Gmc申请")
     tag_code = None
+    tag_name = target_tag_name
     try:
-        tag_code = get_tag_code_by_name(executor.rt, target_tag_name)
-        executor.logger.info(f"分组 [{target_tag_name}] tagCode={tag_code}")
+        tag_code, tag_name = get_tag_code_by_name(executor.rt, target_tag_name)
+        executor.logger.info(f"分组 [{target_tag_name}] tagCode={tag_code} tagName={tag_name}")
     except Exception:
         tag_code = executor.rt.group_code
 
@@ -73,14 +103,18 @@ def execute_create_env(executor, job: dict, payload: dict) -> dict:
     except Exception as e:
         executor.logger.warning(f"查重跳过: {e}")
 
+    # 构建备注：使用 REMARK_FIELD_MAP（地址+Recovery_Email），创建时暂无 Gmail 信息则用域名
+    remark = build_remark(payload) or domain or "unknown"
+    executor.logger.info(f"[create_env] remark={remark}")
+
     # 创建
     container_name = build_container_name(domain)
     params = {
         "containerName": container_name,
-        "tagName": tag_code,
-        "proxyTypeName": executor.default_proxy_type,
+        "tagName": tag_name,
+        "proxyTypeName": "不使用代理",
         "coreVersion": executor.rt.kernel_version,
-        "remark": login_url or domain,
+        "remark": remark,
     }
     try:
         resp = client.create_env(**params)

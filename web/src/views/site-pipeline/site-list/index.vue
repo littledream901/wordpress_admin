@@ -391,14 +391,12 @@ const assignTargetSiteId = ref(null)
 
 const gmailColumns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: 'Username', key: 'username' },
-  { title: 'Password', key: 'password', width: 180, ellipsis: { tooltip: true } },
-  { title: 'Full Name', key: 'full_name', width: 120, ellipsis: { tooltip: true } },
-  { title: 'Recovery Email', key: 'recovery_email', width: 180, ellipsis: { tooltip: true } },
+  { title: 'Username', key: 'username', width: 200, ellipsis: { tooltip: true } },
+  { title: 'Password', key: 'password', width: 220, ellipsis: { tooltip: true } },
   { title: '状态', key: 'status', width: 70 },
-  { title: '分配站点', key: 'assigned_site_domain', width: 120, ellipsis: { tooltip: true } },
+  { title: '已分配站点', key: 'assigned_site_domain', width: 150, ellipsis: { tooltip: true } },
   {
-    title: '操作', key: 'actions', width: 120,
+    title: '操作', key: 'actions', width: 130,
     render: (row) => h(NButton, { size: 'small', type: 'primary', onClick: () => assignGmail(row.id) }, { default: () => '分配到此站点' }),
   },
 ]
@@ -566,9 +564,9 @@ const columns = [
   { title: 'CF 状态', key: 'cloudflare_status', width: 80, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
   { title: 'Dynadot', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已建站' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
-  { title: '产品数', key: 'product_count', width: 80, align: 'center',
+  { title: '产品数', key: 'woo_product_count', width: 80, align: 'center',
     render: (row) => {
-      const count = row.product_count || 0
+      const count = row.woo_product_count || 0
       return h(NSpace, { size: 4, justify: 'center', align: 'center' }, {
         default: () => [
           h('span', { style: 'font-weight:600;min-width:24px' }, count),
@@ -617,7 +615,7 @@ const batchResultColumns = computed(() => {
   if (batchIsAsync.value) {
     cols.push(
       { title: '任务ID', key: 'job_id', width: 50 },
-      { title: '产品数', key: 'product_count', width: 60, render: (r) => r.product_count || '-' },
+      { title: '产品数', key: 'woo_product_count', width: 60, render: (r) => r.woo_product_count || '-' },
       { title: '状态', key: 'status', width: 90, render: (r) => h(NTag, { type: r.status === 'running' ? 'info' : r.ok ? 'success' : 'error', size: 'small' }, { default: () => r.status || (r.ok ? '已提交' : '失败') }) },
     )
   } else {
@@ -859,7 +857,7 @@ async function doSave() {
     formData.assign_to = null
     reload()
   } catch (e) {
-    message.error(e?.response?.data?.msg || '操作失败')
+    message.error(e?.message || e?.response?.data?.msg || '操作失败')
   } finally {
     saving.value = false
   }
@@ -1036,7 +1034,6 @@ async function doSingleAction(action, siteId) {
       }
     } else if (action === 'redirect') {
       singleRedirectSiteId.value = siteId
-      singleRedirectTargetUrl.value = ''
       showSingleRedirect.value = true
       return
     } else if (action === 'assign-gmail') {
@@ -1080,7 +1077,7 @@ async function syncProductCount(siteId, row) {
     message.loading('正在查询远端产品数量...')
     const res = await api.refreshProductCount(siteId)
     const count = res?.data?.product_count ?? 0
-    row.product_count = count
+    row.woo_product_count = count
     message.success(`站点 ${row.domain} 远端产品总数: ${count}`)
   } catch (e) {
     message.error(e?.response?.data?.msg || '查询失败')
