@@ -342,16 +342,23 @@ echo json_encode([
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
-        """通过 HTTP 调用域名替换 PHP 脚本"""
+        """通过 HTTP 调用域名替换 PHP 脚本。
+
+        优先通过域名访问；若域名挂 Cloudflare 代理且源站暂无 SSL（525 错误），
+        自动回退到 localhost 直连，绕过 CDN 层。
+        """
         urls = [
-            f'http://{domain}/domain-replace.php?token={token}',
-            f'https://{domain}/domain-replace.php?token={token}',
+            (f'http://{domain}/domain-replace.php?token={token}', {}),
+            (f'https://{domain}/domain-replace.php?token={token}', {}),
+            # 绕过 Cloudflare：直连 1Panel OpenResty（127.0.0.1:80），Host 头指向域名
+            (f'http://127.0.0.1/domain-replace.php?token={token}', {'Host': domain}),
         ]
         last_error = ''
         for _ in range(6):
-            for url in urls:
+            for url, extra_headers in urls:
                 try:
-                    resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
+                    resp = httpx.get(url, headers=extra_headers, timeout=60,
+                                     verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code != 200:
                         last_error = _extract_wp_error(resp)
                         continue
@@ -433,14 +440,21 @@ echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.woo_script}', is_dir=False)
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
-        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key"""
-        urls = [f'{protocol}://{domain}/{self.woo_script}?token={token}']
+        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key。
+
+        优先通过域名访问；若 Cloudflare 代理导致 525，回退 localhost 直连。
+        """
+        urls = [
+            (f'{protocol}://{domain}/{self.woo_script}?token={token}', {}),
+            (f'http://127.0.0.1/{self.woo_script}?token={token}', {'Host': domain}),
+        ]
         if protocol == 'https':
-            urls.append(f'http://{domain}/{self.woo_script}?token={token}')
+            urls.insert(1, (f'http://{domain}/{self.woo_script}?token={token}', {}))
         for _ in range(self.woo_fetch_retries):
-            for url in urls:
+            for url, extra_headers in urls:
                 try:
-                    resp = httpx.get(url, timeout=30, verify=self.wp_verify_ssl, follow_redirects=True)
+                    resp = httpx.get(url, headers=extra_headers, timeout=30,
+                                     verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code == 200:
                         data = resp.json()
                         if data.get('code') == 200 and data.get('consumer_key') and data.get('consumer_secret'):
@@ -575,24 +589,38 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
 
     def fetch_feed_links(self, ctx_refresh_url: str) -> list:
-        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表，返回扁平的 URL 字符串列表。自动过滤 logs 目录。"""
+        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表，返回扁平的 URL 字符串列表。自动过滤 logs 目录。
+
+        优先通过域名访问；若 Cloudflare 代理导致 525，回退 localhost 直连。
+        """
         if not ctx_refresh_url:
             return []
+        # 构造 localhost 回退 URL（绕过 Cloudflare）
+        import urllib.parse as _up
+        _parsed = _up.urlparse(ctx_refresh_url)
+        _local_url = f'http://127.0.0.1{_parsed.path}?{_parsed.query}'
+        _domain = _parsed.hostname or ''
+        urls = [
+            (ctx_refresh_url, {}),
+            (_local_url, {'Host': _domain}),
+        ]
         for i in range(1, 7):
-            try:
-                resp = httpx.get(ctx_refresh_url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    links = data.get('feed_links') or []
-                    if isinstance(links, list) and links:
-                        links = [str(l) for l in links]
-                        # 过滤 logs 目录（PHP 端已过滤，此处为二次保障）
-                        links = [l for l in links if '/logs/' not in l]
-                        _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
-                        return links
-                    _log.warning("CTX 刷新未返回 feed_links，第 %s/6 次", i)
-            except Exception as exc:
-                _log.warning("CTX 刷新链接请求失败，第 %s/6 次：%s", i, exc)
+            for url, extra_headers in urls:
+                try:
+                    resp = httpx.get(url, headers=extra_headers, timeout=60,
+                                     verify=self.wp_verify_ssl, follow_redirects=True)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        links = data.get('feed_links') or []
+                        if isinstance(links, list) and links:
+                            links = [str(l) for l in links]
+                            # 过滤 logs 目录（PHP 端已过滤，此处为二次保障）
+                            links = [l for l in links if '/logs/' not in l]
+                            _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
+                            return links
+                        _log.warning("CTX 刷新未返回 feed_links，第 %s/6 次", i)
+                except Exception as exc:
+                    _log.warning("CTX 刷新链接请求失败，第 %s/6 次：%s", i, exc)
             time.sleep(5)
         _log.warning("CTX Feed_Link 获取失败")
         return []
@@ -609,27 +637,31 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         return self.fetch_feed_links(domain, token, protocol)
 
     def health_check(self, domain: str, protocol: str) -> bool:
-        """对创建完成的 WordPress 站点做基础健康检查"""
+        """对创建完成的 WordPress 站点做基础健康检查（带重试）"""
         import httpx as _h
 
         urls = [
             f'{protocol}://{domain}/wp-login.php',
             f'{protocol}://{domain}/',
         ]
+        import time as _time
 
-        for url in urls:
-            try:
-                resp = _h.get(url, timeout=30, verify=self.wp_verify_ssl, follow_redirects=True)
-                if resp.status_code not in (200, 301, 302):
-                    continue
+        for attempt in range(1, 11):
+            for url in urls:
+                try:
+                    resp = _h.get(url, timeout=30, verify=self.wp_verify_ssl, follow_redirects=True)
+                    if resp.status_code not in (200, 301, 302):
+                        continue
 
-                final_url = str(resp.url or '').lower()
-                text = (resp.text or '').lower()
+                    final_url = str(resp.url or '').lower()
+                    text = (resp.text or '').lower()
 
-                if any(x in final_url for x in ['/wp-login.php', '/wp-admin', domain.lower()]):
-                    if 'wordpress' in text or 'wp-login' in text or 'wp-content' in text or 'user_login' in text:
-                        return True
-            except Exception:
-                pass
+                    if any(x in final_url for x in ['/wp-login.php', '/wp-admin', domain.lower()]):
+                        if 'wordpress' in text or 'wp-login' in text or 'wp-content' in text or 'user_login' in text:
+                            return True
+                except Exception:
+                    pass
+            if attempt < 10:
+                _time.sleep(10)
 
         return False
