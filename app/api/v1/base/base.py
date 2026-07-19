@@ -79,6 +79,8 @@ async def refresh_access_token(payload: RefreshTokenIn):
 async def get_userinfo():
     user_id = CTX_USER_ID.get()
     user_obj = await user_controller.get(id=user_id)
+    if not user_obj:
+        raise HTTPException(status_code=401, detail="用户不存在或已失效，请重新登录")
     data = await user_obj.to_dict(exclude_fields=["password"])
     if not data.get("avatar"):
         data["avatar"] = "/static/default_avatar.svg"
@@ -89,6 +91,8 @@ async def get_userinfo():
 async def get_user_menu():
     user_id = CTX_USER_ID.get()
     user_obj = await User.filter(id=user_id).first()
+    if not user_obj:
+        raise HTTPException(status_code=401, detail="用户不存在或已失效，请重新登录")
     menus: list[Menu] = []
     if user_obj.is_superuser:
         menus = await Menu.all()
