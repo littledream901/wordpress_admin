@@ -187,6 +187,7 @@ async def init_db():
     # 2025-07-19 全量补全：通过模型 vs 补丁交叉对比，统一补齐所有缺失列
     patches = [
         # -- site_pipeline_site --
+        "ALTER TABLE site_pipeline_site ADD COLUMN dept_id INTEGER",
         "ALTER TABLE site_pipeline_site ADD COLUMN woo_product_count INTEGER DEFAULT 0",
         "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
