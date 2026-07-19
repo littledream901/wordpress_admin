@@ -324,6 +324,12 @@ echo json_encode([
             for url in urls:
                 try:
                     resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
+                    if resp.status_code != 200:
+                        last_error = f"HTTP {resp.status_code}"
+                        continue
+                    if not resp.text or not resp.text.strip():
+                        last_error = "empty response body"
+                        continue
                     data = resp.json()
                     if data.get('code') == 200:
                         return data
