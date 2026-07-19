@@ -57,6 +57,9 @@ def _parse_concatenated_json(text: str) -> dict | None:
         if obj.get('code') == 200:
             return obj
     return objects[0]
+
+
+class OnePanelAPI:
     def __init__(self):
         cfgs = ProviderResolver.sync_get_config_map('onepanel')
         url = str(_provider_value(cfgs, 'OP_URL', 'url', '')).strip()
