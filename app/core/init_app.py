@@ -188,6 +188,8 @@ async def init_db():
         "ALTER TABLE site_pipeline_site ADD COLUMN platform VARCHAR(32) DEFAULT 'wordpress'",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_store_url VARCHAR(500) DEFAULT ''",
         "ALTER TABLE site_pipeline_site ADD COLUMN shopify_token VARCHAR(255) DEFAULT ''",
+        "ALTER TABLE user ADD COLUMN is_superuser BOOLEAN DEFAULT 0",
+        "ALTER TABLE user ADD COLUMN is_active BOOLEAN DEFAULT 1",
     ]
     for sql in patches:
         try:
