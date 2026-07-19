@@ -3,13 +3,13 @@
 
 独立的执行器层，不依赖 API 层（site_pipeline.py）。
 
-流程步骤（12 步，对齐单脚本 1panel_create_wp_final.py 的顺序）：
+流程步骤（12 步，结合单脚本逻辑与生产环境 Cloudflare 需求）：
   1. create_site         - 创建 WordPress 网站
-  2. restore_db          - 恢复数据库
-  3. restore_files       - 恢复模板文件
-  4. rebuild_after_files - 重建容器
-  5. replace_domain      - 域名替换
-  6. apply_ssl           - 申请/绑定 SSL 证书（域名替换后申请）
+  2. apply_ssl           - 申请/绑定 SSL 证书（Cloudflare 代理必须先有 SSL）
+  3. restore_db          - 恢复数据库
+  4. restore_files       - 恢复模板文件
+  5. rebuild_after_files - 重建容器
+  6. replace_domain      - 域名替换
   7. patch_wp_config     - wp-config.php 配置
   8. inject_woo_ctx      - 注入 WooCommerce + CTX PHP 脚本
   9. rebuild_after_patch - 重建容器（脚本注入后 rebuild）
@@ -95,46 +95,7 @@ class ProvisionTaskRunner(TaskRunner):
             site.pipeline_status = 'onepanel:site_created'
             await site.save()
 
-            # Step 2: restore_db（对齐单脚本：建站后先恢复 DB）
-            await self._update_step(job, "restore_db")
-            await self._exec(lambda: db_restorer.restore(db_name))
-
-            # Step 3: restore_files
-            await self._update_step(job, "restore_files")
-            await self._exec(lambda: wp_restorer.restore_files(service_name))
-
-            # Step 4: rebuild_after_files
-            await self._update_step(job, "rebuild_after_files")
-            await self._exec(lambda: site_manager.rebuild_app(app_id))
-
-            # Step 5: replace_domain（对齐单脚本：域名替换在 rebuild 后、SSL 前）
-            await self._update_step(job, "replace_domain")
-            old_domain = (
-                wp_restorer.old_source_domain
-                or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
-            )
-            if not old_domain:
-                raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
-            # 域名替换使用目标协议（对齐单脚本：https if force_https else http）
-            replace_protocol = 'https' if ssl_manager.force_https else 'http'
-            replace_token = ''
-            try:
-                replace_token = await self._exec(
-                    lambda: wp_restorer.inject_domain_replace_script(
-                        service_name=service_name, old_domain=old_domain,
-                        new_domain=site.domain, target_protocol=replace_protocol,
-                    )
-                )
-                await self._exec(
-                    lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token)
-                )
-            finally:
-                if replace_token:
-                    await self._exec(
-                        lambda: wp_restorer.remove_domain_replace_script(service_name)
-                    )
-
-            # Step 6: apply_ssl（对齐单脚本：域名替换后申请 SSL）
+            # Step 2: apply_ssl（Cloudflare 代理必须先申请 SSL，否则域名替换时 Cloudflare 无法连接源站）
             await self._update_step(job, "apply_ssl")
             protocol = 'http'
             if not onepanel_site_id:
@@ -149,7 +110,44 @@ class ProvisionTaskRunner(TaskRunner):
             if protocol not in ('http', 'https'):
                 protocol = 'http'
 
-            # Step 7: patch_wp_config（使用 SSL 后的实际协议）
+            # Step 3: restore_db
+            await self._update_step(job, "restore_db")
+            await self._exec(lambda: db_restorer.restore(db_name))
+
+            # Step 4: restore_files
+            await self._update_step(job, "restore_files")
+            await self._exec(lambda: wp_restorer.restore_files(service_name))
+
+            # Step 5: rebuild_after_files
+            await self._update_step(job, "rebuild_after_files")
+            await self._exec(lambda: site_manager.rebuild_app(app_id))
+
+            # Step 6: replace_domain
+            await self._update_step(job, "replace_domain")
+            old_domain = (
+                wp_restorer.old_source_domain
+                or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
+            )
+            if not old_domain:
+                raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
+            replace_token = ''
+            try:
+                replace_token = await self._exec(
+                    lambda: wp_restorer.inject_domain_replace_script(
+                        service_name=service_name, old_domain=old_domain,
+                        new_domain=site.domain, target_protocol=protocol,
+                    )
+                )
+                await self._exec(
+                    lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token)
+                )
+            finally:
+                if replace_token:
+                    await self._exec(
+                        lambda: wp_restorer.remove_domain_replace_script(service_name)
+                    )
+
+            # Step 7: patch_wp_config
             await self._update_step(job, "patch_wp_config")
             await self._exec(
                 lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol)
