@@ -40,9 +40,7 @@ class UserController(CRUDBase[User, UserCreate, UserUpdate]):
         return obj
 
     async def update_last_login(self, id: int) -> None:
-        user = await self.model.filter(pk=id).first()
-        if not user:
-            return
+        user = await self.get(id=id)
         user.last_login = datetime.now()
         await user.save()
 

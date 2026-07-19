@@ -248,6 +248,86 @@ async def init_db():
             if "duplicate column" not in str(e).lower():
                 logger.warning(f"[init_db] 补丁失败: {e}")
 
+    # ── MySQL 主键修复（SQLite → MySQL 迁移后必执行）──
+    await _repair_mysql_schema()
+
+
+async def _repair_mysql_schema():
+    """MySQL Schema 修复：确保所有业务表 id 列有 PRIMARY KEY + AUTO_INCREMENT。
+
+    SQLite → MySQL 迁移后，Tortoise generate_schemas(safe=True) 可能创建
+    缺少主键约束的表，导致 ``MultipleObjectsReturned`` / ``.id`` 不可访问等兼容问题。
+
+    策略：
+    1. 对每张表执行 ALTER TABLE ... MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY
+    2. 若因重复 id 失败，自动添加临时列去重 → 重试
+    3. 若已有主键 → 跳过
+    4. 仅在 MySQL 环境下生效，幂等可重复执行
+    """
+    if settings.DB_ENGINE != "mysql":
+        return
+
+    from tortoise import Tortoise, connections
+
+    conn = connections.get("default")
+    logger.info("[repair_schema] 开始检查 MySQL 表主键约束...")
+
+    # 收集所有业务表名（排除 aerich 迁移表）
+    business_tables: set[str] = set()
+    for _app_name, models in Tortoise.apps.items():
+        for mdl in models:
+            tbl = mdl._meta.db_table
+            if tbl and tbl != "aerich":
+                business_tables.add(tbl)
+
+    repaired = 0
+    skipped = 0
+    failed = 0
+
+    for table in sorted(business_tables):
+        try:
+            await conn.execute_query(
+                f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
+            )
+            repaired += 1
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "duplicate entry" in err_msg:
+                # 存在重复 id → 自动去重后重试
+                logger.warning(f"[repair_schema] {table}: 检测到重复 id，自动清理...")
+                try:
+                    # 添加临时自增列区分同 id 行
+                    await conn.execute_query(
+                        f"ALTER TABLE `{table}` ADD COLUMN _repair_seq BIGINT NOT NULL AUTO_INCREMENT UNIQUE KEY"
+                    )
+                    # 每组 id 保留 _repair_seq 最小的记录
+                    await conn.execute_query(
+                        f"DELETE t1 FROM `{table}` t1 "
+                        f"INNER JOIN `{table}` t2 "
+                        f"ON t1.id = t2.id AND t1._repair_seq > t2._repair_seq"
+                    )
+                    await conn.execute_query(
+                        f"ALTER TABLE `{table}` DROP COLUMN _repair_seq"
+                    )
+                    # 重试主键修复
+                    await conn.execute_query(
+                        f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
+                    )
+                    repaired += 1
+                    logger.info(f"[repair_schema] {table}: 重复已清理，PK 已修复")
+                except Exception as e2:
+                    failed += 1
+                    logger.error(f"[repair_schema] {table}: 自动清理失败，需手动处理: {e2}")
+            elif "multiple primary key" in err_msg or "primary key" in err_msg:
+                skipped += 1
+            else:
+                failed += 1
+                logger.warning(f"[repair_schema] {table}: 修复失败 ({e})")
+
+    logger.info(
+        f"[repair_schema] 完成 — 修复 {repaired}, 跳过(已有PK) {skipped}, 失败 {failed}"
+    )
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  Section 4: Seed Data
