@@ -95,5 +95,29 @@ class Settings(BaseSettings):
 
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 
+    def validate_production_settings(self) -> list[str]:
+        """校验生产环境关键配置，返回告警列表。
+
+        在 app 启动时调用，DEBUG=false 时对高风险配置告警。
+        """
+        warnings_list = []
+
+        if not self.SECRET_KEY or len(self.SECRET_KEY) < 16:
+            warnings_list.append("SECRET_KEY 为空或过短（<16 字符），生产环境务必更换")
+
+        if not self.DEFAULT_PASSWORD:
+            warnings_list.append("DEFAULT_PASSWORD 未设置，新用户将使用空密码")
+
+        if self.CORS_ORIGINS == ["*"]:
+            warnings_list.append("CORS_ORIGINS 为 ['*']，生产环境应限制为具体域名")
+
+        if self.DEBUG:
+            warnings_list.append("DEBUG=True，生产环境应设为 False")
+
+        if not self.DB_PASSWORD:
+            warnings_list.append("DB_PASSWORD 为空，数据库未设置密码")
+
+        return warnings_list
+
 
 settings = Settings()

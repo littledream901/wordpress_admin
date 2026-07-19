@@ -25,7 +25,6 @@ from tortoise.expressions import Q
 
 from app.api import api_router
 from app.controllers.api import api_controller
-from app.controllers.user import UserCreate, user_controller
 from app.log import logger
 from app.models.admin import Api, Menu, Role
 from app.models.config import Config
@@ -113,41 +112,41 @@ def register_routers(app: FastAPI, prefix: str = "/api"):
 # ════════════════════════════════════════════════════════════════════════════
 
 # 菜单声明式定义
-# 格式: (name, path, parent_path, menu_type, order, icon, is_hidden, component, redirect)
-# parent_path 为空字符串或 "/" 表示根级菜单
+# 字段: name, path, parent_path, menu_type, order, icon, is_hidden, component, redirect
+# parent_path 为空字符串表示根级菜单
 MENU_DEFINITIONS = [
     # ── 站点流水线 ──
-    ("站点流水线",     "/site-pipeline",      "",              MenuType.CATALOG, 10, "mdi:web",                                   0, "Layout", "/site-pipeline/site-list"),
-    ("站点管理",       "site-list",           "/site-pipeline", MenuType.MENU,    1,  "mdi:server-network",                       0, "/site-pipeline/site-list", None),
-    ("Hub分发",        "hub-dispatch",        "/site-pipeline", MenuType.MENU,    2,  "mdi:cloud-upload-outline",                 0, "/site-pipeline/hub-dispatch", None),
-    ("Hub任务列表",    "hub-jobs",            "/site-pipeline", MenuType.MENU,    3,  "mdi:clipboard-list-outline",               0, "/site-pipeline/hub-jobs", None),
-    ("Feed管理",       "feed-manager",        "/site-pipeline", MenuType.MENU,    5,  "mdi:file-replace-outline",                 0, "/site-pipeline/feed-manager", None),
-    ("ADS管理",        "ads-manager",         "/site-pipeline", MenuType.MENU,    6,  "mdi:monitor-eye",                           0, "/site-pipeline/ads-manager", None),
+    {"name": "站点流水线",     "path": "/site-pipeline",      "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 10, "icon": "mdi:web",                                   "is_hidden": False, "component": "Layout", "redirect": "/site-pipeline/site-list"},
+    {"name": "站点管理",       "path": "site-list",           "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 1,  "icon": "mdi:server-network",                       "is_hidden": False, "component": "/site-pipeline/site-list", "redirect": None},
+    {"name": "Hub分发",        "path": "hub-dispatch",        "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 2,  "icon": "mdi:cloud-upload-outline",                 "is_hidden": False, "component": "/site-pipeline/hub-dispatch", "redirect": None},
+    {"name": "Hub任务列表",    "path": "hub-jobs",            "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 3,  "icon": "mdi:clipboard-list-outline",               "is_hidden": False, "component": "/site-pipeline/hub-jobs", "redirect": None},
+    {"name": "Feed管理",       "path": "feed-manager",        "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 5,  "icon": "mdi:file-replace-outline",                 "is_hidden": False, "component": "/site-pipeline/feed-manager", "redirect": None},
+    {"name": "ADS管理",        "path": "ads-manager",         "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 6,  "icon": "mdi:monitor-eye",                           "is_hidden": False, "component": "/site-pipeline/ads-manager", "redirect": None},
     # ── Gmail 管理 ──
-    ("Gmail管理",      "/gmail",              "",              MenuType.CATALOG, 20, "mdi:gmail",                                  0, "Layout", "/gmail/account-list"),
-    ("Gmail账号",      "account-list",        "/gmail",        MenuType.MENU,    1,  "basil:gmail-solid",                         0, "/gmail/account-list", None),
+    {"name": "Gmail管理",      "path": "/gmail",              "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 20, "icon": "mdi:gmail",                                  "is_hidden": False, "component": "Layout", "redirect": "/gmail/account-list"},
+    {"name": "Gmail账号",      "path": "account-list",        "parent_path": "/gmail",        "menu_type": MenuType.MENU,    "order": 1,  "icon": "basil:gmail-solid",                         "is_hidden": False, "component": "/gmail/account-list", "redirect": None},
     # ── Shopify 采集 ──
-    ("Shopify采集",    "/shopify",            "",              MenuType.CATALOG, 30, "mdi:shopping-search",                        0, "Layout", "/shopify/source-list"),
-    ("待采集列表",     "source-list",         "/shopify",      MenuType.MENU,    1,  "mdi:link-variant",                          0, "/shopify/source-list", None),
-    ("产品列表",       "product-list",        "/shopify",      MenuType.MENU,    2,  "mdi:package-variant-closed",                0, "/shopify/product-list", None),
+    {"name": "Shopify采集",    "path": "/shopify",            "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 30, "icon": "mdi:shopping-search",                        "is_hidden": False, "component": "Layout", "redirect": "/shopify/source-list"},
+    {"name": "待采集列表",     "path": "source-list",         "parent_path": "/shopify",      "menu_type": MenuType.MENU,    "order": 1,  "icon": "mdi:link-variant",                          "is_hidden": False, "component": "/shopify/source-list", "redirect": None},
+    {"name": "产品列表",       "path": "product-list",        "parent_path": "/shopify",      "menu_type": MenuType.MENU,    "order": 2,  "icon": "mdi:package-variant-closed",                "is_hidden": False, "component": "/shopify/product-list", "redirect": None},
     # ── 配置管理 ──
-    ("配置管理",       "/config",             "",              MenuType.CATALOG, 40, "carbon:settings",                            0, "Layout", "/config/manage"),
-    ("配置中心",       "manage",              "/config",       MenuType.MENU,    1,  "carbon:settings-adjust",                    0, "/config/manage", None),
-    ("资源绑定",       "bindings",            "/config",       MenuType.MENU,    2,  "carbon:ibm-cloud-pak-manta-automated-data-lineage", 0, "/config/bindings", None),
-    ("账号管理",       "accounts",            "/config",       MenuType.MENU,    3,  "carbon:user-identification",                0, "/config/accounts", None),
-    ("回收站",         "recycle",             "/config",       MenuType.MENU,    4,  "mdi:delete-restore",                         0, "/config/recycle", None),
+    {"name": "配置管理",       "path": "/config",             "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 40, "icon": "carbon:settings",                            "is_hidden": False, "component": "Layout", "redirect": "/config/manage"},
+    {"name": "配置中心",       "path": "manage",              "parent_path": "/config",       "menu_type": MenuType.MENU,    "order": 1,  "icon": "carbon:settings-adjust",                    "is_hidden": False, "component": "/config/manage", "redirect": None},
+    {"name": "资源绑定",       "path": "bindings",            "parent_path": "/config",       "menu_type": MenuType.MENU,    "order": 2,  "icon": "carbon:ibm-cloud-pak-manta-automated-data-lineage", "is_hidden": False, "component": "/config/bindings", "redirect": None},
+    {"name": "账号管理",       "path": "accounts",            "parent_path": "/config",       "menu_type": MenuType.MENU,    "order": 3,  "icon": "carbon:user-identification",                "is_hidden": False, "component": "/config/accounts", "redirect": None},
+    {"name": "回收站",         "path": "recycle",             "parent_path": "/config",       "menu_type": MenuType.MENU,    "order": 4,  "icon": "mdi:delete-restore",                         "is_hidden": False, "component": "/config/recycle", "redirect": None},
     # ── 任务中心 ──
-    ("任务中心",       "/operation-jobs",     "",              MenuType.CATALOG, 50, "carbon:task",                                0, "Layout", "/operation-jobs/job-list"),
-    ("任务列表",       "job-list",            "/operation-jobs", MenuType.MENU,  1,  "carbon:task-view",                          0, "/operation-jobs/job-list", None),
-    ("导入记录",       "import-logs",         "/operation-jobs", MenuType.MENU,  2,  "carbon:document-import",                    0, "/operation-jobs/import-logs", None),
+    {"name": "任务中心",       "path": "/operation-jobs",     "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 50, "icon": "carbon:task",                                "is_hidden": False, "component": "Layout", "redirect": "/operation-jobs/job-list"},
+    {"name": "任务列表",       "path": "job-list",            "parent_path": "/operation-jobs", "menu_type": MenuType.MENU,  "order": 1,  "icon": "carbon:task-view",                          "is_hidden": False, "component": "/operation-jobs/job-list", "redirect": None},
+    {"name": "导入记录",       "path": "import-logs",         "parent_path": "/operation-jobs", "menu_type": MenuType.MENU,  "order": 2,  "icon": "carbon:document-import",                    "is_hidden": False, "component": "/operation-jobs/import-logs", "redirect": None},
     # ── 系统管理 ──
-    ("系统管理",       "/system",             "",              MenuType.CATALOG, 98, "carbon:gui-management",                      0, "Layout", "/system/user"),
-    ("用户管理",       "user",                "/system",       MenuType.MENU,    1,  "material-symbols:person-outline-rounded",   0, "/system/user", None),
-    ("角色管理",       "role",                "/system",       MenuType.MENU,    2,  "carbon:user-role",                          0, "/system/role", None),
-    ("菜单管理",       "menu",                "/system",       MenuType.MENU,    3,  "material-symbols:list-alt-outline",         0, "/system/menu", None),
-    ("API管理",        "api",                 "/system",       MenuType.MENU,    4,  "ant-design:api-outlined",                   0, "/system/api", None),
-    ("部门管理",       "dept",                "/system",       MenuType.MENU,    5,  "mingcute:department-line",                 0, "/system/dept", None),
-    ("审计日志",       "auditlog",            "/system",       MenuType.MENU,    6,  "ph:clipboard-text-bold",                    0, "/system/auditlog", None),
+    {"name": "系统管理",       "path": "/system",             "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 98, "icon": "carbon:gui-management",                      "is_hidden": False, "component": "Layout", "redirect": "/system/user"},
+    {"name": "用户管理",       "path": "user",                "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 1,  "icon": "material-symbols:person-outline-rounded",   "is_hidden": False, "component": "/system/user", "redirect": None},
+    {"name": "角色管理",       "path": "role",                "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 2,  "icon": "carbon:user-role",                          "is_hidden": False, "component": "/system/role", "redirect": None},
+    {"name": "菜单管理",       "path": "menu",                "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 3,  "icon": "material-symbols:list-alt-outline",         "is_hidden": False, "component": "/system/menu", "redirect": None},
+    {"name": "API管理",        "path": "api",                 "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 4,  "icon": "ant-design:api-outlined",                   "is_hidden": False, "component": "/system/api", "redirect": None},
+    {"name": "部门管理",       "path": "dept",                "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 5,  "icon": "mingcute:department-line",                 "is_hidden": False, "component": "/system/dept", "redirect": None},
+    {"name": "审计日志",       "path": "auditlog",            "parent_path": "/system",       "menu_type": MenuType.MENU,    "order": 6,  "icon": "ph:clipboard-text-bold",                    "is_hidden": False, "component": "/system/auditlog", "redirect": None},
 ]
 
 
@@ -158,21 +157,19 @@ MENU_DEFINITIONS = [
 async def init_db():
     """初始化数据库表结构（幂等，可重复执行）。
 
-    entrypoint.sh 已先行执行 generate_schemas(safe=True)，
-    此处仅做补充性检查和主键修复，不再重复建表。
-    本地开发未经过 entrypoint.sh 时仍需建表，通过检测 user 表是否存在来判断。
+    仅做建表检查，不做主键修复、数据去重等高风险操作。
+    这些操作已移至独立的修复脚本 scripts/repair_*.py。
     """
     from tortoise import Tortoise, connections
-
     from tortoise.exceptions import ConfigurationError
+
     try:
         await Tortoise.init(config=settings.TORTOISE_ORM)
     except ConfigurationError:
-        pass  # 已经初始化，忽略
+        pass
 
     conn = connections.get("default")
 
-    # 检查是否已有业务表（以 user 表为准）
     tables_ready = False
     try:
         result = await conn.execute_query("SHOW TABLES LIKE 'user'")
@@ -187,101 +184,6 @@ async def init_db():
     else:
         logger.info("[init_db] 业务表已存在，跳过建表")
 
-    # 确保所有业务表 id 列有 PRIMARY KEY（兼容历史脏数据）
-    await _ensure_primary_keys()
-
-
-async def _ensure_primary_keys():
-    """确保所有业务表 id 列有 PRIMARY KEY AUTO_INCREMENT 约束。
-
-    Tortoise safe=True 不会修改已存在的表，若历史表缺失主键需在此修复。
-    幂等：已有主键的表跳过。
-    """
-    from tortoise import connections
-
-    conn = connections.get("default")
-
-    # 获取当前数据库中缺少主键的业务表（排除无 id 列的 M2M 关联表）
-    db_name = settings.DB_NAME
-    rows = await conn.execute_query(
-        "SELECT t.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES t "
-        "LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS c "
-        "ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME "
-        "AND c.CONSTRAINT_TYPE = 'PRIMARY KEY' "
-        "WHERE t.TABLE_SCHEMA = %s AND t.TABLE_TYPE = 'BASE TABLE' "
-        "AND t.TABLE_NAME != 'aerich' AND c.CONSTRAINT_NAME IS NULL "
-        "AND EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS col "
-        "WHERE col.TABLE_SCHEMA = t.TABLE_SCHEMA AND col.TABLE_NAME = t.TABLE_NAME AND col.COLUMN_NAME = 'id')",
-        [db_name]
-    )
-    tables_missing_pk = rows[1] if rows else []
-
-    if not tables_missing_pk:
-        return
-
-    repaired = 0
-    for row in tables_missing_pk:
-        table = row[0] if isinstance(row, (list, tuple)) else row.get("TABLE_NAME", "")
-        try:
-            await conn.execute_query(
-                f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
-            )
-            repaired += 1
-            logger.info(f"[repair_pk] {table}: PRIMARY KEY 已添加")
-        except Exception as e:
-            err = str(e).lower()
-            if "duplicate entry" in err:
-                logger.error(f"[repair_pk] {table}: 存在重复 id，需手动修复")
-            else:
-                logger.warning(f"[repair_pk] {table}: 修复失败 ({e})")
-
-    if repaired:
-        logger.info(f"[repair_pk] 完成：修复 {repaired} 张表的主键")
-
-
-async def _deduplicate_users():
-    """清理重复的用户记录。
-
-    按 username 分组，每组仅保留 id 最小的一条，
-    其余重复记录删除。
-    幂等：无重复时跳过。
-    """
-    from tortoise import connections
-    conn = connections.get("default")
-
-    try:
-        rows = await conn.execute_query(
-            "SELECT username, COUNT(*) AS cnt, GROUP_CONCAT(id ORDER BY id) AS ids "
-            "FROM `user` GROUP BY username HAVING cnt > 1"
-        )
-        duplicates = rows[1] if rows else []
-    except Exception:
-        return
-
-    if not duplicates:
-        return
-
-    for row in duplicates:
-        if isinstance(row, (list, tuple)):
-            username, _cnt, ids_str = row[0], row[1], row[2]
-        else:
-            username = row.get("username", "")
-            ids_str = str(row.get("ids", ""))
-        if not ids_str:
-            continue
-        id_list = [int(x) for x in str(ids_str).split(",")]
-        keeper_id = id_list[0]
-        remove_ids = id_list[1:]
-        logger.warning(
-            f"[dedup_user] username={username}: 保留 id={keeper_id}, 删除 {remove_ids}"
-        )
-        placeholders = ",".join(["%s"] * len(remove_ids))
-        await conn.execute_query(
-            f"DELETE FROM `user` WHERE id IN ({placeholders})", remove_ids
-        )
-
-    logger.info("[dedup_user] 重复用户已清理")
-
 
 # ════════════════════════════════════════════════════════════════════════════
 #  Section 4: Seed Data
@@ -290,28 +192,55 @@ async def _deduplicate_users():
 # ── 4.1 超级用户 ──
 
 async def init_superuser():
-    """幂等创建默认超级管理员（get_or_create，不会重复插入）。
+    """确保默认管理员账号存在且关键字段正确。
 
-    RESET_ADMIN_PASSWORD=true 时强制重置密码。
+    不覆盖用户已修改的密码、邮箱等配置，仅修复：
+    - 首次创建：创建 admin 账号
+    - RESET_ADMIN_PASSWORD=true：重置密码
+    - is_superuser / is_active 缺失时修复
     """
     from app.models.admin import User
     from app.utils.password import get_password_hash
 
-    hashed = get_password_hash(settings.DEFAULT_PASSWORD)
-    defaults = {
-        "email": "admin@admin.com",
-        "password": hashed,
-        "is_active": True,
-        "is_superuser": True,
-    }
+    user, created = await User.get_or_create(
+        username="admin",
+        defaults={
+            "email": "admin@admin.com",
+            "password": get_password_hash(settings.DEFAULT_PASSWORD),
+            "is_active": True,
+            "is_superuser": True,
+        }
+    )
 
-    user, created = await User.get_or_create(username="admin", defaults=defaults)
     if created:
-        logger.info("[init_superuser] 管理员用户已创建")
-    elif settings.RESET_ADMIN_PASSWORD:
-        user.password = hashed
-        await user.save(update_fields=["password"])
-        logger.info("[init_superuser] RESET_ADMIN_PASSWORD=true，管理员密码已重置")
+        logger.info("[init_superuser] 创建默认管理员 admin")
+        return
+
+    # 已存在用户：仅修复关键字段，不覆盖用户配置
+    changed = False
+
+    if settings.RESET_ADMIN_PASSWORD:
+        user.password = get_password_hash(settings.DEFAULT_PASSWORD)
+        changed = True
+
+    if not user.is_superuser:
+        user.is_superuser = True
+        changed = True
+
+    if not user.is_active:
+        user.is_active = True
+        changed = True
+
+    if changed:
+        update_fields = []
+        if settings.RESET_ADMIN_PASSWORD:
+            update_fields.append("password")
+        if not user.is_superuser:
+            update_fields.append("is_superuser")
+        if not user.is_active:
+            update_fields.append("is_active")
+        await user.save(update_fields=update_fields)
+        logger.info("[init_superuser] 管理员关键字段已修复")
 
 
 # ── 4.2 菜单 ──
@@ -319,62 +248,50 @@ async def init_superuser():
 async def init_menus():
     """根据 MENU_DEFINITIONS 声明式同步菜单：创建/更新新增菜单，隐藏废弃菜单"""
 
-    await _deduplicate_menus()
-
     all_menus = await Menu.all()
     menu_lookup = {}       # (path, parent_id) -> Menu
     path_to_id = {}        # path -> id（用于父级查找）
-    declared_paths = {d[1] for d in MENU_DEFINITIONS}
+    declared_paths = {d["path"] for d in MENU_DEFINITIONS}
 
     for m in all_menus:
         menu_lookup[(m.path, m.parent_id)] = m
 
-    root_items = [d for d in MENU_DEFINITIONS if d[2] in (None, "", "/")]
-    child_items = [d for d in MENU_DEFINITIONS if d[2] not in (None, "", "/")]
+    root_items = [d for d in MENU_DEFINITIONS if d["parent_path"] == ""]
+    child_items = [d for d in MENU_DEFINITIONS if d["parent_path"] != ""]
 
     # 第 1 轮：根级菜单
-    for (name, path, _, menu_type, order, icon, is_hidden, component, redirect) in root_items:
-        existing = menu_lookup.get((path, 0))
+    for item in root_items:
+        existing = menu_lookup.get((item["path"], 0))
         if existing:
-            path_to_id[path] = existing.id
-            await _sync_menu_fields(existing, name, menu_type, icon, order, is_hidden, component, redirect)
+            path_to_id[item["path"]] = existing.id
+            await _sync_menu_fields(existing, item)
         else:
-            menu = await Menu.create(
-                name=name, path=path, parent_id=0, menu_type=menu_type,
-                icon=icon, order=order, is_hidden=bool(is_hidden),
-                component=component, keepalive=False, redirect=redirect,
-            )
-            menu_lookup[(path, 0)] = menu
-            path_to_id[path] = menu.id
-            logger.info(f"[init_menus] 新增菜单: {name} ({path})")
+            menu = await _upsert_menu(item, parent_id=0)
+            menu_lookup[(item["path"], 0)] = menu
+            path_to_id[item["path"]] = menu.id
 
-    # 第 2 轮：子级菜单（迭代直到全部处理）
+    # 第 2 轮：子级菜单
     remaining = list(child_items)
     while remaining:
         processed = []
-        for (name, path, parent_path, menu_type, order, icon, is_hidden, component, redirect) in remaining:
+        for item in remaining:
+            parent_path = item["parent_path"]
             if parent_path not in path_to_id:
                 continue
             parent_id = path_to_id[parent_path]
-            existing = menu_lookup.get((path, parent_id))
+            existing = menu_lookup.get((item["path"], parent_id))
             if existing:
-                path_to_id[path] = existing.id
-                await _sync_menu_fields(existing, name, menu_type, icon, order, is_hidden, component, redirect)
+                path_to_id[item["path"]] = existing.id
+                await _sync_menu_fields(existing, item)
             else:
-                menu = await Menu.create(
-                    name=name, path=path, parent_id=parent_id, menu_type=menu_type,
-                    icon=icon, order=order, is_hidden=bool(is_hidden),
-                    component=component, keepalive=False, redirect=redirect,
-                )
-                menu_lookup[(path, parent_id)] = menu
-                path_to_id[path] = menu.id
-                logger.info(f"[init_menus] 新增菜单: {name} ({path}, parent={parent_path})")
-            processed.append((name, path, parent_path, menu_type, order,
-                              icon, is_hidden, component, redirect))
+                menu = await _upsert_menu(item, parent_id=parent_id)
+                menu_lookup[(item["path"], parent_id)] = menu
+                path_to_id[item["path"]] = menu.id
+            processed.append(item)
         remaining = [r for r in remaining if r not in processed]
         if not processed:
-            for (_, path, parent_path, *_) in remaining:
-                logger.warning(f"[init_menus] 父菜单未定义: {parent_path}，跳过 {path}")
+            for item in remaining:
+                logger.warning(f"[init_menus] 父菜单未定义: {item['parent_path']}，跳过 {item['path']}")
             break
 
     # 第 3 轮：隐藏废弃菜单
@@ -385,6 +302,21 @@ async def init_menus():
             logger.info(f"[init_menus] 废弃菜单已隐藏: {m.name} ({m.path})")
 
 
+async def _upsert_menu(item: dict, parent_id: int) -> Menu:
+    """创建菜单（调用处已确保不存在，直接 create）"""
+    menu = await Menu.create(
+        name=item["name"], path=item["path"], parent_id=parent_id,
+        menu_type=item["menu_type"], icon=item["icon"], order=item["order"],
+        is_hidden=bool(item.get("is_hidden", False)),
+        component=item["component"], keepalive=False,
+        redirect=item.get("redirect"),
+    )
+    logger.info(f"[init_menus] 新增菜单: {item['name']} ({item['path']}, parent_id={parent_id})")
+    return menu
+
+
+# Deprecated: 启动时自动去重风险过高，已移至 scripts/repair_menus.py
+# 保留函数体用于手动调用，但 init_menus() 不再自动执行
 async def _deduplicate_menus():
     """清理 (path, parent_id) 重复的菜单，保留最早创建的那条"""
     from collections import defaultdict
@@ -399,9 +331,7 @@ async def _deduplicate_menus():
             continue
         keeper = dup_list[0]
         removed_ids = [m.id for m in dup_list[1:]]
-        # 子菜单重定向到保留菜单
         await Menu.filter(parent_id__in=removed_ids).update(parent_id=keeper.id)
-        # 清理角色关联后删除
         roles = await Role.filter(menus__id__in=removed_ids).all()
         for role in roles:
             await role.menus.remove(*removed_ids)
@@ -412,15 +342,13 @@ async def _deduplicate_menus():
         )
 
 
-async def _sync_menu_fields(menu, name, menu_type, icon, order, is_hidden, component, redirect):
-    """按需更新菜单字段"""
+async def _sync_menu_fields(menu, item: dict):
+    """按需更新菜单字段（从 dict 定义同步到已有菜单记录）"""
     updated = False
-    for field, new_val in [
-        ("name", name), ("menu_type", menu_type), ("icon", icon),
-        ("order", order), ("is_hidden", bool(is_hidden)),
-        ("component", component), ("redirect", redirect),
-    ]:
+    for field in ("name", "menu_type", "icon", "order", "component", "redirect"):
+        new_val = item.get(field)
         if field == "is_hidden":
+            new_val = bool(item.get("is_hidden", False))
             old = bool(getattr(menu, field))
             if old != new_val:
                 setattr(menu, field, new_val)
@@ -435,15 +363,36 @@ async def _sync_menu_fields(menu, name, menu_type, icon, order, is_hidden, compo
 # ── 4.3 全局配置（旧 Config 模型）──
 
 async def init_configs():
-    """初始化全局配置项（批量查询 + 批量写入缺失项）"""
+    """初始化全局配置项（upsert：不存在则创建，存在则同步元数据，不覆盖用户值）"""
     defaults = _config_defaults()
-    existing_names = {c.name for c in await Config.all()}
-    to_create = [
-        Config(name=name, value=value, description=desc, category=cat,
-               sort_order=order, is_secret=is_secret)
-        for name, value, desc, cat, order, is_secret in defaults
-        if name not in existing_names
-    ]
+    existing_map = {c.name: c for c in await Config.all()}
+
+    to_create = []
+    for name, value, desc, cat, order, is_secret in defaults:
+        existing = existing_map.get(name)
+        if existing:
+            # 已有配置：只更新元数据，不覆盖用户已配置的值
+            meta_changed = False
+            if existing.description != desc:
+                existing.description = desc
+                meta_changed = True
+            if existing.category != cat:
+                existing.category = cat
+                meta_changed = True
+            if existing.sort_order != order:
+                existing.sort_order = order
+                meta_changed = True
+            if existing.is_secret != is_secret:
+                existing.is_secret = is_secret
+                meta_changed = True
+            if meta_changed:
+                await existing.save()
+        else:
+            to_create.append(Config(
+                name=name, value=value, description=desc, category=cat,
+                sort_order=order, is_secret=is_secret,
+            ))
+
     if to_create:
         await Config.bulk_create(to_create)
         logger.info(f"[init_configs] 批量新增 {len(to_create)} 个配置项")
@@ -508,55 +457,78 @@ def _config_defaults():
 # ── 4.4 Provider 配置 ──
 
 async def init_providers():
-    """初始化默认 Provider 实例 + 配置项，并清理废弃配置"""
+    """按自然键 upsert Provider 实例 + 配置项，并清理废弃配置"""
 
     defaults = _provider_defaults()
 
-    # ── 第 1 轮：确保所有 Provider 存在 ──
+    # ── 第 1 轮：按 (provider_type, provider_name) upsert Provider ──
     existing_providers = {
         (p.provider_type, p.provider_name): p
         for p in await ConfigProvider.all()
     }
-    providers_to_create = []
+
     for ptype, name, desc, priority, _ in defaults:
-        key = (ptype, name)
-        if key not in existing_providers:
-            provider = ConfigProvider(
+        provider = existing_providers.get((ptype, name))
+        if provider:
+
+            meta_changed = False
+            if provider.description != desc:
+                provider.description = desc
+                meta_changed = True
+            if provider.priority != priority:
+                provider.priority = priority
+                meta_changed = True
+            if not provider.is_default:
+                provider.is_default = True
+                meta_changed = True
+            if meta_changed:
+                await provider.save()
+        else:
+            provider = await ConfigProvider.create(
                 provider_type=ptype, provider_name=name,
                 description=desc, is_default=True, priority=priority,
                 status="active",
             )
-            existing_providers[key] = provider
-            providers_to_create.append(provider)
+            existing_providers[(ptype, name)] = provider
+            logger.info(f"[init_providers] 新增 Provider: {ptype}/{name}")
 
-    if providers_to_create:
-        await ConfigProvider.bulk_create(providers_to_create)
-        # bulk_create 不填充 id，重新查询
-        existing_providers = {
-            (p.provider_type, p.provider_name): p
-            for p in await ConfigProvider.all()
-        }
-        logger.info(f"[init_providers] 批量新增 {len(providers_to_create)} 个 Provider")
-
-    # ── 第 2 轮：批量创建缺失的配置项 ──
-    all_existing_items = {
-        (ci.provider_id, ci.config_key)
+    # ── 第 2 轮：按 (provider_id, config_key) upsert Item ──
+    existing_items = {
+        (ci.provider_id, ci.config_key): ci
         for ci in await ProviderConfigItem.all()
     }
-    items_to_create = []
+
     for ptype, name, _, _, items in defaults:
         provider = existing_providers[(ptype, name)]
         for i, (key, value, item_desc, config_type, is_secret, is_required) in enumerate(items):
-            if (provider.id, key) not in all_existing_items:
-                items_to_create.append(ProviderConfigItem(
+            existing_item = existing_items.get((provider.id, key))
+            if existing_item:
+
+                meta_changed = False
+                if existing_item.config_type != config_type:
+                    existing_item.config_type = config_type
+                    meta_changed = True
+                if existing_item.is_secret != is_secret:
+                    existing_item.is_secret = is_secret
+                    meta_changed = True
+                if existing_item.is_required != is_required:
+                    existing_item.is_required = is_required
+                    meta_changed = True
+                if existing_item.description != item_desc:
+                    existing_item.description = item_desc
+                    meta_changed = True
+                if existing_item.sort != i:
+                    existing_item.sort = i
+                    meta_changed = True
+                if meta_changed:
+                    await existing_item.save()
+            else:
+                await ProviderConfigItem.create(
                     provider_id=provider.id, config_key=key,
                     config_value=value, config_type=config_type,
                     is_secret=is_secret, is_required=is_required,
                     description=item_desc, sort=i,
-                ))
-    if items_to_create:
-        await ProviderConfigItem.bulk_create(items_to_create)
-        logger.info(f"[init_providers] 批量新增 {len(items_to_create)} 个配置项")
+                )
 
     # ── 清理已废弃的配置项 ──
     await _cleanup_deprecated_provider_items()
@@ -698,29 +670,51 @@ async def init_apis():
 # ── 4.6 角色 ──
 
 async def init_roles():
-    """初始化角色并关联菜单/API"""
-    if await Role.exists():
-        await _sync_existing_roles()
-    else:
+    """初始化角色并关联菜单/API（按 code 识别，幂等）"""
+    admin_role = await Role.filter(code="admin").first()
+    user_role = await Role.filter(code="user").first()
+
+    if not admin_role or not user_role:
         await _create_default_roles()
+    else:
+        await _sync_existing_roles()
 
 
 async def _create_default_roles():
-    """首次创建默认角色（管理员 + 普通用户）"""
-    admin_role = await Role.create(name="管理员", desc="管理员角色")
-    user_role = await Role.create(name="普通用户", desc="普通用户角色")
+    """首次创建默认角色（管理员 + 普通用户），幂等：get_or_create"""
+    admin_role, _ = await Role.get_or_create(
+        code="admin",
+        defaults={"name": "管理员", "desc": "管理员角色"}
+    )
+    user_role, _ = await Role.get_or_create(
+        code="user",
+        defaults={"name": "普通用户", "desc": "普通用户角色"}
+    )
 
     all_apis = await Api.all()
     all_menus = await Menu.all()
 
-    await admin_role.apis.add(*all_apis)
-    await admin_role.menus.add(*all_menus)
-    await user_role.menus.add(*all_menus)
+    # 仅追加未关联的，避免重复膨胀
+    existing_admin_apis = {a.id for a in await admin_role.apis.all()}
+    new_admin_apis = [a for a in all_apis if a.id not in existing_admin_apis]
+    if new_admin_apis:
+        await admin_role.apis.add(*new_admin_apis)
+
+    existing_admin_menus = {m.id for m in await admin_role.menus.all()}
+    new_admin_menus = [m for m in all_menus if m.id not in existing_admin_menus]
+    if new_admin_menus:
+        await admin_role.menus.add(*new_admin_menus)
+
+    existing_user_menus = {m.id for m in await user_role.menus.all()}
+    new_user_menus = [m for m in all_menus if m.id not in existing_user_menus]
+    if new_user_menus:
+        await user_role.menus.add(*new_user_menus)
+
     await _grant_menu_apis(user_role, all_menus, all_apis)
 
 
 async def _sync_existing_roles():
-    """已有角色时，增量同步新增菜单 + 对应的 API（仅对已有父菜单的角色）"""
+    """已有角色时，增量同步新增菜单 + 对应的 API（按 code 区分权限策略）"""
     all_menus = await Menu.all()
     all_menu_ids = {m.id for m in all_menus}
     all_apis = await Api.all()
@@ -731,22 +725,23 @@ async def _sync_existing_roles():
         if not missing_ids:
             continue
 
-        # 只添加该角色已有父菜单的新增菜单，防止越权授予
+        # 按 code 区分策略：admin 拥有全部，user 仅增量
+        is_admin = role.code == "admin"
+
         missing_menus = []
         for m in all_menus:
-            if m.id in missing_ids:
-                # 根菜单（parent_id=0）且角色名是 "admin" 才自动添加
-                if m.parent_id == 0:
-                    if role.name.lower() == "admin":
-                        missing_menus.append(m)
-                # 子菜单：仅当角色已有其父菜单时才添加
-                elif m.parent_id in role_menu_ids:
+            if m.id not in missing_ids:
+                continue
+            if m.parent_id == 0:
+                if is_admin:
                     missing_menus.append(m)
+            elif m.parent_id in role_menu_ids:
+                missing_menus.append(m)
 
         if missing_menus:
             await role.menus.add(*missing_menus)
             await _grant_menu_apis(role, missing_menus, all_apis)
-            logger.info(f"[init_roles] 角色 {role.name} 新增菜单: {[m.name for m in missing_menus]}")
+            logger.info(f"[init_roles] 角色 {role.name}({role.code}) 新增菜单: {[m.name for m in missing_menus]}")
 
 
 async def _grant_menu_apis(role, menus, all_apis=None):
@@ -903,8 +898,9 @@ async def _release_init_lock(lock_key: str):
 # ── 5.3 启动入口 ──
 
 async def init_essential():
-    """应用启动最小初始化：DB 迁移 + 清理僵尸任务 + 增量同步
+    """应用启动轻量初始化：DB 检查 + 僵尸任务清理 + 幂等种子同步
 
+    不包含主键修复、用户去重等高风险操作。
     菜单/角色/Provider 同步受分布式锁保护，多 Worker 仅一个执行。
     """
     t0 = time.perf_counter()
@@ -912,11 +908,7 @@ async def init_essential():
 
     t = time.perf_counter()
     await init_db()
-    steps.append(("DB 迁移", time.perf_counter() - t))
-
-    t = time.perf_counter()
-    await _deduplicate_users()
-    steps.append(("用户去重", time.perf_counter() - t))
+    steps.append(("DB 检查", time.perf_counter() - t))
 
     t = time.perf_counter()
     await recover_stale_jobs()
@@ -937,7 +929,6 @@ async def init_essential():
             await init_providers()
         finally:
             await _release_init_lock("init_providers")
-    # Provider 初始化后立即加载到线程安全缓存（CloudflareService 等同步读取依赖此缓存）
     from app.utils.provider_resolver import _load_configs_to_cache
     await _load_configs_to_cache()
     steps.append(("Provider 同步", time.perf_counter() - t))
@@ -948,9 +939,10 @@ async def init_essential():
 
 
 async def init_data():
-    """完整数据初始化：init_essential + 种子数据（超级用户、全局配置、API）
+    """种子数据初始化入口（幂等，不做数据库修复/迁移）。
 
-    init_essential 已完成菜单/角色/Provider 增量同步，此处仅补充首次启动种子数据。
+    职责：超级用户、全局配置、API 同步。
+    菜单/角色/Provider 同步由 init_essential() 完成。
     """
     await init_essential()
     await init_superuser()

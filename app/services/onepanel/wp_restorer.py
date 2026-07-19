@@ -12,6 +12,13 @@ from app.utils.provider_resolver import ProviderResolver
 from app.core.exceptions import WordPressOperationError
 from .client import OnePanelAPI
 from .file_manager import OnePanelFileManager
+from .php_client import (
+    PHPClient,
+    PHPClientError,
+    PHPClientNetworkError,
+    PHPClientResponseError,
+    PHPClientServerError,
+)
 from .utils import _log, _provider_value, normalize_domain
 
 
@@ -73,6 +80,8 @@ class OnePanelWordPressRestorer:
         self.woo_fetch_retries = int(cfgs.get('OP_WOO_FETCH_RETRIES') or '8')
         self.woo_fetch_interval = int(cfgs.get('OP_WOO_FETCH_INTERVAL') or '5')
         self.ctk_token = cfgs.get('OP_CTK_TOKEN') or ''
+        # PHP HTTP 客户端（统一重试/错误处理/脱敏）
+        self.php_client = PHPClient(verify_ssl=self.wp_verify_ssl, default_timeout=60.0)
 
     def _data_root(self, service_name: str) -> str:
         """WordPress data 根目录（wp-config.php 和 PHP 脚本都在这里）"""
@@ -368,30 +377,18 @@ echo json_encode([
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
-        """通过 HTTP 调用域名替换 PHP 脚本"""
-        urls = [
-            f'http://{domain}/domain-replace.php?token={token}',
-            f'https://{domain}/domain-replace.php?token={token}',
-        ]
-        last_error = ''
-        for _ in range(6):
-            for url in urls:
-                try:
-                    resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
-                    if resp.status_code != 200:
-                        last_error = _extract_wp_error(resp)
-                        continue
-                    if not resp.text or not resp.text.strip():
-                        last_error = "empty response body"
-                        continue
-                    data = resp.json()
-                    if data.get('code') == 200:
-                        return data
-                    last_error = resp.text[:500]
-                except Exception as exc:
-                    last_error = str(exc)
-            time.sleep(5)
-        raise WordPressOperationError("domain replace", detail=last_error)
+        """通过 HTTP 调用域名替换 PHP 脚本（统一重试/错误处理）"""
+        path = f"domain-replace.php?token={token}"
+        try:
+            return self.php_client.fetch_with_fallback(
+                domain=domain, path=path, step="domain_replace",
+                success_check=lambda d: d.get("code") == 200,
+                max_retries=3,
+            )
+        except PHPClientError as e:
+            raise WordPressOperationError("domain replace", detail=str(e))
+        except Exception as e:
+            raise WordPressOperationError("domain replace", detail=str(e))
 
     # --- wp-config ---
 
@@ -427,15 +424,6 @@ echo json_encode([
 
         self.file_manager.save(path, content)
 
-    # --- HTTP 请求辅助 ---
-
-    def _build_fetch_urls(self, domain: str, path: str) -> list:
-        """构建 URL 列表，优先 HTTPS，回退 HTTP。"""
-        return [
-            (f'https://{domain}/{path}', {}, self.wp_verify_ssl),
-            (f'http://{domain}/{path}', {}, False),
-        ]
-
     # --- WooCommerce Key ---
 
     def inject_woo_script(self, service_name: str) -> str:
@@ -468,21 +456,21 @@ echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.woo_script}', is_dir=False)
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
-        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key。"""
-        path = f'{self.woo_script}?token={token}'
-        urls = self._build_fetch_urls(domain, path)
-        for _ in range(self.woo_fetch_retries):
-            for url, headers, verify in urls:
-                try:
-                    resp = httpx.get(url, headers=headers, timeout=30, verify=verify, follow_redirects=True)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data.get('code') == 200 and data.get('consumer_key') and data.get('consumer_secret'):
-                            return data['consumer_key'], data['consumer_secret']
-                except Exception:
-                    pass
-            time.sleep(self.woo_fetch_interval)
-        raise WordPressOperationError("get woo key")
+        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key（统一重试/错误处理）"""
+        path = f"{self.woo_script}?token={token}"
+        try:
+            data = self.php_client.fetch_with_fallback(
+                domain=domain, path=path, step="woo_keys",
+                success_check=lambda d: (
+                    d.get("code") == 200
+                    and d.get("consumer_key")
+                    and d.get("consumer_secret")
+                ),
+                max_retries=3,
+            )
+            return data["consumer_key"], data["consumer_secret"]
+        except PHPClientError as e:
+            raise WordPressOperationError("get woo key", detail=str(e))
 
     # --- CTX / Feed 刷新 ---
 
@@ -609,35 +597,34 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
 
     def fetch_feed_links(self, ctx_refresh_url: str) -> list:
-        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表，返回扁平的 URL 字符串列表。
-        自动过滤 logs 目录。"""
+        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表（统一重试/错误处理）。
+
+        返回扁平的 URL 字符串列表，自动过滤 logs 目录。
+        """
         if not ctx_refresh_url:
             return []
+
         from urllib.parse import urlparse
+
         parsed = urlparse(ctx_refresh_url)
         domain = parsed.hostname
-        path = parsed.path.lstrip('/')
+        path = parsed.path.lstrip("/")
         if parsed.query:
-            path = f'{path}?{parsed.query}'
-        urls = self._build_fetch_urls(domain, path)
-        for i in range(1, 7):
-            for url, headers, verify in urls:
-                try:
-                    resp = httpx.get(url, headers=headers, timeout=60, verify=verify, follow_redirects=True)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        links = data.get('feed_links') or []
-                        if isinstance(links, list) and links:
-                            links = [str(l) for l in links]
-                            links = [l for l in links if '/logs/' not in l]
-                            _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
-                            return links
-                        _log.warning("CTX 刷新未返回 feed_links，第 %s/6 次", i)
-                except Exception as exc:
-                    _log.warning("CTX 刷新链接请求失败，第 %s/6 次：%s", i, exc)
-            time.sleep(5)
-        _log.warning("CTX Feed_Link 获取失败")
-        return []
+            path = f"{path}?{parsed.query}"
+
+        try:
+            data = self.php_client.fetch_with_fallback(
+                domain=domain, path=path, step="ctx_feed",
+                success_check=lambda d: isinstance(d.get("feed_links"), list) and len(d["feed_links"]) > 0,
+                max_retries=3,
+            )
+            links = [str(l) for l in (data.get("feed_links") or [])]
+            links = [l for l in links if "/logs/" not in l]
+            _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
+            return links
+        except PHPClientError as e:
+            _log.warning("CTX Feed_Link 获取失败: %s", e)
+            return []
 
     def fetch_last_feed_link(self, ctx_refresh_url: str) -> Optional[str]:
         """获取第一个 feed 链接（logs 已在 fetch_feed_links 中过滤）"""
@@ -646,17 +633,23 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
 
     def health_check(self, domain: str, protocol: str) -> bool:
-        """对创建完成的 WordPress 站点做基础健康检查（带重试）。"""
-        import httpx as _h
-        import time as _time
+        """对创建完成的 WordPress 站点做基础健康检查（带重试）。
 
+        使用 php_client.raw_request 统一处理网络重试和日志脱敏，
+        保留 WP 特有的 body/URL 模式匹配逻辑。
+        """
         paths = ['wp-login.php', '']
+        client = self.php_client
+
         for attempt in range(1, 11):
             for path in paths:
-                urls = self._build_fetch_urls(domain, path)
-                for url, headers, verify in urls:
+                for proto in ("https", "http"):
                     try:
-                        resp = _h.get(url, headers=headers, timeout=30, verify=verify, follow_redirects=True)
+                        verify = self.wp_verify_ssl if proto == "https" else False
+                        # 临时覆盖 SSL 验证
+                        client.verify_ssl = verify
+                        resp = client.raw_request("GET", f"{proto}://{domain}/{path.lstrip('/')}", max_retries=1)
+
                         if resp.status_code not in (200, 301, 302):
                             continue
 
@@ -666,9 +659,9 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
                         if any(x in final_url for x in ['/wp-login.php', '/wp-admin', domain.lower()]):
                             if 'wordpress' in text or 'wp-login' in text or 'wp-content' in text or 'user_login' in text:
                                 return True
-                    except Exception:
+                    except PHPClientError:
                         pass
             if attempt < 10:
-                _time.sleep(10)
+                time.sleep(10)
 
         return False

@@ -25,6 +25,7 @@ class User(BaseModel, TimestampMixin):
 
 class Role(BaseModel, TimestampMixin):
     name = fields.CharField(max_length=20, unique=True, description="角色名称", db_index=True)
+    code = fields.CharField(max_length=64, unique=True, description="角色编码（admin / user，用于逻辑判断）", db_index=True)
     desc = fields.CharField(max_length=500, null=True, description="角色描述")
     data_scope = fields.IntEnumField(DataScope, default=DataScope.SELF_ONLY, description="数据权限范围", db_index=True)
     menus = fields.ManyToManyField("models.Menu", related_name="role_menus")
@@ -44,6 +45,7 @@ class Api(BaseModel, TimestampMixin):
 
     class Meta:
         table = "api"
+        unique_together = [("path", "method")]
 
 
 class Menu(BaseModel, TimestampMixin):
@@ -61,6 +63,7 @@ class Menu(BaseModel, TimestampMixin):
 
     class Meta:
         table = "menu"
+        unique_together = [("path", "parent_id")]
 
 
 class Dept(BaseModel, TimestampMixin):

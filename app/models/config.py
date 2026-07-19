@@ -16,7 +16,7 @@ class Config(BaseModel, TimestampMixin):
         ('general', '通用'),
     ]
 
-    name = fields.CharField(max_length=100, description="配置键名", db_index=True)
+    name = fields.CharField(max_length=100, unique=True, description="配置键名", db_index=True)
     value = fields.TextField(default="", description="配置值")
     description = fields.CharField(max_length=255, null=True, description="配置说明")
     category = fields.CharField(max_length=50, choices=CATEGORY_CHOICES, description="配置分类", db_index=True)

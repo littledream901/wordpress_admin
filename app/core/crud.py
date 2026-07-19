@@ -27,7 +27,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         try:
             return await self.model.get(id=id)
         except MultipleObjectsReturned:
-            # 兼容历史脏数据（如缺失主键导致重复 id），回退 filter().first()
+            _log.error(
+                "[CRUD.get] 数据异常：模型 %s 存在多条 id=%s 的记录，"
+                "可能缺少 PRIMARY KEY 约束。返回第一条，请尽快执行修复脚本。",
+                self.model.__name__, id
+            )
             return await self.model.filter(id=id).first()
 
     async def get_or_none(self, id: int) -> ModelType | None:

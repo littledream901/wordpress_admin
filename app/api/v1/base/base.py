@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt as pyjwt
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.controllers.user import user_controller
 from app.core.ctx import CTX_USER_ID
 from app.core.dependency import DependAuth
+from app.log import logger
 from app.models.admin import Api, Menu, Role, User
 from app.schemas.base import Fail, Success
 from app.schemas.login import *
@@ -13,6 +14,7 @@ from app.schemas.users import UpdatePassword
 from app.settings import settings
 from app.utils.jwt_utils import create_access_token, create_refresh_token, decode_refresh_token
 from app.utils.password import get_password_hash, verify_password
+from tortoise.exceptions import DoesNotExist, MultipleObjectsReturned
 
 router = APIRouter()
 
@@ -78,7 +80,18 @@ async def refresh_access_token(payload: RefreshTokenIn):
 @router.get("/userinfo", summary="查看用户信息", dependencies=[DependAuth])
 async def get_userinfo():
     user_id = CTX_USER_ID.get()
-    user_obj = await user_controller.get(id=user_id)
+    try:
+        user_obj = await user_controller.get(id=user_id)
+    except DoesNotExist:
+        logger.warning(f"[userinfo] 用户不存在 user_id={user_id}")
+        raise HTTPException(status_code=401, detail="用户不存在或已失效，请重新登录")
+    except MultipleObjectsReturned:
+        logger.error(f"[userinfo] 用户数据异常(重复记录) user_id={user_id}")
+        raise HTTPException(status_code=500, detail="用户数据异常，请联系管理员")
+    except Exception as e:
+        logger.error(f"[userinfo] 获取用户信息异常 user_id={user_id}: {e}")
+        raise HTTPException(status_code=500, detail="服务异常，请稍后重试")
+
     if not user_obj:
         raise HTTPException(status_code=401, detail="用户不存在或已失效，请重新登录")
     data = await user_obj.to_dict(exclude_fields=["password"])

@@ -1,6 +1,14 @@
 #!/bin/bash
 # =============================================
 #  Wordpress Admin — 部署/更新/管理脚本
+#
+#  标准部署生命周期:
+#    1. 备份数据库 (mysqldump)
+#    2. 拉取代码 / 构建镜像
+#    3. 滚动重启 (docker compose stop → up -d)
+#    4. 容器内自动执行迁移 (entrypoint.sh: aerich upgrade → seed)
+#    5. 健康检查 (curl /health)
+#    6. 失败回滚提示
 # =============================================
 set -euo pipefail
 

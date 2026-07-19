@@ -38,13 +38,11 @@ if _HAS_FASTAPI:
             )
         if not settings.DEFAULT_PASSWORD:
             logger.warning("DEFAULT_PASSWORD 未设置，新用户创建将使用空密码")
+
+        # 生产环境高风险配置告警
         if not settings.DEBUG:
-            if settings.CORS_ORIGINS == ["*"] or settings.CORS_ORIGINS == ["http://localhost"]:
-                logger.warning(
-                    "CORS_ORIGINS 为默认值（[\"*\"] 或 [\"http://localhost\"]），"
-                    "生产环境建议指定具体域名。"
-                    "  示例: CORS_ORIGINS=[\"https://your-domain.com\"]"
-                )
+            for w in settings.validate_production_settings():
+                logger.warning(f"[配置] {w}")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
