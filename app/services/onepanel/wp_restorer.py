@@ -363,17 +363,32 @@ echo json_encode([
     def remove_domain_replace_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
 
+    @staticmethod
+    def _build_urls(domain: str, path: str, include_public: bool = True) -> list:
+        """构建 URL 列表：优先 Docker 内部网络直连宿主机 OpenResty，绕过公网 CDN/Cloudflare。
+
+        host.docker.internal → Docker 宿主机（Docker Desktop / Linux with host-gateway）
+        172.17.0.1 → Docker 默认 bridge 网关（Linux 宿主机）
+        """
+        internal = [
+            (f'http://host.docker.internal{path}', {'Host': domain}),
+            (f'http://172.17.0.1{path}', {'Host': domain}),
+        ]
+        if include_public:
+            return internal + [
+                (f'http://{domain}{path}', {}),
+                (f'https://{domain}{path}', {}),
+            ]
+        return internal
+
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
         """通过 HTTP 调用域名替换 PHP 脚本"""
-        urls = [
-            f'http://{domain}/domain-replace.php?token={token}',
-            f'https://{domain}/domain-replace.php?token={token}',
-        ]
+        urls = self._build_urls(domain, f'/domain-replace.php?token={token}')
         last_error = ''
         for _ in range(6):
-            for url in urls:
+            for url, headers in urls:
                 try:
-                    resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
+                    resp = httpx.get(url, headers=headers, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code != 200:
                         last_error = _extract_wp_error(resp)
                         continue
@@ -456,13 +471,12 @@ echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
         """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key"""
-        urls = [f'{protocol}://{domain}/{self.woo_script}?token={token}']
-        if protocol == 'https':
-            urls.append(f'http://{domain}/{self.woo_script}?token={token}')
+        urls = self._build_urls(domain, f'/{self.woo_script}?token={token}')
         for _ in range(self.woo_fetch_retries):
-            for url in urls:
+            for url, headers in urls:
                 try:
-                    resp = httpx.get(url, timeout=30, verify=self.wp_verify_ssl, follow_redirects=True)
+                    resp = httpx.get(url, headers=headers, timeout=30,
+                                     verify=self.wp_verify_ssl, follow_redirects=True)
                     if resp.status_code == 200:
                         data = resp.json()
                         if data.get('code') == 200 and data.get('consumer_key') and data.get('consumer_secret'):
@@ -600,9 +614,16 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表，返回扁平的 URL 字符串列表。自动过滤 logs 目录。"""
         if not ctx_refresh_url:
             return []
+        import urllib.parse as _up
+        _parsed = _up.urlparse(ctx_refresh_url)
+        _domain = _parsed.hostname or ''
+        _path_qs = f'{_parsed.path}?{_parsed.query}' if _parsed.query else _parsed.path
+        urls = self._build_urls(_domain, _path_qs) if _domain else [(ctx_refresh_url, {})]
         for i in range(1, 7):
-            try:
-                resp = httpx.get(ctx_refresh_url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
+            for url, headers in urls:
+                try:
+                    resp = httpx.get(url, headers=headers, timeout=60,
+                                     verify=self.wp_verify_ssl, follow_redirects=True)
                 if resp.status_code == 200:
                     data = resp.json()
                     links = data.get('feed_links') or []
