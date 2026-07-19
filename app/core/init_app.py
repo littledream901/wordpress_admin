@@ -834,7 +834,7 @@ async def _ensure_lock_table():
             instance_id VARCHAR(128) NOT NULL,
             acquired_at TEXT NOT NULL,
             expires_at TEXT NOT NULL
-        )
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """)
 
 

@@ -36,6 +36,7 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         _use_soft_delete = hasattr(self.model, 'is_deleted')
         if _use_soft_delete:
             # 用 __not=True 代替 =False，修复 Tortoise SQLite 方言 BooleanField 过滤不匹配的 bug
+            # MySQL 下 BooleanField → TINYINT(1)，__not=True 等价于 =False
             query = query.filter(is_deleted__not=True)
         try:
             return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)

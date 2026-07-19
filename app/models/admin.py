@@ -68,7 +68,7 @@ class Dept(BaseModel, TimestampMixin):
     desc = fields.CharField(max_length=500, null=True, description="备注")
     is_deleted = fields.BooleanField(default=False, description="软删除标记", db_index=True)
     order = fields.IntField(default=0, description="排序", db_index=True)
-    parent_id = fields.IntField(default=0, max_length=10, description="父部门ID", db_index=True)
+    parent_id = fields.IntField(default=0, description="父部门ID", db_index=True)
 
     class Meta:
         table = "dept"
