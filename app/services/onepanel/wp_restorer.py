@@ -223,6 +223,8 @@ class OnePanelWordPressRestorer:
 
     def inject_domain_replace_script(self, service_name: str, old_domain: str, new_domain: str, target_protocol: str) -> str:
         """注入域名替换 PHP 脚本（处理 PHP serialize），返回 security token"""
+        # 先禁用插件，避免 wp-load.php 因插件 Fatal error 崩溃
+        self._disable_plugins(service_name)
         if not old_domain:
             old_domain = self.old_source_domain
         token = secrets.token_urlsafe(32)
@@ -345,6 +347,38 @@ echo json_encode([
 
     def remove_domain_replace_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
+        # 恢复插件
+        self._enable_plugins(service_name)
+
+    # --- 插件临时禁用（避免 wp-load.php 加载时 Fatal error） ---
+
+    def _disable_plugins(self, service_name: str) -> None:
+        """禁用 WordPress 插件目录（重命名），返回旧目录名用于恢复"""
+        plugins_dir = f'{self._data_root(service_name)}/wp-content/plugins'
+        backup_dir = f'{self._data_root(service_name)}/wp-content/plugins._domain_replace_disabled'
+        try:
+            if self.file_manager.exists(plugins_dir):
+                # 清理上次可能残留的备份
+                if self.file_manager.exists(backup_dir):
+                    self.file_manager.delete(backup_dir, is_dir=True)
+                self.file_manager.move([plugins_dir], backup_dir, 'cut', wait=1)
+                _log.info("已禁用 WordPress 插件目录：%s → %s", plugins_dir, backup_dir)
+        except Exception as exc:
+            _log.warning("禁用插件目录失败（域名替换仍会继续）：%s", exc)
+
+    def _enable_plugins(self, service_name: str) -> None:
+        """恢复 WordPress 插件目录"""
+        plugins_dir = f'{self._data_root(service_name)}/wp-content/plugins'
+        backup_dir = f'{self._data_root(service_name)}/wp-content/plugins._domain_replace_disabled'
+        try:
+            if self.file_manager.exists(backup_dir) and not self.file_manager.exists(plugins_dir):
+                self.file_manager.move([backup_dir], plugins_dir, 'cut', wait=1)
+                _log.info("已恢复 WordPress 插件目录：%s", plugins_dir)
+            elif self.file_manager.exists(backup_dir):
+                self.file_manager.delete(backup_dir, is_dir=True)
+                _log.info("清理残留的插件备份目录：%s", backup_dir)
+        except Exception as exc:
+            _log.warning("恢复插件目录失败：%s", exc)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
         """通过 HTTP 调用域名替换 PHP 脚本"""
