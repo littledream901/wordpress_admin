@@ -4,6 +4,7 @@ from typing import Any, Dict, Generic, List, NewType, Tuple, Type, TypeVar, Unio
 import logging
 
 from pydantic import BaseModel
+from tortoise.exceptions import MultipleObjectsReturned
 from tortoise.expressions import Q
 from tortoise.models import Model
 from tortoise.transactions import in_transaction
@@ -23,7 +24,12 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         self.model = model
 
     async def get(self, id: int) -> ModelType:
-        return await self.model.get(id=id)
+        # MySQL 兼容：SQLite→MySQL 迁移可能产生重复记录，.get() 会抛 MultipleObjectsReturned
+        try:
+            return await self.model.get(id=id)
+        except MultipleObjectsReturned:
+            _log.warning("MultipleObjectsReturned for %s id=%s, using first", self.model.__name__, id)
+            return await self.model.filter(id=id).first()
 
     async def get_or_none(self, id: int) -> ModelType | None:
         return await self.model.filter(id=id).first()
