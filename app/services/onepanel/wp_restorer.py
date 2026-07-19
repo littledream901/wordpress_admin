@@ -15,6 +15,34 @@ from .file_manager import OnePanelFileManager
 from .utils import _log, _provider_value, normalize_domain
 
 
+def _extract_wp_error(resp: httpx.Response) -> str:
+    """从 WordPress 错误页 HTML 中提取有意义的错误信息。"""
+    status = resp.status_code
+    body = resp.text or ""
+    # 尝试解析 JSON（PHP shutdown handler 可能已输出 JSON fatal error）
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and 'error' in data:
+            return f"HTTP {status}: {data.get('error', '')} (line {data.get('line', '?')})"
+        return f"HTTP {status}: {body[:200]}"
+    except Exception:
+        pass
+    title_m = re.search(r'<title>(.*?)<\/title>', body, re.IGNORECASE)
+    title = title_m.group(1) if title_m else ""
+    paragraphs = re.findall(r'<p[^>]*>(.*?)<\/p>', body, re.IGNORECASE)
+    msg_parts = [re.sub(r'<[^>]+>', '', p).strip() for p in paragraphs]
+    msg_parts = [p for p in msg_parts if p]
+    parts = [f"HTTP {status}"]
+    if title:
+        parts.append(title)
+    if msg_parts:
+        parts.append(" | ".join(msg_parts[:3]))
+    if not title and not msg_parts:
+        plain = re.sub(r'<[^>]+>', ' ', body).strip()
+        parts.append(' '.join(plain.split())[:300])
+    return ": ".join(parts)
+
+
 class OnePanelWordPressRestorer:
     """WordPress 站点后处理 —— 文件恢复、域名替换、Woo Key/CTX 注入"""
 
@@ -324,6 +352,12 @@ echo json_encode([
             for url in urls:
                 try:
                     resp = httpx.get(url, timeout=60, verify=self.wp_verify_ssl, follow_redirects=True)
+                    if resp.status_code != 200:
+                        last_error = _extract_wp_error(resp)
+                        continue
+                    if not resp.text or not resp.text.strip():
+                        last_error = "empty response body"
+                        continue
                     data = resp.json()
                     if data.get('code') == 200:
                         return data
