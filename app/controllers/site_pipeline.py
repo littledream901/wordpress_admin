@@ -313,10 +313,10 @@ class SitePipelineController:
         dept_map, user_map, gmail_map = {}, {}, {}
         if dept_ids:
             depts = await Dept.filter(id__in=list(dept_ids)).all()
-            dept_map = {d.id: d.name for d in depts}
+            dept_map = {d.pk: d.name for d in depts}
         if user_ids:
             users = await User.filter(id__in=list(user_ids)).all()
-            user_map = {u.id: u.username for u in users}
+            user_map = {getattr(u, 'pk', getattr(u, 'id', None)): u.username for u in users}
         gmails = await GmailAccount.filter(assigned_site_id__in=site_ids_list).all()
         gmail_map = {g.assigned_site_id: g for g in gmails}
         data = []
@@ -372,9 +372,9 @@ class SitePipelineController:
                     default_map[ptype] = dp
 
         bound_pids = set(bound_provider_ids)
-        all_pids = bound_pids | {default_map[ptype].id for ptype in CORE_TYPES if ptype in default_map}
+        all_pids = bound_pids | {getattr(default_map[ptype], 'pk', default_map[ptype].id) for ptype in CORE_TYPES if ptype in default_map}
         provider_records = await ConfigProvider.filter(id__in=list(all_pids)).all() if all_pids else []
-        provider_map = {p.id: p for p in provider_records}
+        provider_map = {getattr(p, 'pk', p.id): p for p in provider_records}
 
         providers = {}
         for ptype in CORE_TYPES:
@@ -415,8 +415,8 @@ class SitePipelineController:
             site.create_by = site_in.assign_to
             site.dept_id = assigned_user.dept_id if assigned_user else current_user.dept_id
         else:
-            site.create_by = current_user.id
-            site.dept_id = site_in.dept_id if site_in.dept_id is not None else current_user.dept_id
+            site.create_by = getattr(current_user, 'pk', current_user.id)
+            site.dept_id = site_in.dept_id if site_in.dept_id is not None else getattr(current_user, 'dept_id', None)
         await site.save()
         return {"ok": True, "data": {"id": site.id}}
 
@@ -478,9 +478,9 @@ class SitePipelineController:
             p = await ConfigProvider.filter(id=binding.provider_id, status='active').first()
             if p:
                 candidates.append(p)
-                seen_ids.add(p.id)
+                seen_ids.add(getattr(p, 'pk', p.id))
         default_p = await ConfigProvider.get_default('onepanel')
-        if default_p and default_p.id not in seen_ids:
+        if default_p and getattr(default_p, 'pk', default_p.id) not in seen_ids:
             candidates.append(default_p)
         if not candidates:
             return {"status": "skip", "detail": "无可用 onepanel provider"}
@@ -491,7 +491,7 @@ class SitePipelineController:
         return {"status": "not_found", "detail": "所有 provider 上均未找到"}
 
     async def _try_delete_on_provider_by_domain(self, domain: str, provider) -> dict:
-        cfgs = await ProviderConfigItem.get_map(provider.id)
+        cfgs = await ProviderConfigItem.get_map(getattr(provider, 'pk', provider.id))
         base_url = _build_onepanel_url(cfgs)
         api_key = str(cfgs.get('api_key', cfgs.get('OP_API_KEY', '')))
         if not base_url or not api_key:
@@ -670,9 +670,9 @@ class SitePipelineController:
         blocked = await self._check_provision_blocked(site_id)
         if blocked:
             return {"ok": False, "error": "该站点已有建站任务执行中", "code": 400}
-        job = await self._create_job(site_id, site.domain, "provision", total_steps=10)
+        job = await self._create_job(site_id, site.domain, "provision", total_steps=12)
         asyncio.create_task(self._run_provision_bg(job, site))
-        return {"ok": True, "data": {"job_id": job.id, "step": "create_site", "total_steps": 10}}
+        return {"ok": True, "data": {"job_id": job.id, "step": "create_site", "total_steps": 12}}
 
     async def _run_provision_bg(self, job: OperationJob, site):
         async with _provision_semaphore:
