@@ -226,6 +226,7 @@ async def init_db():
         "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN last_task_status VARCHAR(32) DEFAULT ''",
         "ALTER TABLE site_pipeline_hubstudio_agent_heartbeat ADD COLUMN total_tasks INTEGER DEFAULT 0",
         # -- config --
+        "ALTER TABLE config ADD COLUMN value TEXT DEFAULT ''",
         "ALTER TABLE config ADD COLUMN is_secret BOOLEAN DEFAULT 0",
         "ALTER TABLE config ADD COLUMN is_enabled BOOLEAN DEFAULT 1",
         # -- account --
