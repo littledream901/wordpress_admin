@@ -561,8 +561,7 @@ const columns = [
     render: (r) => r.platform === 'shopify' ? h('span', { style: 'color:#999' }, '-') : (r.server_ip || '-'),
   },
   { title: '平台', key: 'platform', width: 60, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
-  { title: 'CF 状态', key: 'cloudflare_status', width: 80, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
-  { title: 'Dynadot', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
+  { title: 'CF 状态', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已建站' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
   { title: '产品数', key: 'woo_product_count', width: 80, align: 'center',
     render: (row) => {
@@ -714,7 +713,7 @@ const batchActions = [
   { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
-  { label: '批量分配', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
+  { label: '批量分配用户', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
   { label: '批量删除', key: 'delete', icon: 'mdi:delete', permission: 'post/api/v1/site-pipeline/site/batch-delete' },
 ]
 
