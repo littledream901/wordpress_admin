@@ -231,7 +231,7 @@ class OnePanelWordPressRestorer:
             new_domain = normalize_domain(new_domain)
         except ValueError:
             pass
-        php = f'''<?php
+        php = rf'''<?php
 header('Content-Type: application/json; charset=utf-8');
 
 // 捕获 PHP Fatal error 输出诊断 JSON（shutdown 时 error_get_last 可拿到致命错误）

@@ -87,8 +87,8 @@ async def upgrade():
             else:
                 raise
 
-    # MySQL 模式：使用 generate_schemas 自动建表（safe=False 全量重建）
-    await Tortoise.generate_schemas(safe=False)
+    # 使用 generate_schemas 自动建表（safe=True 仅创建缺失的表）
+    await Tortoise.generate_schemas(safe=True)
     print('[INFO] 数据库表结构已同步 (generate_schemas)')
 
 asyncio.run(upgrade())

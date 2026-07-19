@@ -158,7 +158,8 @@ MENU_DEFINITIONS = [
 async def init_db():
     """初始化数据库表结构。
 
-    全新部署使用 safe=False 从模型定义全量建表。
+    使用 safe=True 仅创建缺失的表（模型 pk=True 会生成 PRIMARY KEY AUTO_INCREMENT），
+    重启时不会因表已存在而报错。
     """
     from tortoise import Tortoise
 
@@ -169,8 +170,8 @@ async def init_db():
     except ConfigurationError:
         pass  # 已经初始化，忽略
 
-    # 全量建表（模型 pk=True 会直接生成 PRIMARY KEY AUTO_INCREMENT）
-    await Tortoise.generate_schemas(safe=False)
+    # safe=True：仅创建缺失的表，重启时不会因表已存在而报错
+    await Tortoise.generate_schemas(safe=True)
 
 
 # ════════════════════════════════════════════════════════════════════════════
