@@ -628,7 +628,10 @@ class SitePipelineController:
     async def batch_assign_sites(self, site_ids: List[int], dept_id: int = None, assign_to: int = None) -> dict:
         updated = 0
         for sid in site_ids:
-            site = await site_controller.get(id=sid)
+            try:
+                site = await site_controller.get(id=sid)
+            except Exception:
+                continue
             if not site:
                 continue
             if assign_to:
@@ -682,7 +685,11 @@ class SitePipelineController:
     async def batch_provision(self, site_ids: List[int], batch_id: str = "") -> dict:
         results = []
         for site_id in site_ids:
-            site = await site_controller.get(id=site_id)
+            try:
+                site = await site_controller.get(id=site_id)
+            except Exception:
+                results.append({"site_id": site_id, "ok": False, "error": "site not found"})
+                continue
             if not site:
                 results.append({"site_id": site_id, "ok": False, "error": "site not found"})
                 continue
