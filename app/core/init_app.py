@@ -156,22 +156,131 @@ MENU_DEFINITIONS = [
 # ════════════════════════════════════════════════════════════════════════════
 
 async def init_db():
-    """初始化数据库表结构。
+    """初始化数据库表结构（幂等，可重复执行）。
 
-    使用 safe=True 仅创建缺失的表（模型 pk=True 会生成 PRIMARY KEY AUTO_INCREMENT），
-    重启时不会因表已存在而报错。
+    entrypoint.sh 已先行执行 generate_schemas(safe=True)，
+    此处仅做补充性检查和主键修复，不再重复建表。
+    本地开发未经过 entrypoint.sh 时仍需建表，通过检测 user 表是否存在来判断。
     """
-    from tortoise import Tortoise
+    from tortoise import Tortoise, connections
 
-    # 确保 Tortoise 已初始化
     from tortoise.exceptions import ConfigurationError
     try:
         await Tortoise.init(config=settings.TORTOISE_ORM)
     except ConfigurationError:
         pass  # 已经初始化，忽略
 
-    # safe=True：仅创建缺失的表，重启时不会因表已存在而报错
-    await Tortoise.generate_schemas(safe=True)
+    conn = connections.get("default")
+
+    # 检查是否已有业务表（以 user 表为准）
+    tables_ready = False
+    try:
+        result = await conn.execute_query("SHOW TABLES LIKE 'user'")
+        if result[1]:
+            tables_ready = True
+    except Exception:
+        pass
+
+    if not tables_ready:
+        await Tortoise.generate_schemas(safe=True)
+        logger.info("[init_db] 首次建表完成 (safe=True)")
+    else:
+        logger.info("[init_db] 业务表已存在，跳过建表")
+
+    # 确保所有业务表 id 列有 PRIMARY KEY（兼容历史脏数据）
+    await _ensure_primary_keys()
+
+
+async def _ensure_primary_keys():
+    """确保所有业务表 id 列有 PRIMARY KEY AUTO_INCREMENT 约束。
+
+    Tortoise safe=True 不会修改已存在的表，若历史表缺失主键需在此修复。
+    幂等：已有主键的表跳过。
+    """
+    from tortoise import connections
+
+    conn = connections.get("default")
+
+    # 获取当前数据库中缺少主键的业务表（排除无 id 列的 M2M 关联表）
+    db_name = settings.DB_NAME
+    rows = await conn.execute_query(
+        "SELECT t.TABLE_NAME FROM INFORMATION_SCHEMA.TABLES t "
+        "LEFT JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS c "
+        "ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME "
+        "AND c.CONSTRAINT_TYPE = 'PRIMARY KEY' "
+        "WHERE t.TABLE_SCHEMA = %s AND t.TABLE_TYPE = 'BASE TABLE' "
+        "AND t.TABLE_NAME != 'aerich' AND c.CONSTRAINT_NAME IS NULL "
+        "AND EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS col "
+        "WHERE col.TABLE_SCHEMA = t.TABLE_SCHEMA AND col.TABLE_NAME = t.TABLE_NAME AND col.COLUMN_NAME = 'id')",
+        [db_name]
+    )
+    tables_missing_pk = rows[1] if rows else []
+
+    if not tables_missing_pk:
+        return
+
+    repaired = 0
+    for row in tables_missing_pk:
+        table = row[0] if isinstance(row, (list, tuple)) else row.get("TABLE_NAME", "")
+        try:
+            await conn.execute_query(
+                f"ALTER TABLE `{table}` MODIFY COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY"
+            )
+            repaired += 1
+            logger.info(f"[repair_pk] {table}: PRIMARY KEY 已添加")
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate entry" in err:
+                logger.error(f"[repair_pk] {table}: 存在重复 id，需手动修复")
+            else:
+                logger.warning(f"[repair_pk] {table}: 修复失败 ({e})")
+
+    if repaired:
+        logger.info(f"[repair_pk] 完成：修复 {repaired} 张表的主键")
+
+
+async def _deduplicate_users():
+    """清理重复的用户记录。
+
+    按 username 分组，每组仅保留 id 最小的一条，
+    其余重复记录删除。
+    幂等：无重复时跳过。
+    """
+    from tortoise import connections
+    conn = connections.get("default")
+
+    try:
+        rows = await conn.execute_query(
+            "SELECT username, COUNT(*) AS cnt, GROUP_CONCAT(id ORDER BY id) AS ids "
+            "FROM `user` GROUP BY username HAVING cnt > 1"
+        )
+        duplicates = rows[1] if rows else []
+    except Exception:
+        return
+
+    if not duplicates:
+        return
+
+    for row in duplicates:
+        if isinstance(row, (list, tuple)):
+            username, _cnt, ids_str = row[0], row[1], row[2]
+        else:
+            username = row.get("username", "")
+            ids_str = str(row.get("ids", ""))
+        if not ids_str:
+            continue
+        id_list = [int(x) for x in str(ids_str).split(",")]
+        keeper_id = id_list[0]
+        remove_ids = id_list[1:]
+        logger.warning(
+            f"[dedup_user] username={username}: 保留 id={keeper_id}, 删除 {remove_ids}"
+        )
+        placeholders = ",".join(["%s"] * len(remove_ids))
+        await conn.execute_query(
+            f"DELETE FROM `user` WHERE id IN ({placeholders})", remove_ids
+        )
+
+    logger.info("[dedup_user] 重复用户已清理")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -181,39 +290,28 @@ async def init_db():
 # ── 4.1 超级用户 ──
 
 async def init_superuser():
-    """首次启动创建默认超级管理员；RESET_ADMIN_PASSWORD=true 时强制重置密码"""
+    """幂等创建默认超级管理员（get_or_create，不会重复插入）。
+
+    RESET_ADMIN_PASSWORD=true 时强制重置密码。
+    """
     from app.models.admin import User
     from app.utils.password import get_password_hash
 
-    if settings.RESET_ADMIN_PASSWORD:
-        admin = await User.filter(username="admin").first()
-        if admin:
-            admin.password = get_password_hash(settings.DEFAULT_PASSWORD)
-            await admin.save(update_fields=["password"])
-            logger.info("[init_superuser] RESET_ADMIN_PASSWORD=true，admin 密码已重置")
-        else:
-            await user_controller.create_user(
-                UserCreate(
-                    username="admin",
-                    email="admin@admin.com",
-                    password=settings.DEFAULT_PASSWORD,
-                    is_active=True,
-                    is_superuser=True,
-                )
-            )
-        return
+    hashed = get_password_hash(settings.DEFAULT_PASSWORD)
+    defaults = {
+        "email": "admin@admin.com",
+        "password": hashed,
+        "is_active": True,
+        "is_superuser": True,
+    }
 
-    if await user_controller.model.exists():
-        return
-    await user_controller.create_user(
-        UserCreate(
-            username="admin",
-            email="admin@admin.com",
-            password=settings.DEFAULT_PASSWORD,
-            is_active=True,
-            is_superuser=True,
-        )
-    )
+    user, created = await User.get_or_create(username="admin", defaults=defaults)
+    if created:
+        logger.info("[init_superuser] 管理员用户已创建")
+    elif settings.RESET_ADMIN_PASSWORD:
+        user.password = hashed
+        await user.save(update_fields=["password"])
+        logger.info("[init_superuser] RESET_ADMIN_PASSWORD=true，管理员密码已重置")
 
 
 # ── 4.2 菜单 ──
@@ -815,6 +913,10 @@ async def init_essential():
     t = time.perf_counter()
     await init_db()
     steps.append(("DB 迁移", time.perf_counter() - t))
+
+    t = time.perf_counter()
+    await _deduplicate_users()
+    steps.append(("用户去重", time.perf_counter() - t))
 
     t = time.perf_counter()
     await recover_stale_jobs()

@@ -4,6 +4,7 @@ from typing import Any, Dict, Generic, List, NewType, Tuple, Type, TypeVar, Unio
 import logging
 
 from pydantic import BaseModel
+from tortoise.exceptions import MultipleObjectsReturned
 from tortoise.expressions import Q
 from tortoise.models import Model
 from tortoise.transactions import in_transaction
@@ -23,7 +24,11 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         self.model = model
 
     async def get(self, id: int) -> ModelType:
-        return await self.model.get(id=id)
+        try:
+            return await self.model.get(id=id)
+        except MultipleObjectsReturned:
+            # 兼容历史脏数据（如缺失主键导致重复 id），回退 filter().first()
+            return await self.model.filter(id=id).first()
 
     async def get_or_none(self, id: int) -> ModelType | None:
         return await self.model.filter(id=id).first()
