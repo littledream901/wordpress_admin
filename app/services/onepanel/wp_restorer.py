@@ -233,10 +233,32 @@ class OnePanelWordPressRestorer:
             pass
         php = f'''<?php
 header('Content-Type: application/json; charset=utf-8');
+
+// 捕获 PHP Fatal error 输出诊断 JSON（shutdown 时 error_get_last 可拿到致命错误）
+register_shutdown_function(function() {{
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {{
+        http_response_code(500);
+        $msg = $err['message'];
+        // 脱敏路径
+        $msg = str_replace(dirname(__DIR__), '', $msg);
+        echo json_encode(['code' => 500, 'error' => $msg, 'file' => basename($err['file']), 'line' => $err['line']], JSON_UNESCAPED_UNICODE);
+        exit;
+    }}
+}});
+
 $token = '{token}';
 if (!isset($_GET['token']) || !hash_equals($token, $_GET['token'])) {{ http_response_code(403); echo json_encode(['code'=>403,'msg'=>'forbidden']); exit; }}
 define('WP_USE_THEMES', false);
-require_once __DIR__ . '/wp-load.php';
+
+try {{
+    require_once __DIR__ . '/wp-load.php';
+}} catch (\Throwable $e) {{
+    http_response_code(500);
+    echo json_encode(['code' => 500, 'error' => $e->getMessage(), 'file' => basename($e->getFile()), 'line' => $e->getLine()], JSON_UNESCAPED_UNICODE);
+    exit;
+}}
+
 global $wpdb;
 
 $oldDomain = '{old_domain}';
