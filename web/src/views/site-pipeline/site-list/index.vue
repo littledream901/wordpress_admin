@@ -560,7 +560,6 @@ const columns = [
   },
   { title: '平台', key: 'platform', width: 60, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   { title: '解析状态', key: 'cloudflare_status', width: 70, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
-  { title: '建站状态', key: 'onepanel_status', width: 70, render: (r) => statusTag(r.onepanel_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 70, render: (r) => statusTag(r.status), align: 'center' },
   { title: '产品数', key: 'woo_product_count', width: 70, align: 'center',
     render: (row) => {
