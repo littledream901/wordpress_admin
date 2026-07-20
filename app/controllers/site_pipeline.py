@@ -133,8 +133,8 @@ def _apply_dns_result_to_site(site, result: dict):
     if result.get("ok") is False:
         return
 
-    root_ok = result.get('root_ok', True)
-    www_ok = result.get('www_ok', True)
+    root_ok = result.get('root_ok', False)
+    www_ok = result.get('www_ok', False)
     dynadot_r = result.get('dynadot_result')
 
     log_entry = json.dumps({
@@ -556,8 +556,8 @@ class SitePipelineController:
                     break
             if op_site_id:
                 site.onepanel_site_id = op_site_id
-                if site.onepanel_status in ('', '待处理', 'site_created'):
-                    site.onepanel_status = 'exists_in_panel'
+                if site.onepanel_status in ('', '待处理', '创建中'):
+                    site.onepanel_status = '已存在'
                 await site.save()
         except Exception as e:
             _log.warning("同步 onepanel_status 失败: domain=%s error=%s", site.domain, e)

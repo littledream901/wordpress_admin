@@ -108,7 +108,7 @@ class ProvisionTaskRunner(TaskRunner):
             ]:
                 if hasattr(site, field):
                     setattr(site, field, value)
-            site.onepanel_status = 'site_created'
+            site.onepanel_status = '创建中'
             site.pipeline_status = 'onepanel:site_created'
             await site.save()
 
@@ -226,7 +226,7 @@ class ProvisionTaskRunner(TaskRunner):
             site.feed_link = feed_link
             if hasattr(site, 'protocol'):
                 site.protocol = protocol
-            site.onepanel_status = 'provision_success'
+            site.onepanel_status = '已创建'
             site.pipeline_status = 'onepanel:success'
             await site.save()
 
@@ -259,14 +259,14 @@ class ProvisionTaskRunner(TaskRunner):
                 _log.info("已同步 1Panel 站点信息: domain=%s site_id=%s", site.domain, op_site_id)
             # 无论 get_site_id 是否成功，都必须更新状态
             site.status = '已存在'
-            site.onepanel_status = 'exists_in_panel'
+            site.onepanel_status = '已存在'
             site.pipeline_status = 'onepanel:exists'
             await site.save()
             await self._complete_job(job, ok=False, error=str(exc), site=site)
         except Exception as exc:
             _log.exception("建站执行失败: %s", exc)
             site.status = '建站失败'
-            site.onepanel_status = 'provision_failed'
+            site.onepanel_status = '创建失败'
             site.pipeline_status = 'onepanel:failed'
             await site.save()
             await self._complete_job(job, ok=False, error=str(exc), site=site, exc=exc)
