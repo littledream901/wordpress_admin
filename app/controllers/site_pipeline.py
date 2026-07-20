@@ -152,19 +152,20 @@ def _apply_dns_result_to_site(site, result: dict):
     }, ensure_ascii=False)
     site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 
-    # 更新 CF / Dynadot 状态供前端展示
+    # 更新 CF / Dynadot 状态供前端展示（与 cloudflare_service.py 保持一致）
     if root_ok and www_ok:
-        site.cloudflare_status = 'success'
+        site.cloudflare_status = '已解析'
     elif root_ok or www_ok:
-        site.cloudflare_status = 'partial_success'
+        site.cloudflare_status = '部分失败'
     else:
-        site.cloudflare_status = 'failed'
+        site.cloudflare_status = '失败'
 
     if dynadot_r:
-        site.dynadot_status = 'success' if dynadot_r.get('success') else 'failed'
+        site.dynadot_status = 'ns_updated' if dynadot_r.get('success') else 'ns_failed'
     else:
         # Zone 已 active，NS 已正确配置，无需 Dynadot 操作
-        site.dynadot_status = 'success'
+        zone_status = result.get('zone_status', '')
+        site.dynadot_status = f'zone_{zone_status}' if zone_status else 'zone_active'
 
 
 def _run_dns_sync(site):
