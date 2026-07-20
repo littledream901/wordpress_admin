@@ -965,13 +965,13 @@ function startProvisionPolling(jobId, domain, siteId) {
     pending: false,
     retries: 0,
     pollCount: 0,
-    maxPollCount: 12,   // 12 × 5s = 60s 短轮询上限
+    maxPollCount: 20,   // 20 × 10s = 200s 短轮询上限
   })
 
   // 确保全局轮询已启动
   if (!provisionPoller) {
     registerStopAllPollingHandler(_stopProvisionPoll)
-    provisionPoller = setInterval(_pollAllProvision, 5000)
+    provisionPoller = setInterval(_pollAllProvision, 10000)
     _pollAllProvision()
   }
 }
@@ -985,12 +985,12 @@ async function _pollAllProvision() {
   }
 
   provisionPollRound++
-  // 每 3 轮（15秒）复查一次 pending 任务是否已启动
+  // 每 3 轮（30秒）复查一次 pending 任务是否已启动
   const recheckPending = provisionPollRound % 3 === 0
 
   const entries = [...provisionJobs.entries()]
   for (const [k, v] of entries) {
-    // ── 轮询上限检查：12 次 × 5s = 60s，超时引导任务中心 ──
+    // ── 轮询上限检查：20 次 × 10s = 200s，超时引导任务中心 ──
     v.pollCount = (v.pollCount || 0) + 1
     if (v.pollCount > (v.maxPollCount || 12)) {
       v.n.type = 'info'

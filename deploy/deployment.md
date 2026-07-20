@@ -28,6 +28,34 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 
 ---
 
+## 项目目录结构（生产环境关键路径）
+
+```
+wordpress-admin/
+├── app/                    # FastAPI 后端
+│   ├── api/v1/             # API 路由（仅路由注册和参数校验）
+│   ├── controllers/        # 业务逻辑层
+│   ├── models/             # 数据表模型
+│   ├── schemas/            # Pydantic 请求/响应模型
+│   ├── services/           # 第三方服务封装
+│   ├── core/               # 全局基础能力（认证/RBAC/CRUD/中间件）
+│   ├── utils/              # 通用工具函数
+│   └── settings/           # 全局配置
+├── web/                    # Vue 3 前端
+│   ├── src/
+│   │   ├── api/            # axios 请求封装（按模块拆分）
+│   │   ├── components/     # 公共组件
+│   │   ├── views/          # 页面视图
+│   │   ├── router/         # 动态路由
+│   │   └── store/          # Pinia 全局状态
+│   └── dist/               # 构建产物
+├── deploy/                 # 部署配置文件
+├── static/avatars/         # 用户头像上传目录
+└── migrations/             # Aerich 数据库迁移
+```
+
+---
+
 ## 环境要求
 
 | 依赖 | 最低版本 | 说明 |
@@ -36,6 +64,33 @@ Wordpress Admin 是一个基于 FastAPI + Vue 3 + Naive UI 构建的后台管理
 | Docker Compose | 2.0+ | 容器编排（`docker compose`） |
 | Git | 2.0+ | 克隆代码 |
 | curl | 任意 | 健康检查 |
+
+---
+
+## 环境配置说明
+
+部署时需要创建 `.env` 文件（`deploy.sh init` 会自动生成），核心配置：
+
+```bash
+# ========== 必填：安全 ==========
+SECRET_KEY=<自动生成>    # JWT 签名密钥，openssl rand -hex 32
+DEFAULT_PASSWORD=<自动生成>  # 管理员初始密码
+
+# ========== 必填：数据库 ==========
+DB_ENGINE=mysql
+DB_HOST=db              # Docker Compose 内部服务名
+DB_PORT=3306
+DB_USER=admin
+DB_PASSWORD=<自动生成>   # MySQL 业务用户密码
+DB_NAME=vue_fastapi_admin
+
+# ========== MySQL root 密码 ==========
+MYSQL_ROOT_PASSWORD=<自动生成>
+
+# ========== 必填：运行模式 ==========
+DEBUG=false             # 生产环境必须为 false
+CORS_ORIGINS=["https://admin.your-domain.com"]
+```
 
 ---
 
@@ -119,29 +174,46 @@ bash deploy/deploy.sh init
 
 ---
 
-## 环境配置说明
+## HTTPS 反向代理
 
-部署时需要创建 `.env` 文件（`deploy.sh init` 会自动生成），核心配置：
+容器监听 `80` 端口（HTTP），生产环境建议在前置 Nginx 或 Caddy 处理 HTTPS。
 
-```bash
-# ========== 必填：安全 ==========
-SECRET_KEY=<自动生成>    # JWT 签名密钥，openssl rand -hex 32
-DEFAULT_PASSWORD=<自动生成>  # 管理员初始密码
+### Nginx 反向代理
 
-# ========== 必填：数据库 ==========
-DB_ENGINE=mysql
-DB_HOST=db              # Docker Compose 内部服务名
-DB_PORT=3306
-DB_USER=admin
-DB_PASSWORD=<自动生成>   # MySQL 业务用户密码
-DB_NAME=vue_fastapi_admin
+```nginx
+server {
+    listen 80;
+    server_name admin.your-domain.com;
+    return 301 https://$host$request_uri;
+}
 
-# ========== MySQL root 密码 ==========
-MYSQL_ROOT_PASSWORD=<自动生成>
+server {
+    listen 443 ssl http2;
+    server_name admin.your-domain.com;
 
-# ========== 必填：运行模式 ==========
-DEBUG=false             # 生产环境必须为 false
-CORS_ORIGINS=["https://admin.your-domain.com"]
+    ssl_certificate     /etc/letsencrypt/live/admin.your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/admin.your-domain.com/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    client_max_body_size 100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:18080;  # 端口与 .env 中 APP_PORT 或 docker-compose.yml 映射一致
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+### Caddy（更简单，自动签发证书）
+
+```caddyfile
+admin.your-domain.com {
+    reverse_proxy 127.0.0.1:18080
+    encode gzip
+}
 ```
 
 ---
@@ -158,35 +230,6 @@ CORS_ORIGINS=["https://admin.your-domain.com"]
 | HubStudio | HS_API_KEY, HS_BASE_URL | 浏览器环境自动化 |
 | Shopify | SHOPIFY_API_KEY | 产品采集 |
 | WooCommerce | WP_URL, consumer_key, consumer_secret | 产品导入 |
-
----
-
-## 项目目录结构（生产环境关键路径）
-
-```
-wordpress-admin/
-├── app/                    # FastAPI 后端
-│   ├── api/v1/             # API 路由（仅路由注册和参数校验）
-│   ├── controllers/        # 业务逻辑层
-│   ├── models/             # 数据表模型
-│   ├── schemas/            # Pydantic 请求/响应模型
-│   ├── services/           # 第三方服务封装
-│   │   └── importers/       # 产品导入器抽象层 (Shopify/WooCommerce)
-│   ├── core/               # 全局基础能力（认证/RBAC/CRUD/中间件）
-│   ├── utils/              # 通用工具函数
-│   └── settings/           # 全局配置
-├── web/                    # Vue 3 前端
-│   ├── src/
-│   │   ├── api/            # axios 请求封装（按模块拆分）
-│   │   ├── components/     # 公共组件
-│   │   ├── views/          # 页面视图
-│   │   ├── router/         # 动态路由
-│   │   └── store/          # Pinia 全局状态
-│   └── dist/               # 构建产物
-├── deploy/                 # 部署配置文件
-├── static/avatars/         # 用户头像上传目录
-└── migrations/             # Aerich 数据库迁移
-```
 
 ---
 
@@ -254,7 +297,7 @@ services:
 docker compose up -d --build
 ```
 
-### 场景四：远程连接数据库（IDE / 客户端工具）
+### 场景三：远程连接数据库（IDE / 客户端工具）
 
 使用 `deploy.sh init` 部署后，MySQL 远程连接已**自动配置**：
 
@@ -353,77 +396,6 @@ docker compose up -d
 
 ---
 
-## Docker 手动操作
-
-```bash
-# 启动所有服务
-docker compose up -d --build
-
-# 停止
-docker compose down
-
-# 重启
-docker compose restart
-
-# 仅重启应用
-docker compose restart app
-
-# 查看日志
-docker compose logs -f --tail 100 app
-
-# 进入应用容器
-docker compose exec app sh
-
-# 进入 MySQL
-docker compose exec db mysql -uadmin -p vue_fastapi_admin
-```
-
----
-
-## HTTPS 反向代理
-
-容器监听 `80` 端口（HTTP），生产环境建议在前置 Nginx 或 Caddy 处理 HTTPS。
-
-### Nginx 反向代理
-
-```nginx
-server {
-    listen 80;
-    server_name admin.your-domain.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name admin.your-domain.com;
-
-    ssl_certificate     /etc/letsencrypt/live/admin.your-domain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/admin.your-domain.com/privkey.pem;
-
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    client_max_body_size 100m;
-
-    location / {
-        proxy_pass http://127.0.0.1:18080;  # 端口与 .env 中 APP_PORT 或 docker-compose.yml 映射一致
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}
-```
-
-### Caddy（更简单，自动签发证书）
-
-```caddyfile
-admin.your-domain.com {
-    reverse_proxy 127.0.0.1:18080
-    encode gzip
-}
-```
-
----
-
 ## 回滚
 
 ```bash
@@ -448,8 +420,6 @@ docker compose up -d
 ### 步骤 1：停止并删除容器和 MySQL 数据卷
 
 ```bash
-
-
 cd /opt/wordpress-admin
 
 # 停止并删除容器、网络、数据卷（MySQL 所有数据将丢失！）
@@ -508,6 +478,33 @@ bash deploy/deploy.sh update # 拉取代码并重建
 
 ---
 
+## Docker 手动操作
+
+```bash
+# 启动所有服务
+docker compose up -d --build
+
+# 停止
+docker compose down
+
+# 重启
+docker compose restart
+
+# 仅重启应用
+docker compose restart app
+
+# 查看日志
+docker compose logs -f --tail 100 app
+
+# 进入应用容器
+docker compose exec app sh
+
+# 进入 MySQL
+docker compose exec db mysql -uadmin -p vue_fastapi_admin
+```
+
+---
+
 ## 常见问题
 
 ### Q: 启动后提示 SECRET_KEY 未设置
@@ -554,8 +551,6 @@ docker compose exec app ls -la static/avatars/
 1. 在 **系统管理 → 提供商管理** 中检查对应服务是否已配置并激活
 2. 在 **任务中心** 查看具体错误日志
 3. 检查网络连通性：`docker compose exec app ping api.cloudflare.com`
-
-### Q: 建站/DNS/采集任务失败
 
 ---
 

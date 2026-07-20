@@ -455,53 +455,102 @@ echo json_encode([
         path = f'{self._data_root(service_name)}/{self.woo_script}'
         php = f'''<?php
 header('Content-Type: application/json; charset=utf-8');
-$token = '{token}';
-if (!isset($_GET['token']) || !hash_equals($token, $_GET['token'])) {{ http_response_code(403); echo json_encode(['code'=>403,'msg'=>'forbidden']); exit; }}
 
-// ── 诊断输出（失败时附带上下文）──
-function woo_diagnose_and_exit($reason) {{
-    $diag = ['code' => 500, 'msg' => $reason];
-    // 尽力收集上下文（任一函数不可用时跳过）
-    try {{ $diag['home_url'] = function_exists('home_url') ? home_url() : 'home_url() not available'; }} catch (\Throwable $e) {{ $diag['home_url'] = 'error: '.$e->getMessage(); }}
-    try {{ $diag['site_url'] = function_exists('site_url') ? site_url() : 'site_url() not available'; }} catch (\Throwable $e) {{ $diag['site_url'] = 'error: '.$e->getMessage(); }}
-    try {{ $diag['plugins_dir'] = defined('WP_PLUGIN_DIR') ? WP_PLUGIN_DIR : (defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR.'/plugins' : 'unknown'); }} catch (\Throwable $e) {{ $diag['plugins_dir'] = 'error: '.$e->getMessage(); }}
-    try {{ $diag['active_plugins'] = function_exists('get_option') ? get_option('active_plugins', []) : []; }} catch (\Throwable $e) {{ $diag['active_plugins'] = []; }}
-    $diag['woo_in_active_plugins'] = in_array('woocommerce/woocommerce.php', $diag['active_plugins'] ?? []);
-    try {{ $diag['woo_class_exists'] = class_exists('WooCommerce'); }} catch (\Throwable $e) {{ $diag['woo_class_exists'] = false; }}
-    try {{ $diag['woo_plugin_file_exists'] = is_file(($diag['plugins_dir'] ?? '').'/woocommerce/woocommerce.php'); }} catch (\Throwable $e) {{ $diag['woo_plugin_file_exists'] = false; }}
-    try {{ $diag['script_dir'] = __DIR__; }} catch (\Throwable $e) {{ $diag['script_dir'] = 'unknown'; }}
-    echo json_encode($diag, JSON_UNESCAPED_UNICODE);
+$token = '{token}';
+if (!isset($_GET['token']) || !hash_equals($token, $_GET['token'])) {{
+    http_response_code(403);
+    echo json_encode(['code' => 403, 'msg' => 'forbidden'], JSON_UNESCAPED_UNICODE);
     exit;
 }}
 
-// ── 加载 WordPress 核心 ──
-$wp_load = __DIR__ . '/wp-load.php';
-if (!is_file($wp_load)) {{
-    woo_diagnose_and_exit("wp-load.php not found at script directory: " . __DIR__);
-}}
-try {{
-    require_once $wp_load;
-}} catch (\Throwable $e) {{
-    woo_diagnose_and_exit("wp-load.php load failed: " . $e->getMessage());
+function fail_woo($reason, $extra = []) {{
+    $payload = array_merge(['code' => 500, 'msg' => $reason], $extra);
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }}
 
-// ── 验证 WooCommerce 已加载 ──
-if (!class_exists('WooCommerce')) {{
-    woo_diagnose_and_exit("WooCommerce class not loaded (check active_plugins / plugins_dir / site context)");
+define('WP_USE_THEMES', false);
+require_once __DIR__ . '/wp-load.php';
+
+// 基础诊断
+$diag = [
+    'home_url' => function_exists('home_url') ? home_url('/') : null,
+    'site_url' => function_exists('site_url') ? site_url('/') : null,
+    'wp_plugin_dir' => defined('WP_PLUGIN_DIR') ? WP_PLUGIN_DIR : null,
+    'woo_main_file' => defined('WP_PLUGIN_DIR') ? (WP_PLUGIN_DIR . '/woocommerce/woocommerce.php') : null,
+    'active_plugins' => get_option('active_plugins', []),
+    'woo_in_active_plugins' => in_array('woocommerce/woocommerce.php', get_option('active_plugins', []), true),
+    'woo_class_exists' => class_exists('WooCommerce'),
+    'woo_function_exists' => function_exists('wc_api_hash'),
+];
+
+// 如果 Woo 主类没加载，但插件文件存在，尝试手动加载一次
+if (!$diag['woo_class_exists'] && !empty($diag['woo_main_file']) && file_exists($diag['woo_main_file'])) {{
+    try {{
+        require_once $diag['woo_main_file'];
+        $diag['woo_class_exists_after_require'] = class_exists('WooCommerce');
+        $diag['woo_function_exists_after_require'] = function_exists('wc_api_hash');
+    }} catch (\Throwable $e) {{
+        $diag['woo_require_error'] = $e->getMessage();
+    }}
+    $diag['woo_class_exists'] = class_exists('WooCommerce');
+    $diag['woo_function_exists'] = function_exists('wc_api_hash');
+}}
+
+// 最终判定
+if (!$diag['woo_in_active_plugins']) {{
+    fail_woo('WooCommerce not active in current site', $diag);
+}}
+if (!$diag['woo_class_exists'] && !$diag['woo_function_exists']) {{
+    fail_woo('WooCommerce class/function not loaded in current bootstrap context', $diag);
 }}
 
 global $wpdb;
+
+// 生成 key
 $consumer_key = 'ck_' . bin2hex(random_bytes(20));
 $consumer_secret = 'cs_' . bin2hex(random_bytes(20));
-$wpdb->insert($wpdb->prefix . 'woocommerce_api_keys', [
-  'user_id' => $wpdb->get_var("SELECT u.ID FROM {{$wpdb->users}} u INNER JOIN {{$wpdb->usermeta}} m ON u.ID=m.user_id WHERE m.meta_key='{{$wpdb->prefix}}capabilities' AND m.meta_value LIKE '%administrator%' LIMIT 1") ?: 1,
-  'description' => '1Panel Auto Clone Key',
-  'permissions' => 'read_write',
-  'consumer_key' => wc_api_hash($consumer_key),
-  'consumer_secret' => $consumer_secret,
-  'truncated_key' => substr($consumer_key, -7),
+
+// 兼容：如果 wc_api_hash 不可用，用兜底哈希，避免直接失败
+$consumer_key_hash = function_exists('wc_api_hash')
+    ? wc_api_hash($consumer_key)
+    : hash_hmac('sha256', $consumer_key, 'woocommerce-api');
+
+$user_id = (int) $wpdb->get_var("
+    SELECT u.ID
+    FROM {{$wpdb->users}} u
+    INNER JOIN {{$wpdb->usermeta}} m ON u.ID = m.user_id
+    WHERE m.meta_key = '{{$wpdb->prefix}}capabilities'
+      AND m.meta_value LIKE '%administrator%'
+    LIMIT 1
+");
+
+if (!$user_id) {{
+    $user_id = 1;
+}}
+
+$ok = $wpdb->insert($wpdb->prefix . 'woocommerce_api_keys', [
+    'user_id'         => $user_id,
+    'description'     => '1Panel Auto Clone Key',
+    'permissions'     => 'read_write',
+    'consumer_key'    => $consumer_key_hash,
+    'consumer_secret' => $consumer_secret,
+    'truncated_key'   => substr($consumer_key, -7),
 ]);
-echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$consumer_secret], JSON_UNESCAPED_UNICODE);
+
+if (!$ok) {{
+    fail_woo('Failed to insert WooCommerce API key', [
+        'db_error' => $wpdb->last_error,
+        'db_query' => $wpdb->last_query,
+    ] + $diag);
+}}
+
+echo json_encode([
+    'code' => 200,
+    'consumer_key' => $consumer_key,
+    'consumer_secret' => $consumer_secret,
+    'debug' => $diag,
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 '''
         self.file_manager.save(path, php)
         if not self.file_manager.exists(path):
@@ -526,6 +575,10 @@ echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$
                     and d.get("consumer_secret")
                 ),
                 max_retries=3,
+            )
+            _log.info(
+                "Woo key 响应: code=%s, domain=%s, debug=%s",
+                data.get("code"), domain, data.get("debug"),
             )
             return data["consumer_key"], data["consumer_secret"]
         except PHPClientError as e:
@@ -682,13 +735,16 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         try:
             data = self.php_client.fetch_json(
                 url=url,
-                success_check=lambda d: isinstance(d.get("feed_links"), list) and len(d["feed_links"]) > 0,
+                success_check=lambda d: isinstance(d.get("feed_links"), list),
                 max_retries=1,
                 step="ctx_feed",
             )
             links = [str(l) for l in (data.get("feed_links") or [])]
             links = [l for l in links if "/logs/" not in l]
-            _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
+            if links:
+                _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
+            else:
+                _log.info("CTX 刷新成功，暂无 Feed 链接（可能无产品）")
             return links
         except PHPClientResponseError as e:
             _log.warning("CTX Feed_Link 获取失败（业务错误，不重试）: %s", e)

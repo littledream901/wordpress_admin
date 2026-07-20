@@ -197,7 +197,7 @@ async def refresh_access_token(payload: RefreshTokenIn):
     return Success(data=data.model_dump())
 
 
-@router.get("/userinfo", summary="查看用户信息", dependencies=[DependAuth])
+@router.get("/userinfo", summary="查看用户信息")
 async def get_userinfo(current_user: User = DependAuth):
     """返回当前登录用户信息。认证状态已由 DependAuth 保障。"""
     data = _build_userinfo_dict(current_user)
@@ -207,7 +207,7 @@ async def get_userinfo(current_user: User = DependAuth):
     return Success(data=data)
 
 
-@router.get("/usermenu", summary="查看用户菜单", dependencies=[DependAuth])
+@router.get("/usermenu", summary="查看用户菜单")
 async def get_user_menu(current_user: User = DependAuth):
     """返回当前用户可见菜单树。单条脏菜单跳过，不阻断整体返回。"""
     user_id = getattr(current_user, "id", None)
@@ -252,7 +252,7 @@ async def get_user_menu(current_user: User = DependAuth):
     return Success(data=_build_menu_tree(safe_rows, user_id=user_id))
 
 
-@router.get("/userapi", summary="查看用户API", dependencies=[DependAuth])
+@router.get("/userapi", summary="查看用户API")
 async def get_user_api(current_user: User = DependAuth):
     """返回当前用户拥有的接口权限点。单条脏 API 跳过，不阻断整体返回。"""
     user_id = getattr(current_user, "id", None)
