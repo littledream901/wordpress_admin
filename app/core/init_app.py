@@ -287,6 +287,48 @@ async def init_db():
                 except Exception as e:
                     logger.warning(f"[DB] 补齐索引失败 {c['table']}.{c['idx']}: {e}")
 
+        # ── 补齐 M2M 中间表（Tortoise safe 模式不会自动创建）──
+        _m2m_tables = [
+            {
+                "name": "user_roles",
+                "sql": """CREATE TABLE IF NOT EXISTS `user_roles` (
+                    `user_id` BIGINT NOT NULL,
+                    `role_id` BIGINT NOT NULL,
+                    PRIMARY KEY (`user_id`, `role_id`),
+                    FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            },
+            {
+                "name": "role_menus",
+                "sql": """CREATE TABLE IF NOT EXISTS `role_menus` (
+                    `role_id` BIGINT NOT NULL,
+                    `menu_id` BIGINT NOT NULL,
+                    PRIMARY KEY (`role_id`, `menu_id`),
+                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`menu_id`) REFERENCES `menu`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            },
+            {
+                "name": "role_apis",
+                "sql": """CREATE TABLE IF NOT EXISTS `role_apis` (
+                    `role_id` BIGINT NOT NULL,
+                    `api_id` BIGINT NOT NULL,
+                    PRIMARY KEY (`role_id`, `api_id`),
+                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`api_id`) REFERENCES `api`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+            },
+        ]
+        for t in _m2m_tables:
+            try:
+                result = await conn.execute_query(f"SHOW TABLES LIKE '{t['name']}'")
+                if not result[1]:
+                    await conn.execute_script(t["sql"])
+                    logger.info(f"[DB] 补齐 M2M 中间表: {t['name']}")
+            except Exception as e:
+                logger.warning(f"[DB] 补齐 M2M 表失败 {t['name']}: {e}")
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  Section 4: Seed Data
