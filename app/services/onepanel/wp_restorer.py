@@ -457,8 +457,39 @@ echo json_encode([
 header('Content-Type: application/json; charset=utf-8');
 $token = '{token}';
 if (!isset($_GET['token']) || !hash_equals($token, $_GET['token'])) {{ http_response_code(403); echo json_encode(['code'=>403,'msg'=>'forbidden']); exit; }}
-require_once __DIR__ . '/wp-load.php';
-if (!class_exists('WooCommerce')) {{ echo json_encode(['code'=>500,'msg'=>'WooCommerce not active']); exit; }}
+
+// ── 诊断输出（失败时附带上下文）──
+function woo_diagnose_and_exit($reason) {{
+    $diag = ['code' => 500, 'msg' => $reason];
+    // 尽力收集上下文（任一函数不可用时跳过）
+    try {{ $diag['home_url'] = function_exists('home_url') ? home_url() : 'home_url() not available'; }} catch (\Throwable $e) {{ $diag['home_url'] = 'error: '.$e->getMessage(); }}
+    try {{ $diag['site_url'] = function_exists('site_url') ? site_url() : 'site_url() not available'; }} catch (\Throwable $e) {{ $diag['site_url'] = 'error: '.$e->getMessage(); }}
+    try {{ $diag['plugins_dir'] = defined('WP_PLUGIN_DIR') ? WP_PLUGIN_DIR : (defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR.'/plugins' : 'unknown'); }} catch (\Throwable $e) {{ $diag['plugins_dir'] = 'error: '.$e->getMessage(); }}
+    try {{ $diag['active_plugins'] = function_exists('get_option') ? get_option('active_plugins', []) : []; }} catch (\Throwable $e) {{ $diag['active_plugins'] = []; }}
+    $diag['woo_in_active_plugins'] = in_array('woocommerce/woocommerce.php', $diag['active_plugins'] ?? []);
+    try {{ $diag['woo_class_exists'] = class_exists('WooCommerce'); }} catch (\Throwable $e) {{ $diag['woo_class_exists'] = false; }}
+    try {{ $diag['woo_plugin_file_exists'] = is_file(($diag['plugins_dir'] ?? '').'/woocommerce/woocommerce.php'); }} catch (\Throwable $e) {{ $diag['woo_plugin_file_exists'] = false; }}
+    try {{ $diag['script_dir'] = __DIR__; }} catch (\Throwable $e) {{ $diag['script_dir'] = 'unknown'; }}
+    echo json_encode($diag, JSON_UNESCAPED_UNICODE);
+    exit;
+}}
+
+// ── 加载 WordPress 核心 ──
+$wp_load = __DIR__ . '/wp-load.php';
+if (!is_file($wp_load)) {{
+    woo_diagnose_and_exit("wp-load.php not found at script directory: " . __DIR__);
+}}
+try {{
+    require_once $wp_load;
+}} catch (\Throwable $e) {{
+    woo_diagnose_and_exit("wp-load.php load failed: " . $e->getMessage());
+}}
+
+// ── 验证 WooCommerce 已加载 ──
+if (!class_exists('WooCommerce')) {{
+    woo_diagnose_and_exit("WooCommerce class not loaded (check active_plugins / plugins_dir / site context)");
+}}
+
 global $wpdb;
 $consumer_key = 'ck_' . bin2hex(random_bytes(20));
 $consumer_secret = 'cs_' . bin2hex(random_bytes(20));
