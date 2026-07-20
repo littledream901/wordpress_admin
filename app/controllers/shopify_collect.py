@@ -118,10 +118,11 @@ class ShopifyCollectController:
                 )
                 await row.save()
                 result_rows.append({'id': row.id, 'title': row.title, 'product_url': row.product_url})
-            from app.utils.config_reader import get_provider_info
+            from app.utils.config_reader import get_provider_info_async as get_provider_info
+            provider_info = await get_provider_info("shopify")
             site.pipeline_log = (site.pipeline_log or '') + '\n' + json.dumps({
                 'source': 'shopify_random_assign', 'site_id': site.id, 'count': len(result_rows),
-                'products': result_rows, 'provider': get_provider_info("shopify"),
+                'products': result_rows, 'provider': provider_info,
             }, ensure_ascii=False)
             await site.save()
             await self._complete_job(job, ok=True, result={'assigned': len(result_rows)})
@@ -207,10 +208,11 @@ class ShopifyCollectController:
                     ensure_ascii=False,
                 )
                 await row.save()
-            from app.utils.config_reader import get_provider_info
+            from app.utils.config_reader import get_provider_info_async as get_provider_info
+            provider_info = await get_provider_info("shopify")
             site.pipeline_log = (site.pipeline_log or '') + '\n' + json.dumps({
                 'source': 'shopify_batch_random_assign', 'site_id': site.id, 'count': len(sample),
-                'provider': get_provider_info("shopify"),
+                'provider': provider_info,
             }, ensure_ascii=False)
             await site.save()
             await self._create_job(site.id, site.domain, "assign_products", {"count": len(sample)})

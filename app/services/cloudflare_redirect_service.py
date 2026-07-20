@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from app.utils.config_reader import get_provider_info
+from app.utils.config_reader import get_provider_info_async as get_provider_info
 from app.utils.provider_resolver import ProviderResolver
 from app.models.site_pipeline import Site
 from app.core.exceptions import CloudflareError
@@ -169,7 +169,7 @@ class CloudflareRedirectService:
                 {"match": rule2_match, "ok": rule2_ok},
             ],
             "target": target,
-            "provider": get_provider_info("cloudflare"),
+            "provider": await get_provider_info("cloudflare"),
         }, ensure_ascii=False)
         site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 

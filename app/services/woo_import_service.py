@@ -814,8 +814,9 @@ class WooImportService:
 
         site.pipeline_status = "woo_import:success" if success > 0 else "woo_import:failed"
         site.woo_import_status = f"成功{success}" if success > 0 else "导入失败"
-        from app.utils.config_reader import get_provider_info
-        log_data = {"source": "woo_import", "result": result, "provider": get_provider_info("woo")}
+        from app.utils.config_reader import get_provider_info_async as get_provider_info
+        provider_info = await get_provider_info("woo")
+        log_data = {"source": "woo_import", "result": result, "provider": provider_info}
         site.pipeline_log = (site.pipeline_log or "") + "\n" + json.dumps(log_data, ensure_ascii=False)
         await site.save()
 

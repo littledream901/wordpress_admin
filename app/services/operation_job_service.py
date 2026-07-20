@@ -245,8 +245,8 @@ class OperationJobService:
 
         # 追加 pipeline_log
         provider_type = _ACTION_PROVIDER_MAP.get(job.action_type, "")
-        from app.utils.config_reader import get_provider_info
-        provider = get_provider_info(provider_type) if provider_type else {}
+        from app.utils.config_reader import get_provider_info_async as get_provider_info
+        provider = await get_provider_info(provider_type) if provider_type else {}
         log_entry = json.dumps({
             "job_id": job.id,
             "action": job.action_type,

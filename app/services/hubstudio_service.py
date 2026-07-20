@@ -28,7 +28,7 @@ from tortoise.expressions import F
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import HubStudioAgentHeartbeat, HubStudioJob, Site
-from app.utils.config_reader import get_provider_info
+from app.utils.config_reader import get_provider_info_async as get_provider_info
 from app.utils.db_utils import safe_count
 
 
@@ -74,7 +74,7 @@ class HubStudioOrchestrationService:
             domain=domain,
             action_type=f"hub_{job_type}",
             status="running",
-            payload_json=job.payload_json,
+            payload_json=getattr(job, 'payload_json', '{}'),
             started_at=datetime.now(),
         )
 
@@ -171,7 +171,7 @@ class HubStudioOrchestrationService:
                 "job_type": job.job_type,
                 "domain": job.domain,
                 "site_id": job.site_id,
-                "payload": json.loads(job.payload_json or "{}"),
+                "payload": json.loads(getattr(job, 'payload_json', None) or "{}"),
             }
             result = executor.execute(job_dict)
             ok = result.get("status") == "success"
@@ -508,12 +508,12 @@ class HubStudioOrchestrationService:
 
         # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
-        new_payload_json = job.payload_json or "{}"
+        new_payload_json = getattr(job, 'payload_json', None) or "{}"
         if job.job_type in ("create_account", "update_env", "wp_login", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
             if site and site.hub_env_id:
                 try:
-                    payload = json.loads(job.payload_json or "{}")
+                    payload = json.loads(getattr(job, 'payload_json', None) or "{}")
                     need_update = False
                     if not payload.get("hub_env_id"):
                         payload["hub_env_id"] = site.hub_env_id
@@ -858,6 +858,7 @@ class HubStudioOrchestrationService:
         site.hub_last_action = job.job_type
         site.pipeline_status = f"hubstudio:{status}"
 
+        provider_info = await get_provider_info("hubstudio")
         site.append_log({
             "source": "hubstudio",
             "job_id": job.id,
@@ -866,7 +867,7 @@ class HubStudioOrchestrationService:
             "worker_name": job.worker_name,
             "error_message": error_message,
             "result_json": result_json,
-            "provider": get_provider_info("hubstudio"),
+            "provider": provider_info,
         })
 
         if status == "success":
@@ -935,7 +936,7 @@ class HubStudioOrchestrationService:
                 result = json.loads(result_json or "{}")
             except Exception:
                 result = {"raw": result_json}
-            result["provider"] = get_provider_info("hubstudio")
+            result["provider"] = await get_provider_info("hubstudio")
             update_fields["result_json"] = json.dumps(result, ensure_ascii=False)
         if error_message:
             update_fields["error_message"] = error_message

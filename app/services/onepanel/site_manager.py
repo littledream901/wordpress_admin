@@ -6,7 +6,6 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from app.utils.config_reader import get_config
 from app.utils.provider_resolver import ProviderResolver
 from app.models.site_pipeline import Site
 from app.core.exceptions import OnePanelError, DomainAlreadyExistsError

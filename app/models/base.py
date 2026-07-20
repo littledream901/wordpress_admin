@@ -16,7 +16,7 @@ class BaseModel(models.Model):
         d = {}
         for field in self._meta.db_fields:
             if field not in exclude_fields:
-                value = getattr(self, field)
+                value = getattr(self, field, None)
                 if isinstance(value, datetime):
                     value = value.strftime(settings.DATETIME_FORMAT)
                 d[field] = value

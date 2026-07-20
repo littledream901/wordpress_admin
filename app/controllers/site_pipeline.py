@@ -28,7 +28,7 @@ from app.services.providers.dynadot_service import DynadotService
 from app.services.tasks.runner import task_runner
 from app.services.woo_import_service import WooImportService
 from app.services.importers import get_importer
-from app.utils.config_reader import get_config, get_config_async
+from app.utils.config_reader import get_config_async
 from app.utils.provider_resolver import ProviderResolver
 
 _log = logging.getLogger(__name__)
@@ -311,7 +311,8 @@ class HubStudioJobController(CRUDBase[HubStudioJob, HubStudioJobCreate, HubStudi
             site.hub_status = status
             site.pipeline_status = f'hubstudio:{status}'
             old_log = site.pipeline_log or ''
-            from app.utils.config_reader import get_provider_info
+            from app.utils.config_reader import get_provider_info_async as get_provider_info
+            provider_info = await get_provider_info("hubstudio")
             site.pipeline_log = (old_log + '\n' + json.dumps({
                 'job_id': job.id,
                 'job_type': job.job_type,
@@ -319,7 +320,7 @@ class HubStudioJobController(CRUDBase[HubStudioJob, HubStudioJobCreate, HubStudi
                 'worker_name': worker_name,
                 'error_message': error_message,
                 'result_json': result_json,
-                'provider': get_provider_info("hubstudio"),
+                'provider': provider_info,
             }, ensure_ascii=False)).strip()
             if status == 'success':
                 try:

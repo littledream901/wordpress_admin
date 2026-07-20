@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from app.utils.config_reader import get_provider_info
+from app.utils.config_reader import get_provider_info_async as get_provider_info
 from app.utils.provider_resolver import ProviderResolver
 from app.utils.http_retry import retry_request
 from app.models.site_pipeline import Site
@@ -188,6 +188,7 @@ class CloudflareService:
         site.cloudflare_status = '已解析' if root_ok and www_ok else '部分失败'
 
         now = datetime.now()
+        provider_info = await get_provider_info("cloudflare")
         log_entry = json.dumps({
             "ts": now.isoformat(),
             "source": "cloudflare_dns_ns",
@@ -202,7 +203,7 @@ class CloudflareService:
             "root_ok": root_ok,
             "www_ok": www_ok,
             "dynadot_result": dynadot_result,
-            "provider": get_provider_info("cloudflare"),
+            "provider": provider_info,
         }, ensure_ascii=False)
         site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 
@@ -263,6 +264,7 @@ class CloudflareService:
         site.cloudflare_status = '已解析' if root_ok and www_ok else '部分失败'
 
         now = datetime.now()
+        provider_info = await get_provider_info("cloudflare")
         log_entry = json.dumps({
             "ts": now.isoformat(),
             "source": "cloudflare_shopify_dns",
@@ -279,7 +281,7 @@ class CloudflareService:
             "dynadot_result": dynadot_result,
             "deleted_a": deleted_a,
             "deleted_aaaa": deleted_aaaa,
-            "provider": get_provider_info("cloudflare"),
+            "provider": provider_info,
         }, ensure_ascii=False)
         site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 
