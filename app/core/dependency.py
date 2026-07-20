@@ -4,6 +4,7 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Request
 
 from app.core.ctx import CTX_USER_ID
+from app.log import logger
 from app.models.admin import Role, User
 from app.settings import settings
 
@@ -63,6 +64,10 @@ class PermissionControl:
         path = (root_path + route.path) if route else request.url.path
         roles: list[Role] = await current_user.roles
         if not roles:
+            logger.warning(
+                "[Perm] 拒绝: user=%s(id=%s) 无角色绑定 | method=%s path=%s",
+                current_user.username, current_user.id, method, path,
+            )
             raise HTTPException(status_code=403, detail="The user is not bound to a role")
         apis = [await role.apis for role in roles]
         permission_apis = list(set(
@@ -71,6 +76,11 @@ class PermissionControl:
             if getattr(api, "method", None) and getattr(api, "path", None)
         ))
         if (method, path) not in permission_apis:
+            role_codes = [r.code for r in roles]
+            logger.warning(
+                "[Perm] 拒绝: user=%s(id=%s) roles=%s | 请求 %s %s | 拥有 %d 条权限",
+                current_user.username, current_user.id, role_codes, method, path, len(permission_apis),
+            )
             raise HTTPException(status_code=403, detail=f"Permission denied method:{method} path:{path}")
 
 

@@ -193,6 +193,13 @@ async def init_db():
         {"table": "site_pipeline_gmail_account", "col": "assigned_site_domain", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'"},
         {"table": "api", "col": "method",     "sql": "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'"},
         {"table": "api", "col": "is_button",  "sql": "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "payload_json",  "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `payload_json` TEXT NULL COMMENT '任务负载'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "result_json",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `result_json` TEXT NULL COMMENT '任务结果'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "error_message", "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `error_message` TEXT NULL COMMENT '错误信息'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "worker_name",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `worker_name` VARCHAR(128) DEFAULT '' COMMENT '执行节点名称'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "retry_count",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "started_at",    "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `started_at` DATETIME NULL COMMENT '开始执行时间'"},
+        {"table": "site_pipeline_hubstudio_job", "col": "finished_at",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `finished_at` DATETIME NULL COMMENT '完成时间'"},
     ]
 
     # ── Schema 演进：历史模型新增的索引 ──
@@ -976,13 +983,49 @@ async def _release_init_lock(lock_key: str):
         pass
 
 
+# ── 5.2 持久化初始化标记 ──
+
+_INIT_COMPLETED_KEY = "system_init_version"
+
+
+async def _is_init_completed() -> bool:
+    """检查当前版本是否已完成初始化（基于 Config 表持久化标记）"""
+    try:
+        stored = await Config.get_value(_INIT_COMPLETED_KEY, default="")
+        return stored == settings.VERSION
+    except Exception:
+        return False
+
+
+async def _mark_init_completed():
+    """标记当前版本初始化完成"""
+    try:
+        cfg, _ = await Config.get_or_create(
+            name=_INIT_COMPLETED_KEY,
+            defaults={
+                "value": settings.VERSION,
+                "description": "系统初始化完成版本标记（版本变更时自动重新同步菜单/角色/API）",
+                "category": "general",
+                "sort_order": 0,
+                "is_secret": False,
+            }
+        )
+        if cfg.value != settings.VERSION:
+            cfg.value = settings.VERSION
+            await cfg.save(update_fields=["value"])
+            logger.info(f"[Init] 版本标记已更新: {cfg.value} → {settings.VERSION}")
+    except Exception as e:
+        logger.warning(f"[Init] 无法标记初始化完成: {e}")
+
+
 # ── 5.3 启动入口 ──
 
 async def init_essential():
     """应用启动轻量初始化：DB 检查 + 僵尸任务清理 + 幂等种子同步
 
     不包含主键修复、用户去重等高风险操作。
-    菜单/角色/Provider 同步受分布式锁保护，多 Worker 仅一个执行。
+    菜单/角色/Provider 同步基于版本号持久化标记：同版本只执行一次，
+    版本号变更（新部署、新增菜单/API）时自动重新同步。
     """
     t0 = time.perf_counter()
     steps = []
@@ -995,25 +1038,36 @@ async def init_essential():
     await recover_stale_jobs()
     steps.append(("僵尸任务清理", time.perf_counter() - t))
 
-    t = time.perf_counter()
-    if await _try_acquire_init_lock("init_menus_roles", timeout_seconds=300):
-        try:
-            await init_menus()
-            await init_apis()
-            await init_roles()
-        finally:
-            await _release_init_lock("init_menus_roles")
-    steps.append(("菜单/角色同步", time.perf_counter() - t))
+    # 版本号持久化标记：同版本已完成初始化则跳过同步，避免 worker 重启导致权限丢失
+    if await _is_init_completed():
+        logger.info("[Init] 当前版本 %s 已完成初始化，跳过种子同步", settings.VERSION)
 
-    t = time.perf_counter()
-    if await _try_acquire_init_lock("init_providers", timeout_seconds=300):
-        try:
-            await init_providers()
-        finally:
-            await _release_init_lock("init_providers")
-    from app.utils.provider_resolver import _load_configs_to_cache
-    await _load_configs_to_cache()
-    steps.append(("Provider 同步", time.perf_counter() - t))
+        # Provider 缓存仍需加载（每次启动都需要）
+        from app.utils.provider_resolver import _load_configs_to_cache
+        await _load_configs_to_cache()
+        steps.append(("Provider 缓存加载", 0))
+    else:
+        t = time.perf_counter()
+        if await _try_acquire_init_lock("init_menus_roles", timeout_seconds=300):
+            try:
+                await init_menus()
+                await init_apis()
+                await init_roles()
+            finally:
+                await _release_init_lock("init_menus_roles")
+        steps.append(("菜单/角色同步", time.perf_counter() - t))
+
+        t = time.perf_counter()
+        if await _try_acquire_init_lock("init_providers", timeout_seconds=300):
+            try:
+                await init_providers()
+            finally:
+                await _release_init_lock("init_providers")
+        from app.utils.provider_resolver import _load_configs_to_cache
+        await _load_configs_to_cache()
+        steps.append(("Provider 同步", time.perf_counter() - t))
+
+        await _mark_init_completed()
 
     total = time.perf_counter() - t0
     detail = " | ".join(f"{name}: {elapsed:.1f}s" for name, elapsed in steps)

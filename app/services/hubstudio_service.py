@@ -508,7 +508,7 @@ class HubStudioOrchestrationService:
 
         # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
-        new_payload_json = job.payload_json
+        new_payload_json = job.payload_json or "{}"
         if job.job_type in ("create_account", "update_env", "wp_login", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
             if site and site.hub_env_id:

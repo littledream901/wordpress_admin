@@ -412,7 +412,11 @@ class SitePipelineController:
         depts, users, gmails = results[0] or [], results[1] or [], results[2] or []
         dept_map = {d.pk: d.name for d in depts}
         user_map = {u.id: u.username for u in users}
-        gmail_map = {g.assigned_site_id: g for g in gmails}
+        gmail_map = {}
+        for g in gmails:
+            sid = getattr(g, 'assigned_site_id', None)
+            if sid is not None:
+                gmail_map[sid] = g
 
         # 并行序列化
         dicts = await asyncio.gather(*[obj.to_dict(exclude_fields=['pipeline_log']) for obj in objs])
