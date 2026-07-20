@@ -371,20 +371,43 @@ echo json_encode([
 ], JSON_UNESCAPED_UNICODE);
 '''
         self.file_manager.save(path, php)
+        # ── 写入后验证：确认文件已落盘 ──
+        if not self.file_manager.exists(path):
+            raise WordPressOperationError(
+                "domain replace script inject",
+                detail=f"domain-replace.php 写入后磁盘验证失败：{path}，请检查磁盘权限与路径",
+            )
+        _log.info("domain-replace.php 已写入 %s", path)
         return token
 
     def remove_domain_replace_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
-        """通过 HTTP 调用域名替换 PHP 脚本（统一重试/错误处理）"""
+        """通过 HTTP 调用域名替换 PHP 脚本（统一重试/错误处理）。
+
+        HTTP 404 是关键信号：脚本写入了磁盘但 Web 根目录未命中。
+        此时不做无意义重试，直接抛出可诊断的错误信息。
+        """
         path = f"domain-replace.php?token={token}"
         try:
             return self.php_client.fetch_with_fallback(
                 domain=domain, path=path, step="domain_replace",
                 success_check=lambda d: d.get("code") == 200,
-                max_retries=3,
+                max_retries=1,
             )
+        except PHPClientResponseError as e:
+            msg = str(e)
+            if "HTTP 404" in msg:
+                raise WordPressOperationError(
+                    "domain replace", detail=(
+                        f"HTTP 404：domain-replace.php 不可访问 ({domain})。"
+                        "排查步骤：1) 文件是否写入到当前站点的 Nginx root 目录下？ "
+                        "2) 当前域名是否指向正确站点？ "
+                        "3) Nginx 是否已 reload？"
+                    )
+                )
+            raise WordPressOperationError("domain replace", detail=msg)
         except PHPClientError as e:
             raise WordPressOperationError("domain replace", detail=str(e))
         except Exception as e:
@@ -450,6 +473,11 @@ $wpdb->insert($wpdb->prefix . 'woocommerce_api_keys', [
 echo json_encode(['code'=>200,'consumer_key'=>$consumer_key,'consumer_secret'=>$consumer_secret], JSON_UNESCAPED_UNICODE);
 '''
         self.file_manager.save(path, php)
+        if not self.file_manager.exists(path):
+            raise WordPressOperationError(
+                "woo script inject",
+                detail=f"{self.woo_script} 写入后磁盘验证失败：{path}",
+            )
         return token
 
     def remove_woo_script(self, service_name: str) -> None:
@@ -591,6 +619,11 @@ if (function_exists('wp_upload_dir')) {{
 echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 '''
         self.file_manager.save(path, php)
+        if not self.file_manager.exists(path):
+            raise WordPressOperationError(
+                "ctx script inject",
+                detail=f"{self.ctx_script} 写入后磁盘验证失败：{path}",
+            )
         return f'{protocol}://{domain}/{self.ctx_script}?token={token}'
 
     def remove_ctx_script(self, service_name: str) -> None:
