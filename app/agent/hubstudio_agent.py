@@ -255,9 +255,9 @@ class HubStudioAgent:
             raise
 
     def _verify_permissions(self) -> bool:
-        """验证登录后的 token 是否有效、用户状态是否正常 — 启动时自检"""
+        """验证登录后 token 是否有效 — 不做重新登录，仅检查"""
         try:
-            userinfo = self._api_get("/base/userinfo")
+            userinfo = self._api_get("/base/userinfo", _is_retry_after_login=True)
             user_data = userinfo.get("data", {})
             username = user_data.get("username", "?")
             is_active = user_data.get("is_active", False)
@@ -373,8 +373,10 @@ class HubStudioAgent:
         return self._api_request("POST", path, payload=payload, params=params,
                                  max_retries=max_retries, quiet_final_error=quiet_final_error)
 
-    def _api_get(self, path: str, params: Optional[dict] = None, max_retries: int = 3) -> dict:
-        return self._api_request("GET", path, params=params, max_retries=max_retries)
+    def _api_get(self, path: str, params: Optional[dict] = None, max_retries: int = 3,
+                 _is_retry_after_login: bool = False) -> dict:
+        return self._api_request("GET", path, params=params,
+                                 max_retries=max_retries, _is_retry_after_login=_is_retry_after_login)
 
     def _warn_missing_sensitive(self, source: str = "DB"):
         """检查并警告缺少必要密钥"""
