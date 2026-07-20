@@ -10,6 +10,7 @@ from app.schemas.config_provider import (
     ProviderConfigItemCreate, ProviderConfigItemUpdate,
     ResourceProviderBindingCreate,
 )
+from app.utils.provider_defaults import get_default_items
 
 # ── 配置值类型校验 ──
 _VALIDATORS = {
@@ -31,9 +32,39 @@ def _validate_config_value(config_key: str, config_type: str, value: str):
             raise ValueError(f"配置项 [{config_key}] 类型为 {config_type}，值 '{value}' 不合法：{hint}")
 
 
+async def _init_default_items(provider: ConfigProvider):
+    """为新建的 Provider 自动创建该类型的默认配置项（已存在的 key 跳过）。"""
+    items = get_default_items(provider.provider_type)
+    if not items:
+        return
+    existing_keys = set(it.config_key for it in
+                        await ProviderConfigItem.filter(provider_id=provider.id).all())
+    to_create = []
+    for config_key, default_value, description, config_type, is_secret, is_required in items:
+        if config_key in existing_keys:
+            continue
+        to_create.append(ProviderConfigItem(
+            provider_id=provider.id,
+            config_key=config_key,
+            config_value=default_value,
+            config_type=config_type,
+            is_secret=is_secret,
+            is_required=is_required,
+            description=description,
+        ))
+    if to_create:
+        await ProviderConfigItem.bulk_create(to_create)
+
+
 class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, ConfigProviderUpdate]):
     def __init__(self):
         super().__init__(model=ConfigProvider)
+
+    async def create(self, obj_in: ConfigProviderCreate) -> ConfigProvider:
+        """创建 Provider，同时自动初始化该类型的默认配置项。"""
+        provider = await super().create(obj_in=obj_in)
+        await _init_default_items(provider)
+        return provider
 
     async def get_by_type(self, provider_type: str):
         return await self.model.filter(provider_type=provider_type, is_deleted=False, status="active").order_by("-priority").all()
