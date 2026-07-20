@@ -206,128 +206,87 @@ async def init_db():
 
     if not tables_ready:
         await Tortoise.generate_schemas(safe=True)
-        logger.info("[DB] 首次建表完成")
-    else:
-        logger.debug("[DB] 业务表已存在，跳过建表")
+        logger.info("[DB] 首次建表完成（含 M2M 中间表）")
+        return
 
-        # 提取数据库名
-        db_name = ""
-        try:
-            db_name = settings.TORTOISE_ORM["connections"]["default"]["credentials"].get("database", "")
-        except Exception:
-            pass
+    logger.debug("[DB] 业务表已存在，跳过建表")
 
-        if not db_name:
-            # 回退：逐条尝试 ALTER（无法获取数据库名时）
-            await _legacy_alter_fallback(conn)
-            return
+    # 提取数据库名
+    db_name = ""
+    try:
+        db_name = settings.TORTOISE_ORM["connections"]["default"]["credentials"].get("database", "")
+    except Exception:
+        pass
 
-        # ── 定义需要补齐的列 ──
-        _needed_columns: list[dict] = [
-            {"table": "menu", "col": "parent_id", "sql": "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'"},
-            {"table": "menu", "col": "remark",    "sql": "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'"},
-            {"table": "site_pipeline_gmail_account", "col": "assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'"},
-            {"table": "site_pipeline_gmail_account", "col": "assigned_site_domain", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'"},
-            {"table": "api", "col": "method",     "sql": "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'"},
-            {"table": "api", "col": "is_button",  "sql": "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'"},
-        ]
+    if not db_name:
+        # 回退：逐条尝试 ALTER（无法获取数据库名时）
+        await _legacy_alter_fallback(conn)
+        return
 
-        # ── 定义需要补齐的索引 ──
-        _needed_indexes: list[dict] = [
-            {"table": "menu", "idx": "idx_menu_parent_id", "sql": "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)"},
-            {"table": "site_pipeline_site", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
-            {"table": "account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
-            {"table": "ads_env", "idx": "idx_is_deleted", "sql": "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
-            {"table": "site_pipeline_gmail_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
-            {"table": "site_pipeline_gmail_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
-            {"table": "config_provider", "idx": "idx_is_deleted", "sql": "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
-            {"table": "api", "idx": "idx_api_method", "sql": "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)"},
-        ]
+    # ── 定义需要补齐的列 ──
+    _needed_columns: list[dict] = [
+        {"table": "menu", "col": "parent_id", "sql": "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'"},
+        {"table": "menu", "col": "remark",    "sql": "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'"},
+        {"table": "site_pipeline_gmail_account", "col": "assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'"},
+        {"table": "site_pipeline_gmail_account", "col": "assigned_site_domain", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'"},
+        {"table": "api", "col": "method",     "sql": "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'"},
+        {"table": "api", "col": "is_button",  "sql": "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'"},
+    ]
 
-        # ── 一次查询：获取所有已存在的列 ──
-        existing_cols: set[tuple] = set()
-        col_pairs = ", ".join(f"('{c['table']}', '{c['col']}')" for c in _needed_columns)
-        try:
-            rows = await conn.execute_query(
-                f"SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
-                f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, COLUMN_NAME) IN ({col_pairs})"
-            )
-            for row in rows[1]:
-                existing_cols.add((row["TABLE_NAME"], row["COLUMN_NAME"]))
-        except Exception as e:
-            logger.warning(f"[DB] 查询已存在列失败: {e}")
+    # ── 定义需要补齐的索引 ──
+    _needed_indexes: list[dict] = [
+        {"table": "menu", "idx": "idx_menu_parent_id", "sql": "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)"},
+        {"table": "site_pipeline_site", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "ads_env", "idx": "idx_is_deleted", "sql": "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "site_pipeline_gmail_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "site_pipeline_gmail_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
+        {"table": "config_provider", "idx": "idx_is_deleted", "sql": "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "api", "idx": "idx_api_method", "sql": "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)"},
+    ]
 
-        # ── 一次查询：获取所有已存在的索引 ──
-        existing_idxs: set[tuple] = set()
-        idx_pairs = ", ".join(f"('{c['table']}', '{c['idx']}')" for c in _needed_indexes)
-        try:
-            rows = await conn.execute_query(
-                f"SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
-                f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, INDEX_NAME) IN ({idx_pairs})"
-            )
-            for row in rows[1]:
-                existing_idxs.add((row["TABLE_NAME"], row["INDEX_NAME"]))
-        except Exception as e:
-            logger.warning(f"[DB] 查询已存在索引失败: {e}")
+    # ── 一次查询：获取所有已存在的列 ──
+    existing_cols: set[tuple] = set()
+    col_pairs = ", ".join(f"('{c['table']}', '{c['col']}')" for c in _needed_columns)
+    try:
+        rows = await conn.execute_query(
+            f"SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, COLUMN_NAME) IN ({col_pairs})"
+        )
+        for row in rows[1]:
+            existing_cols.add((row["TABLE_NAME"], row["COLUMN_NAME"]))
+    except Exception as e:
+        logger.warning(f"[DB] 查询已存在列失败: {e}")
 
-        # ── 只对缺失的列/索引执行 ALTER ──
-        for c in _needed_columns:
-            if (c["table"], c["col"]) not in existing_cols:
-                try:
-                    await conn.execute_query(c["sql"])
-                    logger.info(f"[DB] 补齐列: {c['table']}.{c['col']}")
-                except Exception as e:
-                    logger.warning(f"[DB] 补齐列失败 {c['table']}.{c['col']}: {e}")
+    # ── 一次查询：获取所有已存在的索引 ──
+    existing_idxs: set[tuple] = set()
+    idx_pairs = ", ".join(f"('{c['table']}', '{c['idx']}')" for c in _needed_indexes)
+    try:
+        rows = await conn.execute_query(
+            f"SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+            f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, INDEX_NAME) IN ({idx_pairs})"
+        )
+        for row in rows[1]:
+            existing_idxs.add((row["TABLE_NAME"], row["INDEX_NAME"]))
+    except Exception as e:
+        logger.warning(f"[DB] 查询已存在索引失败: {e}")
 
-        for c in _needed_indexes:
-            if (c["table"], c["idx"]) not in existing_idxs:
-                try:
-                    await conn.execute_query(c["sql"])
-                    logger.info(f"[DB] 补齐索引: {c['table']}.{c['idx']}")
-                except Exception as e:
-                    logger.warning(f"[DB] 补齐索引失败 {c['table']}.{c['idx']}: {e}")
-
-        # ── 补齐 M2M 中间表（Tortoise safe 模式不会自动创建）──
-        _m2m_tables = [
-            {
-                "name": "user_roles",
-                "sql": """CREATE TABLE IF NOT EXISTS `user_roles` (
-                    `user_id` BIGINT NOT NULL,
-                    `role_id` BIGINT NOT NULL,
-                    PRIMARY KEY (`user_id`, `role_id`),
-                    FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON DELETE CASCADE,
-                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-            },
-            {
-                "name": "role_menus",
-                "sql": """CREATE TABLE IF NOT EXISTS `role_menus` (
-                    `role_id` BIGINT NOT NULL,
-                    `menu_id` BIGINT NOT NULL,
-                    PRIMARY KEY (`role_id`, `menu_id`),
-                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE,
-                    FOREIGN KEY (`menu_id`) REFERENCES `menu`(`id`) ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-            },
-            {
-                "name": "role_apis",
-                "sql": """CREATE TABLE IF NOT EXISTS `role_apis` (
-                    `role_id` BIGINT NOT NULL,
-                    `api_id` BIGINT NOT NULL,
-                    PRIMARY KEY (`role_id`, `api_id`),
-                    FOREIGN KEY (`role_id`) REFERENCES `role`(`id`) ON DELETE CASCADE,
-                    FOREIGN KEY (`api_id`) REFERENCES `api`(`id`) ON DELETE CASCADE
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
-            },
-        ]
-        for t in _m2m_tables:
+    # ── 只对缺失的列/索引执行 ALTER ──
+    for c in _needed_columns:
+        if (c["table"], c["col"]) not in existing_cols:
             try:
-                result = await conn.execute_query(f"SHOW TABLES LIKE '{t['name']}'")
-                if not result[1]:
-                    await conn.execute_script(t["sql"])
-                    logger.info(f"[DB] 补齐 M2M 中间表: {t['name']}")
+                await conn.execute_query(c["sql"])
+                logger.info(f"[DB] 补齐列: {c['table']}.{c['col']}")
             except Exception as e:
-                logger.warning(f"[DB] 补齐 M2M 表失败 {t['name']}: {e}")
+                logger.warning(f"[DB] 补齐列失败 {c['table']}.{c['col']}: {e}")
+
+    for c in _needed_indexes:
+        if (c["table"], c["idx"]) not in existing_idxs:
+            try:
+                await conn.execute_query(c["sql"])
+                logger.info(f"[DB] 补齐索引: {c['table']}.{c['idx']}")
+            except Exception as e:
+                logger.warning(f"[DB] 补齐索引失败 {c['table']}.{c['idx']}: {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
