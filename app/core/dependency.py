@@ -65,7 +65,7 @@ class PermissionControl:
         roles: list[Role] = await current_user.roles
         if not roles:
             logger.warning(
-                "[Perm] 拒绝: user=%s(id=%s) 无角色绑定 | method=%s path=%s",
+                "[Perm] 拒绝: user={}(id={}) 无角色绑定 | method={} path={}",
                 current_user.username, current_user.id, method, path,
             )
             raise HTTPException(status_code=403, detail="The user is not bound to a role")
@@ -78,7 +78,7 @@ class PermissionControl:
         if (method, path) not in permission_apis:
             role_codes = [r.code for r in roles]
             logger.warning(
-                "[Perm] 拒绝: user=%s(id=%s) roles=%s | 请求 %s %s | 拥有 %d 条权限",
+                "[Perm] 拒绝: user={}(id={}) roles={} | 请求 {} {} | 拥有 {} 条权限",
                 current_user.username, current_user.id, role_codes, method, path, len(permission_apis),
             )
             raise HTTPException(status_code=403, detail=f"Permission denied method:{method} path:{path}")

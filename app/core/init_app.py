@@ -1040,7 +1040,7 @@ async def init_essential():
 
     # 版本号持久化标记：同版本已完成初始化则跳过同步，避免 worker 重启导致权限丢失
     if await _is_init_completed():
-        logger.info("[Init] 当前版本 %s 已完成初始化，跳过种子同步", settings.VERSION)
+        logger.info("[Init] 当前版本 {} 已完成初始化，跳过种子同步", settings.VERSION)
 
         # Provider 缓存仍需加载（每次启动都需要）
         from app.utils.provider_resolver import _load_configs_to_cache
