@@ -2,9 +2,9 @@
 set -e
 
 # 加载 .env 环境变量（shell 脚本不自动读取 .env）
-if [ -f /app/.env ]; then
+if [ -f /opt/wordpress-admin/.env ]; then
     set -a
-    . /app/.env
+    . /opt/wordpress-admin/.env
     set +a
 fi
 
