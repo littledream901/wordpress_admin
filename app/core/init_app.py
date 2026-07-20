@@ -158,41 +158,15 @@ MENU_DEFINITIONS = [
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Section 3: Schema Migration
+#  Section 3: Schema
 # ════════════════════════════════════════════════════════════════════════════
 
-# ── 3.0 回退方案：无法获取数据库名时使用 ──
-
-async def _legacy_alter_fallback(conn):
-    """旧版逐条 ALTER TABLE 回退方案"""
-    _alter_table_migrations = [
-        "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'",
-        "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)",
-        "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'",
-        "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)",
-        "ALTER TABLE `account` ADD INDEX `idx_is_deleted` (`is_deleted`)",
-        "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)",
-        "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)",
-        "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'",
-        "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'",
-        "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)",
-        "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)",
-        "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'",
-        "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'",
-        "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)",
-    ]
-    for sql in _alter_table_migrations:
-        try:
-            await conn.execute_query(sql)
-        except Exception:
-            pass
-
-
 async def init_db():
-    """检查业务表是否已建表，首次自动建表（幂等）。
+    """确保数据库 Schema 与 ORM 模型一致（幂等）。
 
-    ORM 初始化由 app/__init__.py lifespan 负责，本函数不再调用 Tortoise.init()。
-    增量列补齐：先查询 INFORMATION_SCHEMA 确认缺哪些列/索引，只对缺失的执行 ALTER。
+    - 空库：调用 Tortoise.generate_schemas 一次性建表。
+    - 存量库：通过 INFORMATION_SCHEMA 检测增量列/索引，补齐历史演进缺口。
+      （Aerich 可覆盖的迁移优先用 Aerich，此处作为无 Aerich 环境的兜底。）
     """
     conn = connections.get("default")
 
@@ -211,19 +185,7 @@ async def init_db():
 
     logger.debug("[DB] 业务表已存在，跳过建表")
 
-    # 提取数据库名
-    db_name = ""
-    try:
-        db_name = settings.TORTOISE_ORM["connections"]["default"]["credentials"].get("database", "")
-    except Exception:
-        pass
-
-    if not db_name:
-        # 回退：逐条尝试 ALTER（无法获取数据库名时）
-        await _legacy_alter_fallback(conn)
-        return
-
-    # ── 定义需要补齐的列 ──
+    # ── Schema 演进：历史模型新增的列（声明式，仅补齐缺失项）──
     _needed_columns: list[dict] = [
         {"table": "menu", "col": "parent_id", "sql": "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'"},
         {"table": "menu", "col": "remark",    "sql": "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'"},
@@ -233,7 +195,7 @@ async def init_db():
         {"table": "api", "col": "is_button",  "sql": "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'"},
     ]
 
-    # ── 定义需要补齐的索引 ──
+    # ── Schema 演进：历史模型新增的索引 ──
     _needed_indexes: list[dict] = [
         {"table": "menu", "idx": "idx_menu_parent_id", "sql": "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)"},
         {"table": "site_pipeline_site", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
@@ -245,7 +207,7 @@ async def init_db():
         {"table": "api", "idx": "idx_api_method", "sql": "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)"},
     ]
 
-    # ── 一次查询：获取所有已存在的列 ──
+    # ── 检测 Schema 差异：已存在的列 ──
     existing_cols: set[tuple] = set()
     col_pairs = ", ".join(f"('{c['table']}', '{c['col']}')" for c in _needed_columns)
     try:
@@ -258,7 +220,7 @@ async def init_db():
     except Exception as e:
         logger.warning(f"[DB] 查询已存在列失败: {e}")
 
-    # ── 一次查询：获取所有已存在的索引 ──
+    # ── 检测 Schema 差异：已存在的索引 ──
     existing_idxs: set[tuple] = set()
     idx_pairs = ", ".join(f"('{c['table']}', '{c['idx']}')" for c in _needed_indexes)
     try:
@@ -271,22 +233,22 @@ async def init_db():
     except Exception as e:
         logger.warning(f"[DB] 查询已存在索引失败: {e}")
 
-    # ── 只对缺失的列/索引执行 ALTER ──
+    # ── 执行 Schema 演进：仅补齐缺失的列 ──
     for c in _needed_columns:
         if (c["table"], c["col"]) not in existing_cols:
             try:
                 await conn.execute_query(c["sql"])
-                logger.info(f"[DB] 补齐列: {c['table']}.{c['col']}")
+                logger.info(f"[DB] Schema 演进: 新增列 {c['table']}.{c['col']}")
             except Exception as e:
-                logger.warning(f"[DB] 补齐列失败 {c['table']}.{c['col']}: {e}")
+                logger.warning(f"[DB] Schema 演进失败 {c['table']}.{c['col']}: {e}")
 
     for c in _needed_indexes:
         if (c["table"], c["idx"]) not in existing_idxs:
             try:
                 await conn.execute_query(c["sql"])
-                logger.info(f"[DB] 补齐索引: {c['table']}.{c['idx']}")
+                logger.info(f"[DB] Schema 演进: 新增索引 {c['table']}.{c['idx']}")
             except Exception as e:
-                logger.warning(f"[DB] 补齐索引失败 {c['table']}.{c['idx']}: {e}")
+                logger.warning(f"[DB] Schema 演进失败 {c['table']}.{c['idx']}: {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -453,33 +415,6 @@ async def _upsert_menu(item: dict, parent_id: int) -> Menu:
     )
     logger.info(f"[init_menus] 新增菜单: {item['name']} ({item['path']}, parent_id={parent_id})")
     return menu
-
-
-# Deprecated: 启动时自动去重风险过高，已移至 scripts/repair_menus.py
-# 保留函数体用于手动调用，但 init_menus() 不再自动执行
-async def _deduplicate_menus():
-    """清理 (path, parent_id) 重复的菜单，保留最早创建的那条"""
-    from collections import defaultdict
-
-    all_menus = await Menu.all().order_by("id")
-    groups = defaultdict(list)
-    for m in all_menus:
-        groups[(m.path, m.parent_id)].append(m)
-
-    for (path, parent_id), dup_list in groups.items():
-        if len(dup_list) <= 1:
-            continue
-        keeper = dup_list[0]
-        removed_ids = [m.id for m in dup_list[1:]]
-        await Menu.filter(parent_id__in=removed_ids).update(parent_id=keeper.id)
-        roles = await Role.filter(menus__id__in=removed_ids).all()
-        for role in roles:
-            await role.menus.remove(*removed_ids)
-        await Menu.filter(id__in=removed_ids).delete()
-        logger.warning(
-            f"[init_menus] 清理重复菜单 path={path} parent_id={parent_id}: "
-            f"保留 id={keeper.id}, 删除 {removed_ids}"
-        )
 
 
 async def _sync_menu_fields(menu, item: dict):
