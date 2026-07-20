@@ -11,6 +11,7 @@ try:
 
     from app.core.exceptions import SettingNotFound
     from app.core.init_app import (
+        init_configs,
         init_essential,
         init_superuser,
         make_middlewares,
@@ -76,6 +77,7 @@ if _HAS_FASTAPI:
 
         await init_essential()
         await init_superuser()
+        await init_configs()
 
         # 后台任务：每小时清理过期的 Feed 文件
         async def _cleanup_loop():

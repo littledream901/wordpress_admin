@@ -403,19 +403,22 @@ async def init_superuser():
 
     if agent_created:
         logger.info("[init_superuser] 创建 HubStudio Agent 专用账号 hubstudio_agent")
-        return
+    else:
+        # 已存在：修复关键字段
+        agent_changed = False
+        if getattr(agent_user, "is_superuser", False):
+            agent_user.is_superuser = False
+            agent_changed = True
+        if not getattr(agent_user, "is_active", True):
+            agent_user.is_active = True
+            agent_changed = True
+        if agent_changed:
+            await agent_user.save()
+            logger.info("[init_superuser] HubStudio Agent 账号字段已修复")
 
-    # 已存在：修复关键字段
-    agent_changed = False
-    if getattr(agent_user, "is_superuser", False):
-        agent_user.is_superuser = False
-        agent_changed = True
-    if not getattr(agent_user, "is_active", True):
-        agent_user.is_active = True
-        agent_changed = True
-    if agent_changed:
-        await agent_user.save()
-        logger.info("[init_superuser] HubStudio Agent 账号字段已修复")
+    # 确保角色绑定（兼容首次启动时 init_roles 先于 init_superuser 执行的场景）
+    await _ensure_admin_role_binding()
+    await _ensure_agent_role_binding()
 
 
 # ── 4.2 菜单 ──
@@ -523,17 +526,18 @@ async def _deduplicate_menus():
 async def _sync_menu_fields(menu, item: dict):
     """按需更新菜单字段（从 dict 定义同步到已有菜单记录）"""
     updated = False
-    for field in ("name", "menu_type", "icon", "order", "component", "redirect"):
-        new_val = item.get(field)
+    for field in ("name", "menu_type", "icon", "order", "component", "redirect", "is_hidden"):
         if field == "is_hidden":
             new_val = bool(item.get("is_hidden", False))
-            old = bool(getattr(menu, field))
+            old = bool(getattr(menu, field, False))
             if old != new_val:
                 setattr(menu, field, new_val)
                 updated = True
-        elif getattr(menu, field) != new_val:
-            setattr(menu, field, new_val)
-            updated = True
+        else:
+            new_val = item.get(field)
+            if getattr(menu, field) != new_val:
+                setattr(menu, field, new_val)
+                updated = True
     if updated:
         await menu.save()
 
