@@ -285,16 +285,18 @@ async def init_db():
 # ── 4.1 超级用户 ──
 
 async def init_superuser():
-    """确保默认管理员账号存在且关键字段正确。
+    """确保默认管理员账号及 Agent 专用账号存在且关键字段正确。
 
     不覆盖用户已修改的密码、邮箱等配置，仅修复：
-    - 首次创建：创建 admin 账号
-    - RESET_ADMIN_PASSWORD=true：重置密码
+    - 首次创建：创建 admin / hubstudio_agent 账号
+    - RESET_ADMIN_PASSWORD=true：重置 admin 密码
     - is_superuser / is_active 缺失时修复
+    - hubstudio_agent 确保非超管、非菜单用户
     """
     from app.models.admin import User
     from app.utils.password import get_password_hash
 
+    # ── admin 管理员账号 ──
     user, created = await User.get_or_create(
         username="admin",
         defaults={
@@ -307,35 +309,61 @@ async def init_superuser():
 
     if created:
         logger.info("[init_superuser] 创建默认管理员 admin")
+    else:
+        # 已存在用户：仅修复关键字段，不覆盖用户配置
+        changed = False
+
+        if settings.RESET_ADMIN_PASSWORD:
+            user.password = get_password_hash(settings.DEFAULT_PASSWORD)
+            changed = True
+
+        if not user.is_superuser:
+            user.is_superuser = True
+            changed = True
+
+        if not user.is_active:
+            user.is_active = True
+            changed = True
+
+        if changed:
+            update_fields = []
+            if settings.RESET_ADMIN_PASSWORD:
+                update_fields.append("password")
+            if not user.is_superuser:
+                update_fields.append("is_superuser")
+            if not user.is_active:
+                update_fields.append("is_active")
+            await user.save(update_fields=update_fields)
+            logger.info("[Admin] 管理员关键字段已修复")
+        else:
+            logger.debug("[Admin] 管理员账号已就绪")
+
+    # ── hubstudio_agent 专用账号（非超管，仅通过 API 操作）──
+    agent_user, agent_created = await User.get_or_create(
+        username="hubstudio_agent",
+        defaults={
+            "email": "hubstudio_agent@local",
+            "password": get_password_hash(settings.DEFAULT_PASSWORD),
+            "is_active": True,
+            "is_superuser": False,
+        }
+    )
+
+    if agent_created:
+        logger.info("[init_superuser] 创建 HubStudio Agent 专用账号 hubstudio_agent")
         return
 
-    # 已存在用户：仅修复关键字段，不覆盖用户配置
-    changed = False
-
-    if settings.RESET_ADMIN_PASSWORD:
-        user.password = get_password_hash(settings.DEFAULT_PASSWORD)
-        changed = True
-
-    if not user.is_superuser:
-        user.is_superuser = True
-        changed = True
-
-    if not user.is_active:
-        user.is_active = True
-        changed = True
-
-    if changed:
-        update_fields = []
-        if settings.RESET_ADMIN_PASSWORD:
-            update_fields.append("password")
-        if not user.is_superuser:
-            update_fields.append("is_superuser")
-        if not user.is_active:
-            update_fields.append("is_active")
-        await user.save(update_fields=update_fields)
-        logger.info("[Admin] 管理员关键字段已修复")
-    else:
-        logger.debug("[Admin] 管理员账号已就绪")
+    # 已存在：修复关键字段
+    agent_changed = False
+    if getattr(agent_user, "is_superuser", False):
+        agent_user.is_superuser = False
+        agent_changed = True
+    if not getattr(agent_user, "is_active", True):
+        agent_user.is_active = True
+        agent_changed = True
+    if agent_changed:
+        await agent_user.save()
+        logger.info("[init_superuser] HubStudio Agent 账号字段已修复")
 
 
 # ── 4.2 菜单 ──
@@ -786,18 +814,25 @@ async def init_apis():
 # ── 4.6 角色 ──
 
 async def init_roles():
-    """初始化角色并关联菜单/API（按 code 识别，幂等）"""
+    """初始化角色并关联菜单/API（按 code 识别，幂等），含 Agent 专用角色绑定"""
     admin_role = await Role.filter(code="admin").first()
     user_role = await Role.filter(code="user").first()
+    agent_role = await Role.filter(code="hub_agent").first()
 
-    if not admin_role or not user_role:
+    if not admin_role or not user_role or not agent_role:
         await _create_default_roles()
     else:
         await _sync_existing_roles()
+        # 增量同步 hub_agent 的 API 权限（不受菜单变更影响）
+        if agent_role:
+            await _grant_hub_agent_apis(agent_role, await Api.all())
+
+    # 确保 hubstudio_agent 用户绑定 hub_agent 角色
+    await _ensure_agent_role_binding()
 
 
 async def _create_default_roles():
-    """首次创建默认角色（管理员 + 普通用户），幂等：get_or_create"""
+    """首次创建默认角色（管理员 + 普通用户 + HubStudio Agent），幂等：get_or_create"""
     admin_role, _ = await Role.get_or_create(
         code="admin",
         defaults={"name": "管理员", "desc": "管理员角色"}
@@ -806,11 +841,15 @@ async def _create_default_roles():
         code="user",
         defaults={"name": "普通用户", "desc": "普通用户角色"}
     )
+    agent_role, _ = await Role.get_or_create(
+        code="hub_agent",
+        defaults={"name": "HubStudio Agent", "desc": "HubStudio Agent 自动任务专用角色，仅 API 无菜单"}
+    )
 
     all_apis = await Api.all()
     all_menus = await Menu.all()
 
-    # 仅追加未关联的，避免重复膨胀
+    # admin：全部 API + 全部菜单
     existing_admin_apis = {a.id for a in await admin_role.apis.all()}
     new_admin_apis = [a for a in all_apis if a.id not in existing_admin_apis]
     if new_admin_apis:
@@ -821,12 +860,16 @@ async def _create_default_roles():
     if new_admin_menus:
         await admin_role.menus.add(*new_admin_menus)
 
+    # user：全部菜单
     existing_user_menus = {m.id for m in await user_role.menus.all()}
     new_user_menus = [m for m in all_menus if m.id not in existing_user_menus]
     if new_user_menus:
         await user_role.menus.add(*new_user_menus)
 
     await _grant_menu_apis(user_role, all_menus, all_apis)
+
+    # hub_agent：仅 HubStudio Agent 相关 API，无菜单
+    await _grant_hub_agent_apis(agent_role, all_apis)
 
 
 async def _sync_existing_roles():
@@ -917,6 +960,59 @@ def _collect_menu_prefixes(menu, all_menus_map: dict) -> set[str]:
         else:
             break
     return prefixes
+
+
+# ── HubStudio Agent 专用权限 ──
+
+# HubStudio Agent 必需的 API 路径键（精确匹配）
+_HUB_AGENT_API_PATHS = {
+    ("POST", "/api/v1/site-pipeline/hub-job/claim"),
+    ("POST", "/api/v1/site-pipeline/hub-job/heartbeat"),
+    ("GET",  "/api/v1/site-pipeline/hub-job/agent-config"),
+    ("GET",  "/api/v1/base/userinfo"),
+}
+
+# report 路径包含 {job_id} 动态参数，不能用精确匹配，用后缀识别
+_HUB_REPORT_SUFFIX = "/site-pipeline/hub-job/"
+_HUB_REPORT_ENDS  = "/report"
+
+
+async def _grant_hub_agent_apis(agent_role, all_apis: list):
+    """仅授予 HubStudio Agent 必需的 API 权限（无菜单）"""
+    existing_ids = {a.id for a in await agent_role.apis.all()}
+    to_add = []
+    for api in all_apis:
+        if api.id in existing_ids:
+            continue
+        key = (api.method, api.path)
+        if key in _HUB_AGENT_API_PATHS:
+            to_add.append(api)
+        elif api.method == "POST" and _HUB_REPORT_SUFFIX in api.path and api.path.endswith(_HUB_REPORT_ENDS):
+            to_add.append(api)
+
+    if to_add:
+        await agent_role.apis.add(*to_add)
+        logger.info(
+            f"[init_roles] hub_agent 角色已授予 {len(to_add)} 个 API: "
+            f"{[(a.method, a.path) for a in to_add]}"
+        )
+    else:
+        logger.debug("[init_roles] hub_agent 角色 API 已就绪")
+
+
+async def _ensure_agent_role_binding():
+    """确保 hubstudio_agent 用户绑定了 hub_agent 角色（幂等）"""
+    from app.models.admin import User
+
+    agent_user = await User.filter(username="hubstudio_agent").first()
+    agent_role = await Role.filter(code="hub_agent").first()
+    if not agent_user or not agent_role:
+        return
+
+    existing = {r.code for r in await agent_user.roles.all()}
+    if "hub_agent" not in existing:
+        await agent_user.roles.add(agent_role)
+        logger.info("[init_roles] hubstudio_agent 已绑定 hub_agent 角色")
 
 
 # ════════════════════════════════════════════════════════════════════════════

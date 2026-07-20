@@ -134,7 +134,7 @@ class HubStudioAgent:
             proto, rest = self.server_url.split("://", 1)
             rest = rest.replace("//", "/")
             self.server_url = f"{proto}://{rest}"
-        self.username = os.getenv("HUB_AGENT_USERNAME", "admin")
+        self.username = os.getenv("HUB_AGENT_USERNAME", "hubstudio_agent")
         self.password = os.getenv("HUB_AGENT_PASSWORD", "123456")
         self._token: Optional[str] = None  # 登录后自动获取
         self._token_lock = threading.Lock()  # 多线程 token 读写保护
