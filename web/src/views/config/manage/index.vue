@@ -37,6 +37,9 @@
     >
       <template #header-extra>
         <n-space>
+          <n-button size="small" type="primary" @click="addConfigItem">
+            添加配置
+          </n-button>
           <n-button size="small" @click="loadItems(selectedProvider.id)">
             刷新
           </n-button>
@@ -338,15 +341,15 @@ async function setDefault(id) {
 async function removeProvider(id) {
   try {
     await api.deleteProvider({ id })
+    if (selectedProvider.value?.id === id) {
+      selectedProvider.value = null
+      itemList.value = []
+    }
+    message.success('已移入回收站')
+    $table.value?.handleSearch()
   } catch {
-    // 错误已在拦截器处理
+    message.error('删除失败')
   }
-  if (selectedProvider.value?.id === id) {
-    selectedProvider.value = null
-    itemList.value = []
-  }
-  message.success('已删除')
-  $table.value?.handleSearch()
 }
 
 // ─── ConfigItem 编辑 ───
@@ -357,6 +360,8 @@ const saving = ref(false)
 const editMode = ref('form')
 const jsonText = ref('')
 const jsonError = ref('')
+let _tempCid = 0
+function _newTempId() { return `_new_${++_tempCid}` }
 
 function selectProvider(row) {
   selectedProvider.value = { ...row }
@@ -367,9 +372,13 @@ function selectProvider(row) {
 }
 
 async function loadItems(providerId) {
-  const r = await api.getItems({ provider_id: providerId })
-  itemList.value = r.data || []
-  syncFormToJson()
+  try {
+    const r = await api.getItems({ provider_id: providerId })
+    itemList.value = r.data || []
+    syncFormToJson()
+  } catch {
+    itemList.value = []
+  }
 }
 
 // ─── 已绑定账号 ───
@@ -429,6 +438,21 @@ function syncJsonToForm() {
     for (const [key, value] of Object.entries(obj)) {
       if (keyMap[key]) {
         keyMap[key].config_value = String(value)
+      } else {
+        // JSON 中有新 key，自动添加到 itemList
+        const newItem = {
+          id: _newTempId(),
+          config_key: key,
+          config_value: String(value),
+          config_type: 'string',
+          is_secret: false,
+          is_required: false,
+          description: '',
+          remark: '',
+          sort: itemList.value.length,
+          _isNew: true,
+        }
+        itemList.value.push(newItem)
       }
     }
     jsonError.value = ''
@@ -455,7 +479,33 @@ function onFormChange() {
   }
 }
 
+function addConfigItem() {
+  const newItem = {
+    id: _newTempId(), // 临时 id，保存后由后端分配实际 id
+    config_key: '',
+    config_value: '',
+    config_type: 'string',
+    is_secret: false,
+    is_required: false,
+    description: '',
+    remark: '',
+    sort: itemList.value.length,
+    _isNew: true,
+  }
+  itemList.value.push(newItem)
+  if (editMode.value === 'json') {
+    syncFormToJson()
+  }
+}
+
 async function deleteConfigItem(item) {
+  // 未保存的新项直接从列表中移除，无需调后端
+  if (item._isNew) {
+    itemList.value = itemList.value.filter(it => it.id !== item.id)
+    if (editMode.value === 'json') syncFormToJson()
+    message.success('已移除')
+    return
+  }
   try {
     await api.deleteItem({ id: item.id })
     itemList.value = itemList.value.filter(it => it.id !== item.id)
@@ -494,6 +544,7 @@ async function saveItems() {
       })),
     })
     message.success('保存成功')
+    await loadItems(selectedProvider.value.id)  // 重新加载以获取新建项的真实 ID
   } catch {
     message.error('保存失败')
   }
