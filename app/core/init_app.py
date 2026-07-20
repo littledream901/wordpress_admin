@@ -253,9 +253,9 @@ async def init_db():
                 f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, COLUMN_NAME) IN ({col_pairs})"
             )
             for row in rows[1]:
-                existing_cols.add((row[0], row[1]))
-        except Exception:
-            pass
+                existing_cols.add((row["TABLE_NAME"], row["COLUMN_NAME"]))
+        except Exception as e:
+            logger.warning(f"[DB] 查询已存在列失败: {e}")
 
         # ── 一次查询：获取所有已存在的索引 ──
         existing_idxs: set[tuple] = set()
@@ -266,9 +266,9 @@ async def init_db():
                 f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, INDEX_NAME) IN ({idx_pairs})"
             )
             for row in rows[1]:
-                existing_idxs.add((row[0], row[1]))
-        except Exception:
-            pass
+                existing_idxs.add((row["TABLE_NAME"], row["INDEX_NAME"]))
+        except Exception as e:
+            logger.warning(f"[DB] 查询已存在索引失败: {e}")
 
         # ── 只对缺失的列/索引执行 ALTER ──
         for c in _needed_columns:
