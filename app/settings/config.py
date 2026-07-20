@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     APP_DESCRIPTION: str = "Wordpress 站点管理平台"
 
     # ── CORS ──
-    CORS_ORIGINS: typing.List[str] = ["*"]
+    CORS_ORIGINS: typing.Union[typing.List[str], str] = ["*"]
     """允许的跨域来源，生产环境必须指定具体域名，如 ["https://your-domain.com"]"""
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: typing.List[str] = ["*"]
