@@ -173,6 +173,9 @@ async def _legacy_alter_fallback(conn):
         "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'",
         "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)",
         "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+        "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'",
+        "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'",
+        "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)",
     ]
     for sql in _alter_table_migrations:
         try:
@@ -221,6 +224,8 @@ async def init_db():
             {"table": "menu", "col": "remark",    "sql": "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'"},
             {"table": "site_pipeline_gmail_account", "col": "assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'"},
             {"table": "site_pipeline_gmail_account", "col": "assigned_site_domain", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'"},
+            {"table": "api", "col": "method",     "sql": "ALTER TABLE `api` ADD COLUMN `method` VARCHAR(10) NOT NULL DEFAULT 'GET' COMMENT '请求方法'"},
+            {"table": "api", "col": "is_button",  "sql": "ALTER TABLE `api` ADD COLUMN `is_button` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否为按钮权限'"},
         ]
 
         # ── 定义需要补齐的索引 ──
@@ -232,6 +237,7 @@ async def init_db():
             {"table": "site_pipeline_gmail_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
             {"table": "site_pipeline_gmail_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
             {"table": "config_provider", "idx": "idx_is_deleted", "sql": "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+            {"table": "api", "idx": "idx_api_method", "sql": "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)"},
         ]
 
         # ── 一次查询：获取所有已存在的列 ──
