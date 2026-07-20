@@ -76,7 +76,7 @@ class PermissionControl:
             if getattr(api, "method", None) and getattr(api, "path", None)
         ))
         if (method, path) not in permission_apis:
-            role_codes = [r.code for r in roles]
+            role_codes = [getattr(r, 'code', '?') for r in roles]
             logger.warning(
                 "[Perm] 拒绝: user={}(id={}) roles={} | 请求 {} {} | 拥有 {} 条权限",
                 current_user.username, current_user.id, role_codes, method, path, len(permission_apis),

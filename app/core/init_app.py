@@ -200,6 +200,7 @@ async def init_db():
         {"table": "site_pipeline_hubstudio_job", "col": "retry_count",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `retry_count` INT NOT NULL DEFAULT 0 COMMENT '重试次数'"},
         {"table": "site_pipeline_hubstudio_job", "col": "started_at",    "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `started_at` DATETIME NULL COMMENT '开始执行时间'"},
         {"table": "site_pipeline_hubstudio_job", "col": "finished_at",   "sql": "ALTER TABLE `site_pipeline_hubstudio_job` ADD COLUMN `finished_at` DATETIME NULL COMMENT '完成时间'"},
+        {"table": "role", "col": "code", "sql": "ALTER TABLE `role` ADD COLUMN `code` VARCHAR(64) NULL COMMENT '角色编码（admin/user/hub_agent，用于逻辑判断）'"},
     ]
 
     # ── Schema 演进：历史模型新增的索引 ──
