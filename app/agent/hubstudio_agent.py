@@ -137,6 +137,7 @@ class HubStudioAgent:
         self.username = os.getenv("HUB_AGENT_USERNAME", "admin")
         self.password = os.getenv("HUB_AGENT_PASSWORD", "123456")
         self._token: Optional[str] = None  # 登录后自动获取
+        self._token_lock = threading.Lock()  # 多线程 token 读写保护
         self.worker_name = os.getenv("HUB_AGENT_WORKER_NAME", socket.gethostname())
         self.provider_id = int(os.getenv("HUB_AGENT_PROVIDER_ID") or "0")
         self.poll_interval = int(os.getenv("HUB_AGENT_POLL_INTERVAL") or "5")
@@ -219,7 +220,7 @@ class HubStudioAgent:
             self.password = getpass.getpass("请输入后端登录密码: ")
 
     def _login(self) -> str:
-        """登录后端获取 JWT token"""
+        """登录后端获取 JWT token（线程安全：锁只保护 token 写入）"""
         self._prompt_credentials()
         self.logger.info(f"正在登录后端 (username={self.username})...")
         data = self._api_unauth_post("/base/access_token", payload={
@@ -229,7 +230,8 @@ class HubStudioAgent:
         token = data.get("data", {}).get("access_token")
         if not token:
             raise RuntimeError(f"登录失败: {json.dumps(data, ensure_ascii=False)}")
-        self._token = token
+        with self._token_lock:
+            self._token = token
         self.logger.info("登录成功")
         return token
 
@@ -297,8 +299,13 @@ class HubStudioAgent:
             max_retries: 最大重试次数
             quiet_final_error: True 时不输出最终失败 error（由调用方自行处理）
         """
-        if not self._token:
+        # 线程安全地获取当前 token 快照
+        with self._token_lock:
+            token = self._token
+        if not token:
             self._login()
+            with self._token_lock:
+                token = self._token
 
         url = f"{self.server_url}{path}"
         if params:
@@ -313,7 +320,7 @@ class HubStudioAgent:
             try:
                 req = urllib.request.Request(url, data=body, method=method)
                 req.add_header("Content-Type", "application/json")
-                req.add_header("Authorization", f"Bearer {self._token}")
+                req.add_header("Authorization", f"Bearer {token}")
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("code") and data["code"] != 200:
