@@ -258,7 +258,9 @@ class ProvisionTaskRunner(TaskRunner):
                 site.onepanel_site_id = op_site_id
                 _log.info("已同步 1Panel 站点信息: domain=%s site_id=%s", site.domain, op_site_id)
             # 无论 get_site_id 是否成功，都必须更新状态
-            site.status = '已存在'
+            # 避免降级：已创建成功的站点不改为"已存在"
+            if site.status not in ('已创建',):
+                site.status = '已存在'
             site.onepanel_status = '已存在'
             site.pipeline_status = 'onepanel:exists'
             await site.save()
