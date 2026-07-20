@@ -497,18 +497,41 @@ class HubStudioAgent:
         self.logger.info(f"  Connector:   {self.config['connector_dir']}\\{self.config['exe_name']}")
         self.logger.info("=" * 60)
 
-        # 启动前登录后端
-        try:
-            self._login()
-        except Exception as e:
-            self.logger.error(f"登录后端失败: {e}")
-            self.logger.warning("Agent 将继续运行，但任务执行可能会因认证失败而报错")
+        # ── 启动前登录后端（带退避重试，不登录不启动主循环）──
+        self._prompt_credentials()
+        login_ok = False
+        for attempt in range(1, 100):  # 最多重试约 8 分钟
+            try:
+                self._login()
+                login_ok = True
+                break
+            except Exception as e:
+                delay = min(2 ** (attempt - 1), 60)
+                self.logger.warning(
+                    f"后端登录失败 (第 {attempt} 次): {e}，{delay}s 后重试"
+                )
+                time.sleep(delay)
+        if not login_ok:
+            self.logger.error("后端登录失败，已达最大重试次数，退出")
+            return
 
-        # 从服务端拉取配置（DB 优先）
-        try:
-            self._fetch_agent_config()
-        except Exception as e:
-            self.logger.warning(f"拉取服务端配置失败: {e}")
+        # ── 从服务端拉取 Provider 配置（带退避重试）──
+        config_ok = False
+        for attempt in range(1, 20):
+            try:
+                self._fetch_agent_config()
+                config_ok = True
+                break
+            except Exception as e:
+                delay = min(2 ** (attempt - 1), 30)
+                self.logger.warning(
+                    f"拉取 Provider 配置失败 (第 {attempt} 次): {e}，{delay}s 后重试"
+                )
+                time.sleep(delay)
+        if not config_ok:
+            self.logger.warning(
+                "拉取 Provider 配置失败，将以本地兜底配置运行"
+            )
 
         # ── 配置完整性摘要 ──
         if self.provider_id:

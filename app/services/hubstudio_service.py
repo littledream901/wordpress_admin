@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.controllers.gmail_account import gmail_account_controller
 from app.core.exceptions import HubStudioError, SiteNotFoundError
 from app.log import logger
+from tortoise.exceptions import MultipleObjectsReturned
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import HubStudioAgentHeartbeat, HubStudioJob, Site
@@ -270,13 +271,24 @@ class HubStudioOrchestrationService:
         data = [await obj.to_dict() for obj in objs]
         return total, data
 
+    async def _get_job_safe(self, job_id: int) -> Optional[HubStudioJob]:
+        """安全获取任务（容忍 DB 主键缺失等异常，取第一条）"""
+        try:
+            return await HubStudioJob.filter(id=job_id).first()
+        except MultipleObjectsReturned:
+            logger.error(
+                "数据异常：HubStudioJob 存在多条 id=%s 的记录，"
+                "可能缺少 PRIMARY KEY 约束。取第一条，请尽快执行 repair_primary_keys 修复。", job_id
+            )
+            return await HubStudioJob.filter(id=job_id).order_by("id").first()
+
     async def get_job(self, job_id: int) -> Optional[HubStudioJob]:
         """获取任务详情"""
-        return await HubStudioJob.filter(id=job_id).first()
+        return await self._get_job_safe(job_id)
 
     async def retry_job(self, job_id: int, execute_now: bool = False) -> Optional[HubStudioJob]:
         """重试失败任务，同步重置关联的 OperationJob"""
-        job = await HubStudioJob.filter(id=job_id).first()
+        job = await self._get_job_safe(job_id)
         if not job:
             return None
         job.status = "pending"
@@ -310,7 +322,7 @@ class HubStudioOrchestrationService:
 
     async def cancel_job(self, job_id: int) -> Optional[HubStudioJob]:
         """取消任务（仅 pending/running 状态可取消）"""
-        job = await HubStudioJob.filter(id=job_id).first()
+        job = await self._get_job_safe(job_id)
         if not job:
             return None
         if job.status not in ("pending", "running"):
@@ -531,7 +543,7 @@ class HubStudioOrchestrationService:
         worker_name: str = "",
     ) -> Optional[HubStudioJob]:
         """Agent 回传任务结果（同时更新 Site 和 OperationJob）"""
-        job = await HubStudioJob.filter(id=job_id).first()
+        job = await self._get_job_safe(job_id)
         if not job:
             return None
 
