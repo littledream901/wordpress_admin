@@ -33,6 +33,7 @@ from app.models.config import Config
 from app.models.config_provider import ConfigProvider, ProviderConfigItem
 from app.schemas.menus import MenuType
 from app.settings.config import settings
+from app.utils.provider_defaults import _PROVIDER_DEFAULTS
 
 from app.core.exceptions import (
     ExternalAPIError,
@@ -1053,7 +1054,6 @@ async def init_essential():
         finally:
             await _release_init_lock("init_providers")
     from app.utils.provider_resolver import _load_configs_to_cache
-    from app.utils.provider_defaults import _PROVIDER_DEFAULTS
     await _load_configs_to_cache()
     steps.append(("Provider 同步", time.perf_counter() - t))
 
