@@ -116,7 +116,7 @@ def _resolve_old_key(name: str) -> tuple[str | None, str]:
 
 
 def get_provider_info(provider_type: str) -> dict:
-    """同步获取当前解析到的 Provider 信息（用于日志记录）
+    """同步获取当前解析到的 Provider 信息（用于日志记录/同步上下文）
 
     Returns:
         {"provider_id": int, "provider_name": str} 或 {} 如果无 Provider
@@ -132,6 +132,18 @@ def get_provider_info(provider_type: str) -> dict:
         return _run_sync(_fetch())
     except Exception:
         return {}
+
+
+async def get_provider_info_async(provider_type: str) -> dict:
+    """异步获取当前解析到的 Provider 信息（在 async 上下文中使用，不阻塞事件循环）"""
+    from app.models.config_provider import ConfigProvider
+    try:
+        p = await ConfigProvider.get_default(provider_type)
+        if p:
+            return {"provider_id": p.id, "provider_name": p.provider_name}
+    except Exception:
+        pass
+    return {}
 
 
 def get_config(name: str, default: str = "") -> str:

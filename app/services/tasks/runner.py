@@ -150,11 +150,13 @@ class TaskRunner:
             )
 
         job.status = "success" if ok else "failed"
+        ptype = self._provider_type(job)
+        provider_info = None
         if result:
-            ptype = self._provider_type(job)
             if ptype:
-                from app.utils.config_reader import get_provider_info
-                result = {**result, "provider": get_provider_info(ptype)}
+                from app.utils.config_reader import get_provider_info_async
+                provider_info = await get_provider_info_async(ptype)
+                result = {**result, "provider": provider_info}
             job.result_json = json.dumps(result, ensure_ascii=False)
         if error:
             job.error_message = error
@@ -176,7 +178,7 @@ class TaskRunner:
             self._append_site_log(
                 site, job.action_type,
                 data={"result": result} if result else {},
-                provider_type=self._provider_type(job),
+                provider_info=provider_info,
                 action=job.action_type,
                 status=job.status,
                 started_at=job.started_at,
@@ -189,7 +191,7 @@ class TaskRunner:
         site: Site,
         source: str,
         data: dict,
-        provider_type: str = "",
+        provider_info: dict = None,
         action: str = "",
         status: str = "success",
         started_at: datetime = None,
@@ -197,7 +199,6 @@ class TaskRunner:
         error: str = "",
     ):
         """追加站点流水线日志（结构化的 JSON 条目）"""
-        from app.utils.config_reader import get_provider_info
 
         now = datetime.now()
         started = started_at or now
@@ -220,8 +221,8 @@ class TaskRunner:
             "error": error,
             **data,
         }
-        if provider_type:
-            entry["provider"] = get_provider_info(provider_type)
+        if provider_info:
+            entry["provider"] = provider_info
 
         old_log = site.pipeline_log or ""
         site.pipeline_log = (old_log + "\n" + json.dumps(entry, ensure_ascii=False)).strip()

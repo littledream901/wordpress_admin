@@ -597,8 +597,10 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
 
     def fetch_feed_links(self, ctx_refresh_url: str) -> list:
-        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表（统一重试/错误处理）。
+        """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表。
 
+        ctx-refresh.php 的 500 通常是 WordPress 侧代码逻辑错误（非瞬态），
+        因此最多重试 1 次，且仅走 HTTPS（HTTP→HTTPS 重定向无意义）。
         返回扁平的 URL 字符串列表，自动过滤 logs 目录。
         """
         if not ctx_refresh_url:
@@ -612,16 +614,21 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         if parsed.query:
             path = f"{path}?{parsed.query}"
 
+        url = f"https://{domain}/{path}"
         try:
-            data = self.php_client.fetch_with_fallback(
-                domain=domain, path=path, step="ctx_feed",
+            data = self.php_client.fetch_json(
+                url=url,
                 success_check=lambda d: isinstance(d.get("feed_links"), list) and len(d["feed_links"]) > 0,
-                max_retries=3,
+                max_retries=1,
+                step="ctx_feed",
             )
             links = [str(l) for l in (data.get("feed_links") or [])]
             links = [l for l in links if "/logs/" not in l]
             _log.info("CTX 刷新成功，获取到 %s 条 Feed 链接", len(links))
             return links
+        except PHPClientResponseError as e:
+            _log.warning("CTX Feed_Link 获取失败（业务错误，不重试）: %s", e)
+            return []
         except PHPClientError as e:
             _log.warning("CTX Feed_Link 获取失败: %s", e)
             return []
