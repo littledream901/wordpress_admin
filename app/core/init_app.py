@@ -733,6 +733,9 @@ async def init_roles():
         if agent_role:
             await _grant_hub_agent_apis(agent_role, await Api.all())
 
+    # 确保 admin 用户绑定 admin 角色
+    await _ensure_admin_role_binding()
+
     # 确保 hubstudio_agent 用户绑定 hub_agent 角色
     await _ensure_agent_role_binding()
 
@@ -904,6 +907,21 @@ async def _grant_hub_agent_apis(agent_role, all_apis: list):
         )
     else:
         logger.debug("[init_roles] hub_agent 角色 API 已就绪")
+
+
+async def _ensure_admin_role_binding():
+    """确保 admin 用户绑定了 admin 角色（幂等）"""
+    from app.models.admin import User
+
+    admin_user = await User.filter(username="admin").first()
+    admin_role = await Role.filter(code="admin").first()
+    if not admin_user or not admin_role:
+        return
+
+    existing = {r.code for r in await admin_user.roles.all()}
+    if "admin" not in existing:
+        await admin_user.roles.add(admin_role)
+        logger.info("[init_roles] admin 已绑定 admin 角色")
 
 
 async def _ensure_agent_role_binding():
