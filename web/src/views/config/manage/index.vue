@@ -1,7 +1,7 @@
 <template>
   <CommonPage title="配置中心">
     <template #action>
-      <n-button type="primary" @click="handleAdd">
+      <n-button v-permission="'post/api/v1/config/create'" type="primary" @click="handleAdd">
         <TheIcon icon="material-symbols:add" :size="16" class="mr-5" />
         新增 Provider
       </n-button>
@@ -122,7 +122,7 @@
       <n-empty v-else description="该 Provider 暂无配置项" />
 
       <div v-if="itemList.length > 0" mt-20 flex justify-center>
-        <n-button type="primary" size="large" :loading="saving" @click="saveItems">
+        <n-button v-permission="'post/api/v1/config/batch-save'" type="primary" size="large" :loading="saving" @click="saveItems">
           保存配置项
         </n-button>
       </div>

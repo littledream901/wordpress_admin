@@ -33,7 +33,7 @@
         />
       </template>
       <template #queryBarActions>
-        <n-button type="info" size="small" :disabled="checkedSiteIds.length === 0" @click="openBatchModal">
+        <n-button v-permission="'post/api/v1/config-provider/bindings/batch-create'" type="info" size="small" :disabled="checkedSiteIds.length === 0" @click="openBatchModal">
           批量绑定 ({{ checkedSiteIds.length }})
         </n-button>
         <n-tag type="info" size="small" :bordered="false">

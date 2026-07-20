@@ -71,8 +71,24 @@ def _get_onepanel_files():
         _onepanel_files = OnePanelFileManager(_get_onepanel_api())
     return _onepanel_files
 
-_provision_semaphore = asyncio.Semaphore(_load_max_concurrent())
-_import_semaphore = asyncio.Semaphore(_load_max_concurrent())
+_provision_semaphore: asyncio.Semaphore | None = None
+_import_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_provision_semaphore() -> asyncio.Semaphore:
+    """惰性创建建站信号量（避免模块导入时触发 provider 配置读取）"""
+    global _provision_semaphore
+    if _provision_semaphore is None:
+        _provision_semaphore = asyncio.Semaphore(_load_max_concurrent())
+    return _provision_semaphore
+
+
+def _get_import_semaphore() -> asyncio.Semaphore:
+    """惰性创建导入信号量（避免模块导入时触发 provider 配置读取）"""
+    global _import_semaphore
+    if _import_semaphore is None:
+        _import_semaphore = asyncio.Semaphore(_load_max_concurrent())
+    return _import_semaphore
 
 
 # ── 辅助工具函数 ──
@@ -113,17 +129,13 @@ def _apply_dns_result_to_site(site, result: dict):
     """将 DNS 结果写入 site 对象（不 save，由调用方在 async 上下文中 save）"""
     now = datetime.now()
 
+    # 明确失败的响应（如 Zone 创建失败）不覆盖 site 状态
+    if result.get("ok") is False:
+        return
+
     root_ok = result.get('root_ok', True)
     www_ok = result.get('www_ok', True)
-    site.cloudflare_status = '已解析' if (root_ok and www_ok) else '部分失败'
-
     dynadot_r = result.get('dynadot_result')
-    if dynadot_r is not None:
-        ok = dynadot_r.get("success", False) if isinstance(dynadot_r, dict) else False
-        site.dynadot_status = "ns_updated" if ok else f"ns_failed:{json.dumps(dynadot_r)[:80]}"
-    else:
-        zone_status = result.get("zone_status") or "unknown"
-        site.dynadot_status = f'zone_{zone_status}'
 
     log_entry = json.dumps({
         "ts": now.isoformat(),
@@ -140,10 +152,29 @@ def _apply_dns_result_to_site(site, result: dict):
     }, ensure_ascii=False)
     site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 
+    # 更新 CF / Dynadot 状态供前端展示
+    if root_ok and www_ok:
+        site.cloudflare_status = 'success'
+    elif root_ok or www_ok:
+        site.cloudflare_status = 'partial_success'
+    else:
+        site.cloudflare_status = 'failed'
+
+    if dynadot_r:
+        site.dynadot_status = 'success' if dynadot_r.get('success') else 'failed'
+    else:
+        # Zone 已 active，NS 已正确配置，无需 Dynadot 操作
+        site.dynadot_status = 'success'
+
 
 def _run_dns_sync(site):
     """在线程池中同步执行 DNS + NS 操作（避免阻塞事件循环）
-    注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB"""
+    注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB
+
+    Cloudflare zone 创建是最关键的前置步骤；完成后 Cloudflare 记录设置
+    与 Dynadot NS 更新相互独立，并行执行以缩短总耗时。
+    """
+    from concurrent.futures import ThreadPoolExecutor
     from app.services.providers.dynadot_service import DynadotService
 
     cf = cloudflare_service
@@ -154,20 +185,37 @@ def _run_dns_sync(site):
         zone_id, ns, status = cf.get_or_create_zone(site.domain)
         if not zone_id:
             return {'ok': False, 'error': f'Shopify zone 创建失败: domain={site.domain}'}
-        dynadot_result = None
-        if status in ('pending', 'invalid_nameservers'):
-            try:
-                dynadot_svc = DynadotService()
-                dynadot_result = dynadot_svc.set_nameserver(site.domain, ns)
-            except Exception as e:
-                dynadot_result = {"success": False, "error": str(e)}
-        cf.delete_records_by_type(zone_id, 'A')
-        cf.delete_records_by_type(zone_id, 'AAAA')
-        root_ok = cf.add_or_update_a_record(zone_id, site.domain, SHOPIFY_IP)
-        www_ok = cf.add_or_update_cname_record(zone_id, 'www', SHOPIFY_CNAME)
+
+        # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
+        dynadot_result, cf_results = None, {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            if status in ('pending', 'invalid_nameservers'):
+                futures['dynadot'] = executor.submit(
+                    lambda: DynadotService().set_nameserver(site.domain, ns)
+                )
+            futures['cf'] = executor.submit(
+                _setup_cf_records, cf, zone_id, site.domain,
+                root_type='A', root_value=SHOPIFY_IP,
+                www_type='CNAME', www_value=SHOPIFY_CNAME,
+                www_name='www',
+            )
+            for name, future in futures.items():
+                try:
+                    if name == 'dynadot':
+                        dynadot_result = future.result()
+                    elif name == 'cf':
+                        cf_results = future.result()
+                except Exception as e:
+                    if name == 'dynadot':
+                        dynadot_result = {"success": False, "error": str(e)}
+                    else:
+                        cf_results = {"root_ok": False, "www_ok": False, "error": str(e)}
+
         return {
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
-            'root_ok': root_ok, 'www_ok': www_ok,
+            'root_ok': cf_results.get('root_ok', False),
+            'www_ok': cf_results.get('www_ok', False),
             'dynadot_result': dynadot_result,
         }
     else:
@@ -175,22 +223,55 @@ def _run_dns_sync(site):
         if not zone_id:
             return {'ok': False, 'error': f'Zone 创建失败: domain={site.domain}'}
 
-        dynadot_result = None
-        if status in ('pending', 'invalid_nameservers'):
-            try:
-                dynadot_svc = DynadotService()
-                dynadot_result = dynadot_svc.set_nameserver(site.domain, ns)
-            except Exception as e:
-                dynadot_result = {"success": False, "error": str(e)}
-
-        root_ok = cf.add_or_update_a_record(zone_id, site.domain, site.server_ip)
-        www_ok = cf.add_or_update_a_record(zone_id, f'www.{site.domain}', site.server_ip)
+        # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
+        dynadot_result, cf_results = None, {}
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            if status in ('pending', 'invalid_nameservers'):
+                futures['dynadot'] = executor.submit(
+                    lambda: DynadotService().set_nameserver(site.domain, ns)
+                )
+            futures['cf'] = executor.submit(
+                _setup_cf_records, cf, zone_id, site.domain,
+                root_type='A', root_value=site.server_ip,
+                www_type='A', www_value=site.server_ip,
+                www_name=f'www.{site.domain}',
+            )
+            for name, future in futures.items():
+                try:
+                    if name == 'dynadot':
+                        dynadot_result = future.result()
+                    elif name == 'cf':
+                        cf_results = future.result()
+                except Exception as e:
+                    if name == 'dynadot':
+                        dynadot_result = {"success": False, "error": str(e)}
+                    else:
+                        cf_results = {"root_ok": False, "www_ok": False, "error": str(e)}
 
         return {
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
-            'root_ok': root_ok, 'www_ok': www_ok,
+            'root_ok': cf_results.get('root_ok', False),
+            'www_ok': cf_results.get('www_ok', False),
             'dynadot_result': dynadot_result,
         }
+
+
+def _setup_cf_records(cf, zone_id, domain, root_type, root_value, www_type, www_value, www_name=None):
+    """在 ThreadPoolExecutor 中执行的 Cloudflare 记录设置（同步）"""
+    if www_name is None:
+        www_name = f'www.{domain}'
+    cf.delete_records_by_type(zone_id, root_type)
+    cf.delete_records_by_type(zone_id, 'AAAA')
+    if root_type == 'CNAME':
+        root_ok = cf.add_or_update_cname_record(zone_id, domain, root_value)
+    else:
+        root_ok = cf.add_or_update_a_record(zone_id, domain, root_value)
+    if www_type == 'CNAME':
+        www_ok = cf.add_or_update_cname_record(zone_id, 'www', www_value)
+    else:
+        www_ok = cf.add_or_update_a_record(zone_id, www_name, www_value)
+    return {'root_ok': root_ok, 'www_ok': www_ok}
 
 
 # ── CRUD ──
@@ -293,6 +374,7 @@ class SitePipelineController:
     ) -> dict:
         """查询站点列表并附加部门/用户/Gmail 信息"""
         from app.core.data_permission import DataPermissionFilter
+        t0 = time.perf_counter()
         q = Q()
         if domain:
             q &= Q(domain__contains=domain)
@@ -305,29 +387,50 @@ class SitePipelineController:
             q &= Q(dept_id=dept_id)
         if assign_to is not None:
             q &= Q(create_by=assign_to)
+        t1 = time.perf_counter()
         total, objs = await site_controller.list(page=page, page_size=page_size, search=q, order=['-id'])
+        t2 = time.perf_counter()
 
         dept_ids = {d for obj in objs if (d := getattr(obj, 'dept_id', None))}
         user_ids = {u for obj in objs if (u := getattr(obj, 'create_by', None))}
         site_ids_list = [obj.id for obj in objs]
-        dept_map, user_map, gmail_map = {}, {}, {}
-        if dept_ids:
-            depts = await Dept.filter(id__in=list(dept_ids)).all()
-            dept_map = {d.pk: d.name for d in depts}
-        if user_ids:
-            users = await User.filter(id__in=list(user_ids)).all()
-            user_map = {u.id: u.username for u in users}
-        gmails = await GmailAccount.filter(assigned_site_id__in=site_ids_list).all()
+
+        # 并行查询三张关联表
+        dept_task = Dept.filter(id__in=list(dept_ids)).all() if dept_ids else None
+        user_task = User.filter(id__in=list(user_ids)).all() if user_ids else None
+        gmail_task = None
+        try:
+            gmail_task = GmailAccount.filter(assigned_site_id__in=site_ids_list).all()
+        except Exception:
+            _log.warning("GmailAccount 查询失败（字段可能未迁移），跳过")
+
+        results = await asyncio.gather(
+            dept_task or asyncio.sleep(0),
+            user_task or asyncio.sleep(0),
+            gmail_task or asyncio.sleep(0),
+        )
+        depts, users, gmails = results[0] or [], results[1] or [], results[2] or []
+        dept_map = {d.pk: d.name for d in depts}
+        user_map = {u.id: u.username for u in users}
         gmail_map = {g.assigned_site_id: g for g in gmails}
+
+        # 并行序列化
+        dicts = await asyncio.gather(*[obj.to_dict(exclude_fields=['pipeline_log']) for obj in objs])
         data = []
-        for obj in objs:
-            d = await obj.to_dict()
+        for obj, d in zip(objs, dicts):
             gmail = gmail_map.get(obj.id)
             d['gmail_username'] = gmail.username if gmail else ''
             d['gmail_status'] = gmail.status if gmail else ''
             d['dept_name'] = dept_map.get(getattr(obj, 'dept_id', None), '')
             d['assign_to_name'] = user_map.get(getattr(obj, 'create_by', None), '')
             data.append(d)
+
+        t3 = time.perf_counter()
+        _log.info(
+            "[site/list] 耗时分解 | 权限过滤: %dms | DB查询: %dms | 关联+序列化: %dms | 总计: %dms",
+            int((t1 - t0) * 1000), int((t2 - t1) * 1000),
+            int((t3 - t2) * 1000), int((t3 - t0) * 1000),
+        )
         return {"total": total, "data": data, "page": page, "page_size": page_size}
 
     async def get_site_detail(self, site_id: int) -> dict:
@@ -346,7 +449,11 @@ class SitePipelineController:
             site_dict['assign_to_name'] = owner.username if owner else ''
         else:
             site_dict['assign_to_name'] = ''
-        gmail = await GmailAccount.filter(assigned_site_id=obj.id).first()
+        try:
+            gmail = await GmailAccount.filter(assigned_site_id=obj.id).first()
+        except Exception:
+            _log.warning("GmailAccount 详情查询失败（字段可能未迁移）")
+            gmail = None
 
         CORE_TYPES = ['cloudflare', 'dynadot', 'onepanel', 'hubstudio'] if obj.platform != 'shopify' \
                      else ['cloudflare', 'dynadot', 'hubstudio', 'shopify']
@@ -678,7 +785,7 @@ class SitePipelineController:
         return {"ok": True, "data": {"job_id": job.id, "step": "create_site", "total_steps": 12}}
 
     async def _run_provision_bg(self, job: OperationJob, site):
-        async with _provision_semaphore:
+        async with _get_provision_semaphore():
             from app.services.tasks.provision import provision_task_runner
             await provision_task_runner._run_impl(job, site)
 
@@ -727,9 +834,9 @@ class SitePipelineController:
             result = await loop.run_in_executor(None, _run_dns_sync, site)
             _apply_dns_result_to_site(site, result)
             await site.save()
-            await self._complete_job(job, ok=True, result=result)
+            await self._complete_job(job, ok=True, result=result, site=site)
         except Exception as e:
-            await self._complete_job(job, ok=False, error=str(e))
+            await self._complete_job(job, ok=False, error=str(e), site=site)
 
     async def batch_dns(self, site_ids: List[int]) -> dict:
         batch_id = f"dns-{int(time.time())}"
@@ -759,9 +866,11 @@ class SitePipelineController:
                     try:
                         loop = asyncio.get_event_loop()
                         r = await loop.run_in_executor(None, _run_dns_sync, site)
+                        # 判断 DNS 实际结果（r 中有 ok 字段的才是失败摘要响应）
+                        dns_ok = r.get("ok") is not False
                         _apply_dns_result_to_site(site, r)
                         await site.save()
-                        results.append({"site_id": site.id, "domain": site.domain, "ok": True, "result": r})
+                        results.append({"site_id": site.id, "domain": site.domain, "ok": dns_ok, "result": r})
                     except Exception as e:
                         results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": str(e)})
             await asyncio.gather(*[_run_one(s) for s in valid_sites])
@@ -790,7 +899,7 @@ class SitePipelineController:
                 ns_list = ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]
             result = dynadot_service.set_nameserver(site.domain, ns_list)
             ok = result.get("success", False)
-            await self._complete_job(job, ok=ok, result=result, error=result.get("error", ""))
+            await self._complete_job(job, ok=ok, result=result, error=result.get("error", ""), site=site)
             self._append_site_log(site, "dynadot_ns", {"success": ok}, "dynadot")
             site.dynadot_status = "ns_updated" if ok else f"ns_failed:{str(result.get('error',''))[:80]}"
             await site.save()
@@ -798,43 +907,10 @@ class SitePipelineController:
                 return {"ok": True, "data": {"domain": site.domain, "ns_list": ns_list, "raw": result}}
             return {"ok": False, "error": result.get("error", "Unknown error"), "code": 500}
         except Exception as e:
-            await self._complete_job(job, ok=False, error=str(e))
+            await self._complete_job(job, ok=False, error=str(e), site=site)
             site.dynadot_status = f"ns_failed:{str(e)[:80]}"
             await site.save()
             return {"ok": False, "error": str(e), "code": 500}
-
-    async def batch_dynadot_ns(self, site_ids: List[int], ns_list: List[str] = None) -> dict:
-        batch_id = f"dynadot-ns-{int(time.time())}"
-        results = []
-        if not ns_list:
-            ns_list = ["a.ns.cloudflare.com", "b.ns.cloudflare.com"]
-        for site_id in site_ids:
-            site = await site_controller.get(id=site_id)
-            if not site:
-                results.append({"site_id": site_id, "ok": False, "error": "site not found"})
-                continue
-            job = await self._create_job(site_id, site.domain, "dynadot_ns", batch_id=batch_id)
-            asyncio.create_task(self._run_dynadot_ns_bg(job, site, ns_list))
-            results.append({"site_id": site_id, "domain": site.domain, "ok": True, "job_id": job.id, "status": "running"})
-        return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": len(results),
-                "success": sum(1 for r in results if r["ok"]), "fail": sum(1 for r in results if not r["ok"])}}
-
-    async def _run_dynadot_ns_bg(self, job: OperationJob, site, ns_list: list):
-        loop = asyncio.get_event_loop()
-        try:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(None, dynadot_service.set_nameserver, site.domain, ns_list),
-                timeout=120,
-            )
-            ok = result.get("success", False)
-            await self._complete_job(job, ok=ok, result=result, error=result.get("error", ""))
-            self._append_site_log(site, "dynadot_ns", {"success": ok, "raw": str(result.get("raw", ""))[:200]}, "dynadot")
-            site.dynadot_status = "ns_updated" if ok else f"ns_failed:{str(result.get('error',''))[:80]}"
-            await site.save()
-        except Exception as e:
-            await self._complete_job(job, ok=False, error=str(e))
-            site.dynadot_status = f"ns_failed:{str(e)[:80]}"
-            await site.save()
 
     # ── Redirect ──
     async def provision_redirect(self, site_id: int, target_url: str) -> dict:
@@ -842,10 +918,10 @@ class SitePipelineController:
         job = await self._create_job(site_id, site.domain, "redirect")
         try:
             result = await cloudflare_redirect_service.setup_redirect(site, target_url)
-            await self._complete_job(job, ok=True, result=result)
+            await self._complete_job(job, ok=True, result=result, site=site)
             return {"ok": True, "data": result}
         except Exception as e:
-            await self._complete_job(job, ok=False, error=str(e))
+            await self._complete_job(job, ok=False, error=str(e), site=site)
             return {"ok": False, "error": str(e), "code": 500}
 
     async def batch_redirect(self, site_ids: List[int], target_url: str) -> dict:
@@ -865,9 +941,9 @@ class SitePipelineController:
     async def _run_redirect_bg(self, job: OperationJob, site, target_url: str):
         try:
             result = await cloudflare_redirect_service.setup_redirect(site, target_url)
-            await self._complete_job(job, ok=True, result=result)
+            await self._complete_job(job, ok=True, result=result, site=site)
         except Exception as e:
-            await self._complete_job(job, ok=False, error=str(e))
+            await self._complete_job(job, ok=False, error=str(e), site=site)
 
     # ── 产品导入 ──
     async def import_products(self, site_id: int) -> dict:
@@ -906,19 +982,27 @@ class SitePipelineController:
                 "success": sum(1 for r in results if r["ok"]), "fail": sum(1 for r in results if not r["ok"])}}
 
     async def _run_import_bg(self, job: OperationJob, site, importer, pre_selected_rows=None):
-        async with _import_semaphore:
-            await self._update_job_step(job, "importing")
+        async with _get_import_semaphore():
             try:
+                await self._update_job_step(job, "importing")
                 result = await importer.import_products(site, pre_selected_rows)
                 ok = result.get("ok", False) if isinstance(result, dict) else False
-                await self._complete_job(job, ok=ok, result=result)
+                await self._complete_job(job, ok=ok, result=result, site=site)
                 if ok and result.get("success", 0) > 0:
                     if site.platform == 'shopify':
                         await self._refresh_shopify_product_count(site)
                     else:
                         await self._refresh_product_count(site)
             except Exception as e:
-                await self._complete_job(job, ok=False, error=str(e))
+                # 兜底：确保即使 _complete_job 抛异常，任务状态也能落盘
+                try:
+                    await self._complete_job(job, ok=False, error=str(e), site=site)
+                except Exception as inner_e:
+                    _log.error("_run_import_bg _complete_job 失败: %s", inner_e)
+                    job.status = "failed"
+                    job.error_message = str(e)
+                    job.finished_at = datetime.now()
+                    await job.save()
 
     async def refresh_product_count(self, site_id: int) -> dict:
         site = await site_controller.get(id=site_id)

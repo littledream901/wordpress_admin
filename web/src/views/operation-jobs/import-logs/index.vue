@@ -12,7 +12,7 @@
       </template>
       <template #queryBarActions>
         <n-upload accept=".csv,.xlsx" :show-file-list="false" @change="handleUpload">
-          <n-button type="primary">上传 CSV/XLSX 导入</n-button>
+          <n-button v-permission="'post/api/v1/import/sites'" type="primary">上传 CSV/XLSX 导入</n-button>
         </n-upload>
         <n-select v-model:value="uploadType" :options="typeOptions.filter(t => t.value)" placeholder="选择导入类型" style="width:160px" />
         <n-button secondary @click="downloadTemplate">下载模板</n-button>

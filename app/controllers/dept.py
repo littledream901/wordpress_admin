@@ -18,7 +18,11 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
             q &= Q(name__contains=name)
         all_depts = await self.model.filter(q).order_by("order")
 
-        # 辅助函数，用于递归构建部门树
+        # O(n) 构建部门树：先按 parent_id 分组，再递归输出
+        children_map: dict = {}
+        for dept in all_depts:
+            children_map.setdefault(dept.parent_id, []).append(dept)
+
         def build_tree(parent_id):
             return [
                 {
@@ -27,10 +31,9 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
                     "desc": dept.desc,
                     "order": dept.order,
                     "parent_id": dept.parent_id,
-                    "children": build_tree(dept.id),  # 递归构建子部门
+                    "children": build_tree(dept.id),
                 }
-                for dept in all_depts
-                if dept.parent_id == parent_id
+                for dept in children_map.get(parent_id, [])
             ]
 
         # 从顶级部门（parent_id=0）开始构建部门树
@@ -42,8 +45,6 @@ class DeptController(CRUDBase[Dept, DeptCreate, DeptUpdate]):
 
     async def update_dept_closure(self, obj: Dept):
         parent_depts = await DeptClosure.filter(descendant=obj.parent_id)
-        for i in parent_depts:
-            print(i.ancestor, i.descendant)
         dept_closure_objs: list[DeptClosure] = []
         # 插入父级关系
         for item in parent_depts:

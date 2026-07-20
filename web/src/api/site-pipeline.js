@@ -13,7 +13,6 @@ export default {
   batchDeleteSites: (ids = []) => request.post('/site-pipeline/site/batch-delete', ids),
   batchDns: (ids = []) => request.post('/site-pipeline/site/batch-dns', ids),
   batchProvision: (ids = []) => request.post('/site-pipeline/site/batch-provision', ids),
-  batchDynadotNs: (ids = [], nsList = '') => request.post('/site-pipeline/site/batch-dynadot-ns', { site_ids: ids, ns_list: nsList }),
   batchRedirect: (ids = [], targetUrl = '') => request.post('/site-pipeline/site/batch-redirect', { site_ids: ids, target_url: targetUrl }),
   batchHubDispatch: (ids = [], jobType = 'create_env') => request.post('/site-pipeline/site/batch-hub-dispatch', { site_ids: ids, job_type: jobType }),
   batchImportProducts: (ids = []) => request.post('/site-pipeline/site/batch-woo-import', ids),

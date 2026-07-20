@@ -57,12 +57,12 @@ class AdsEnvController(CRUDBase[AdsEnv, AdsEnvCreate, AdsEnvUpdate]):
         total, objs = await self.list(
             page=page, page_size=page_size, search=q,
             order=order or ['-created_at'],
+            prefetch_related=['sites'],
         )
 
         data = []
         for obj in objs:
             d = await obj.to_dict(exclude_fields=['sites'])
-            await obj.fetch_related('sites')
             d['site_ids'] = [s.id for s in obj.sites]
             d['site_domains'] = [s.domain for s in obj.sites]
             data.append(d)

@@ -35,11 +35,17 @@
         <template v-if="checkedRowKeys.length">
           <n-divider vertical />
           <span style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
-          <n-button size="small" type="warning" ghost @click="batchRetry">
+          <n-button v-permission="'post/api/v1/site-pipeline/hub-job/{job_id}/retry'" size="small" type="warning" ghost @click="batchRetry">
             批量重试
           </n-button>
-          <n-button size="small" type="error" ghost @click="batchCancel">
-            批量取消
+          <n-button v-permission="'post/api/v1/site-pipeline/hub-job/batch-cancel'"
+            size="small"
+            type="error"
+            ghost
+            :disabled="canBatchCancel.length === 0"
+            @click="batchCancel"
+          >
+            批量取消 ({{ canBatchCancel.length }})
           </n-button>
         </template>
       </template>
@@ -71,7 +77,7 @@
         <n-input v-if="currentRow?.error_message" type="textarea" :value="currentRow.error_message" :rows="4" readonly />
         <n-space>
           <n-button @click="copyText(JSON.stringify(currentRow, null, 2))">复制全部</n-button>
-          <n-button type="warning" @click="retryCurrent" :disabled="!currentRow">重试此任务</n-button>
+          <n-button v-permission="'post/api/v1/site-pipeline/hub-job/{job_id}/retry'" type="warning" @click="retryCurrent" :disabled="!currentRow">重试此任务</n-button>
         </n-space>
       </n-space>
     </n-modal>
@@ -79,10 +85,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, h, onMounted } from 'vue'
+import { h, ref, reactive, computed, onMounted, resolveDirective, withDirectives } from 'vue'
 import { NButton, NTag, useMessage } from 'naive-ui'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
+
+const vPermission = resolveDirective('permission')
 
 const message = useMessage()
 const crudRef = ref(null)
@@ -236,9 +244,9 @@ const columns = [
     title: '操作', key: 'actions', width: 180,
     render: row => h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, [
       h(NButton, { size: 'tiny', onClick: () => openDetail(row) }, { default: () => '详情' }),
-      h(NButton, { size: 'tiny', type: 'warning', onClick: () => retryJob(row) }, { default: () => '重试' }),
+      withDirectives(h(NButton, { size: 'tiny', type: 'warning', onClick: () => retryJob(row) }, { default: () => '重试' }), [[vPermission, 'post/api/v1/site-pipeline/hub-job/{job_id}/retry']]),
       (row.status === 'pending' || row.status === 'running')
-        ? h(NButton, { size: 'tiny', type: 'error', onClick: () => cancelJob(row) }, { default: () => '取消' })
+        ? withDirectives(h(NButton, { size: 'tiny', type: 'error', onClick: () => cancelJob(row) }, { default: () => '取消' }), [[vPermission, 'post/api/v1/site-pipeline/hub-job/{job_id}/cancel']])
         : null,
     ].filter(Boolean)),
   },

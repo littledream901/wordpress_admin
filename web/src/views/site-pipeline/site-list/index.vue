@@ -73,9 +73,6 @@
           确定要对 <b>{{ checkedRowKeys.length }}</b> 个站点执行
           <b>{{ currentBatchLabel }}</b> 操作吗？
         </div>
-        <n-form-item v-if="currentBatchAction === 'dynadot-ns'" label="NS 列表" label-placement="left">
-          <n-input v-model:value="batchExtraNsList" placeholder="ns1.dynadot.com,ns2.dynadot.com" />
-        </n-form-item>
         <n-form-item v-if="currentBatchAction === 'redirect'" label="目标URL" label-placement="left">
           <n-input v-model:value="batchExtraTargetUrl" placeholder="https://target.com/$1" />
         </n-form-item>
@@ -182,7 +179,7 @@
         <template #footer>
           <n-space justify="end">
             <n-button @click="showAdd = false">取消</n-button>
-            <n-button type="primary" @click="doSave" :loading="saving">保存</n-button>
+            <n-button v-permission="'post/api/v1/site-pipeline/site/update'" type="primary" @click="doSave" :loading="saving">保存</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -306,7 +303,7 @@
             <template #footer>
               <n-space justify="end">
                 <n-button @click="showShopifyEdit = false">取消</n-button>
-                <n-button type="primary" @click="saveShopifyConfig" :loading="shopifySaving">保存</n-button>
+                <n-button v-permission="'post/api/v1/site-pipeline/site/update'" type="primary" @click="saveShopifyConfig" :loading="shopifySaving">保存</n-button>
               </n-space>
             </template>
           </n-modal>
@@ -351,6 +348,7 @@ import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, useMessage, use
 import api from '@/api/site-pipeline'
 import baseApi from '@/api'
 import gmailApi from '@/api/gmail'
+import { isForceLoggingOut, registerStopAllPollingHandler } from '@/utils'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import TheIcon from '@/components/icon/TheIcon.vue'
@@ -397,7 +395,7 @@ const gmailColumns = [
   { title: '已分配站点', key: 'assigned_site_domain', width: 150, ellipsis: { tooltip: true } },
   {
     title: '操作', key: 'actions', width: 130,
-    render: (row) => h(NButton, { size: 'small', type: 'primary', onClick: () => assignGmail(row.id) }, { default: () => '分配到此站点' }),
+    render: (row) => withDirectives(h(NButton, { size: 'small', type: 'primary', onClick: () => assignGmail(row.id) }, { default: () => '分配到此站点' }), [[vPermission, 'post/api/v1/gmail/assign']]),
   },
 ]
 
@@ -561,23 +559,23 @@ const columns = [
     render: (r) => r.platform === 'shopify' ? h('span', { style: 'color:#999' }, '-') : (r.server_ip || '-'),
   },
   { title: '平台', key: 'platform', width: 60, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
-  { title: 'CF 状态', key: 'dynadot_status', width: 80, render: (r) => statusTag(r.dynadot_status), align: 'center' },
-  { title: '站点状态', key: 'status', width: 80, render: (r) => h(NTag, { type: r.status === '已建站' ? 'success' : 'default', size: 'small' }, { default: () => r.status || '-' }), align: 'center' },
-  { title: '产品数', key: 'woo_product_count', width: 80, align: 'center',
+  { title: '解析状态', key: 'cloudflare_status', width: 70, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
+  { title: '站点状态', key: 'status', width: 70, render: (r) => statusTag(r.status), align: 'center' },
+  { title: '产品数', key: 'woo_product_count', width: 70, align: 'center',
     render: (row) => {
       const count = row.woo_product_count || 0
       return h(NSpace, { size: 4, justify: 'center', align: 'center' }, {
         default: () => [
           h('span', { style: 'font-weight:600;min-width:24px' }, count),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: (e) => { e.stopPropagation(); syncProductCount(row.id, row) } },
+          withDirectives(h(NButton, { size: 'tiny', quaternary: true, onClick: (e) => { e.stopPropagation(); syncProductCount(row.id, row) } },
             { default: () => h(TheIcon, { icon: 'mdi:sync', size: 14 }) }
-          ),
+          ), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/refresh-woo-count']]),
         ],
       })
     },
   },
-  { title: 'Gmail', key: 'gmail_username', width: 80, render: (r) => r.gmail_username ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
-  { title: 'Hub 状态', key: 'hub_status', width: 100, render: (r) => statusTag(r.hub_status), align: 'center' },
+  { title: 'Gmail', key: 'gmail_username', width: 70, render: (r) => r.gmail_username ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
+  { title: 'Hub 状态', key: 'hub_status', width: 120, render: (r) => statusTag(r.hub_status), align: 'center' },
   { title: 'GMC', key: 'gmc_status', width: 80, render: (r) => statusTag(r.gmc_status), align: 'center' },
   { title: '重定向', key: 'pipeline_status', width: 80, render: (r) => statusTag(redirectLabel(r)), align: 'center' },
   { title: '操作', key: 'actions', width: 400,
@@ -660,7 +658,7 @@ const batchSuccessCount = computed(() => batchResults.value.filter(r => r.ok).le
 const batchFailCount = computed(() => batchResults.value.filter(r => !r.ok).length)
 const batchTotalCount = computed(() => batchResults.value.length)
 // 异步操作（返回 job_id 后台运行）
-const batchIsAsync = computed(() => ['dns', 'dynadot-ns', 'provision', 'hub', 'woo-import', 'redirect'].includes(batchResultActionType.value))
+const batchIsAsync = computed(() => ['dns', 'provision', 'woo-import', 'redirect'].includes(batchResultActionType.value))
 
 function goToJobs() {
   showBatchResult.value = false
@@ -695,9 +693,7 @@ const batchAddPlaceholder = computed(() => batchAddPlatform.value === 'shopify'
 
 const batchActionLabelMap = {
   dns: '批量 DNS+NS',
-  'dynadot-ns': '批量 Dynadot NS',
   provision: '批量建站',
-  hub: '批量 Hub 分发',
   'woo-import': '批量导入产品',
   redirect: '批量重定向',
   'assign-gmail': '批量分配Gmail',
@@ -707,9 +703,7 @@ const batchActionLabelMap = {
 
 const batchActions = [
   { label: '批量 DNS+NS', key: 'dns', icon: 'mdi:cloud-check', permission: 'post/api/v1/site-pipeline/site/batch-dns' },
-  { label: '批量 Dynadot NS', key: 'dynadot-ns', icon: 'mdi:domain', permission: 'post/api/v1/site-pipeline/site/batch-dynadot-ns' },
   { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch', permission: 'post/api/v1/site-pipeline/site/batch-provision' },
-  { label: '批量 Hub 分发', key: 'hub', icon: 'mdi:cube-send', permission: 'post/api/v1/site-pipeline/site/batch-hub-dispatch' },
   { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
@@ -751,19 +745,27 @@ async function executeBatchAction() {
     let res
     if (action === 'dns') {
       res = await api.batchDns(ids)
-    } else if (action === 'dynadot-ns') {
-      res = await api.batchDynadotNs(ids, batchExtraNsList.value)
     } else if (action === 'provision') {
       res = await api.batchProvision(ids)
-      // 为每个建站任务启动进度轮询
       const provResults = res?.data?.results ?? []
-      provResults.forEach(r => {
-        if (r.ok && r.job_id) {
-          startProvisionPolling(r.job_id, r.domain || '', r.site_id)
-        }
-      })
-    } else if (action === 'hub') {
-      res = await api.batchHubDispatch(ids, 'create_env')
+      const okCount = provResults.filter(r => r.ok).length
+      const failCount = provResults.length - okCount
+      if (okCount > 0) {
+        notification.create({
+          type: 'info',
+          title: '批量建站已提交',
+          content: () => {
+            return h('div', { style: 'line-height: 1.8' }, [
+              `已提交 ${okCount} 个建站任务`,
+              failCount > 0 ? `，${failCount} 个失败` : '',
+              h('br'),
+              h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
+            ])
+          },
+          duration: 15000,
+          closable: true,
+        })
+      }
     } else if (action === 'woo-import') {
       res = await api.batchImportProducts(ids)
     } else if (action === 'redirect') {
@@ -918,12 +920,25 @@ const STEP_LABELS = {
   done: '完成',
 }
 
+const MAX_POLL_JOBS = 3                  // 当前页最多同时轮询的 job 数
 const provisionJobs = new Map()          // key → { jobId, domain, n, pending: bool }
 let provisionPoller = null               // 全局 setInterval id
 let provisionPollRound = 0               // 轮询轮次（用于降低 pending 复查频率）
 
 function startProvisionPolling(jobId, domain, siteId) {
   const key = `${siteId}_${jobId}`
+
+  // 并发上限：超过上限不挂轮询，直接引导任务中心
+  if (provisionJobs.size >= MAX_POLL_JOBS) {
+    notification.create({
+      type: 'info',
+      title: '建站任务已提交',
+      content: `任务 #${jobId} (${domain}) 已提交，当前轮询任务已达上限，请前往任务中心查看`,
+      duration: 8000,
+      closable: true,
+    })
+    return
+  }
 
   // 清理旧的同 key 记录
   const old = provisionJobs.get(key)
@@ -943,24 +958,62 @@ function startProvisionPolling(jobId, domain, siteId) {
     },
   })
 
-  provisionJobs.set(key, { jobId, domain, n, pending: false })
+  provisionJobs.set(key, {
+    jobId,
+    domain,
+    n,
+    pending: false,
+    retries: 0,
+    pollCount: 0,
+    maxPollCount: 12,   // 12 × 5s = 60s 短轮询上限
+  })
 
   // 确保全局轮询已启动
   if (!provisionPoller) {
+    registerStopAllPollingHandler(_stopProvisionPoll)
     provisionPoller = setInterval(_pollAllProvision, 5000)
     _pollAllProvision()
   }
 }
 
 async function _pollAllProvision() {
+  // 全局退出闸门：停止所有轮询
+  if (isForceLoggingOut()) {
+    _stopProvisionPoll()
+    provisionJobs.clear()
+    return
+  }
+
   provisionPollRound++
   // 每 3 轮（15秒）复查一次 pending 任务是否已启动
   const recheckPending = provisionPollRound % 3 === 0
 
   const entries = [...provisionJobs.entries()]
   for (const [k, v] of entries) {
+    // ── 轮询上限检查：12 次 × 5s = 60s，超时引导任务中心 ──
+    v.pollCount = (v.pollCount || 0) + 1
+    if (v.pollCount > (v.maxPollCount || 12)) {
+      v.n.type = 'info'
+      v.n.title = `后台继续执行: ${v.domain}`
+      v.n.content = () => {
+        return h('span', [
+          `任务 #${v.jobId} 仍在执行，`,
+          h('a', {
+            href: 'javascript:void(0)',
+            onClick: goToJobs,
+            style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer',
+          }, '点击前往任务中心查看'),
+        ])
+      }
+      v.n.duration = 12000
+      v.n.closable = true
+      provisionJobs.delete(k)
+      continue
+    }
+
     // 已知 pending 的跳过 API 调用，除非轮到复查
     if (v.pending && !recheckPending) continue
+    if (!v.jobId) continue
 
     try {
       const res = await api.getJob({ id: v.jobId })
@@ -983,10 +1036,11 @@ async function _pollAllProvision() {
         v.n.closable = true
         provisionJobs.delete(k)
         setTimeout(reload, 1000)
-      } else if (job.status === 'failed') {
-        v.n.type = 'error'
-        v.n.title = `建站失败: ${v.domain}`
-        v.n.content = job.error_message || '未知错误'
+      } else if (job.status === 'failed' || job.status === 'cancelled') {
+        v.n.type = job.status === 'cancelled' ? 'warning' : 'error'
+        v.n.title = `建站${job.status === 'cancelled' ? '取消' : '失败'}: ${v.domain}`
+        const cancelReason = (() => { try { return JSON.parse(job.result_json || '{}').cancel_reason } catch { return '' } })()
+        v.n.content = job.error_message || cancelReason || (job.status === 'cancelled' ? '任务已被取消' : '未知错误')
         v.n.duration = 15000
         v.n.closable = true
         provisionJobs.delete(k)
@@ -994,10 +1048,59 @@ async function _pollAllProvision() {
       } else {
         v.n.content = `[步骤] ${label}`
       }
-    } catch (_) { /* ignore */ }
+    } catch (err) {
+      // 全局退出触发的请求拒绝，静默停止轮询
+      if (err?.__forceLogout) {
+        provisionJobs.delete(k)
+        _stopProvisionPoll()
+        break
+      }
+      const code = err?.code || err?.response?.status || 0
+      if (code === 404) {
+        // 任务不存在（可能被清理），停止轮询
+        v.n.type = 'warning'
+        v.n.title = `任务丢失: ${v.domain}`
+        v.n.content = `任务 #${v.jobId} 不存在`
+        v.n.duration = 10000
+        v.n.closable = true
+        provisionJobs.delete(k)
+      } else if (code === 401) {
+        // 未登录或 token 过期，停止所有轮询
+        v.n.content = '[登录已过期]'
+        v.n.duration = 5000
+        v.n.closable = true
+        provisionJobs.delete(k)
+        _stopProvisionPoll()
+      } else if (code === 403 || code === 422) {
+        // 无权限或数据异常，停止该任务轮询
+        v.n.type = 'error'
+        v.n.title = `轮询失败: ${v.domain}`
+        v.n.content = `状态码 ${code}，已停止轮询`
+        v.n.duration = 10000
+        v.n.closable = true
+        provisionJobs.delete(k)
+      } else {
+        // 500 / 网络异常：有限重试，超次数后停止
+        v.retries = (v.retries || 0) + 1
+        if (v.retries > 5) {
+          v.n.type = 'error'
+          v.n.title = `轮询中断: ${v.domain}`
+          v.n.content = `连续失败 ${v.retries} 次，已停止轮询`
+          v.n.duration = 10000
+          v.n.closable = true
+          provisionJobs.delete(k)
+        }
+      }
+    }
   }
   // 没有任务了，停止全局轮询
   if (provisionJobs.size === 0 && provisionPoller) {
+    _stopProvisionPoll()
+  }
+}
+
+function _stopProvisionPoll() {
+  if (provisionPoller) {
     clearInterval(provisionPoller)
     provisionPoller = null
   }
@@ -1009,9 +1112,6 @@ async function doSingleAction(action, siteId) {
     if (action === 'dns') {
       await api.provisionDns(siteId)
       message.success('DNS+NS 已触发')
-    } else if (action === 'dynadot-ns') {
-      await api.provisionDynadotNs(siteId)
-      message.success('Dynadot NS 已触发')
     } else if (action === 'provision') {
       const res = await api.provisionSite(siteId)
       const jobId = res?.data?.job_id

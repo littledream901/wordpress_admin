@@ -75,9 +75,9 @@ class OperationJob(BaseModel, TimestampMixin):
     worker_name = fields.CharField(max_length=128, default="", description="执行节点")
     last_heartbeat = fields.DatetimeField(null=True, description="最后心跳时间")
     batch_id = fields.CharField(max_length=64, default="", description="批次ID（批量操作）", db_index=True)
-    retry_count = fields.IntField(default=0, description="已重试次数")
+    retry_count = fields.IntField(default=0, description="已重试次数", db_index=True)
     max_retry = fields.IntField(default=3, description="最大重试次数")
-    started_at = fields.DatetimeField(null=True, description="开始执行时间")
+    started_at = fields.DatetimeField(null=True, description="开始执行时间", db_index=True)
     finished_at = fields.DatetimeField(null=True, description="完成时间")
 
     class Meta:

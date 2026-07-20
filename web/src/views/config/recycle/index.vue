@@ -1,7 +1,7 @@
 <template>
   <CommonPage title="回收站">
     <template #action>
-      <n-button type="error" secondary @click="handleEmpty">
+      <n-button v-permission="'post/api/v1/recycle-bin/empty'" type="error" secondary @click="handleEmpty">
         <TheIcon icon="mdi:delete-sweep" :size="16" class="mr-5" />
         清空当前分类
       </n-button>

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query
 
 from app.controllers.menu import menu_controller
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.menus import *
+from app.schemas.menus import MenuCreate, MenuUpdate
 from app.utils.db_utils import safe_count
 
 logger = logging.getLogger(__name__)
@@ -83,16 +83,24 @@ async def list_menu(
     page: int = Query(1, description="页码"),
     page_size: int = Query(10, description="每页数量"),
 ):
-    async def get_menu_with_children(menu_id: int):
-        menu = await menu_controller.model.get(id=menu_id)
-        menu_dict = await menu.to_dict()
-        child_menus = await menu_controller.model.filter(parent_id=menu_id).order_by("order")
-        menu_dict["children"] = [await get_menu_with_children(child.id) for child in child_menus]
-        return menu_dict
-
-    parent_menus = await menu_controller.model.filter(parent_id=0).order_by("order")
-    res_menu = [await get_menu_with_children(menu.id) for menu in parent_menus]
-    return SuccessExtra(data=res_menu, total=len(res_menu), page=page, page_size=page_size)
+    """一次性加载全部菜单，在内存中构建树（避免递归查询 N+1）"""
+    all_menus = await menu_controller.model.all().order_by("order")
+    menu_dicts = [await m.to_dict() for m in all_menus]
+    by_id = {m["id"]: m for m in menu_dicts}
+    for m in menu_dicts:
+        m["children"] = []
+    roots = []
+    for m in menu_dicts:
+        parent_id = m.get("parent_id", 0) or 0
+        if parent_id == 0:
+            roots.append(m)
+        else:
+            parent = by_id.get(parent_id)
+            if parent:
+                parent["children"].append(m)
+            else:
+                roots.append(m)
+    return SuccessExtra(data=roots, total=len(roots), page=page, page_size=page_size)
 
 
 @router.get("/get", summary="查看菜单")

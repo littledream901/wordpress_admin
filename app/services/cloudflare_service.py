@@ -7,6 +7,7 @@ import httpx
 
 from app.utils.config_reader import get_provider_info
 from app.utils.provider_resolver import ProviderResolver
+from app.utils.http_retry import retry_request
 from app.models.site_pipeline import Site
 from app.core.exceptions import CloudflareError
 
@@ -47,9 +48,13 @@ class CloudflareService:
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, **params) -> Dict[str, Any]:
         try:
-            resp = self.session.request(
-                method, self.base + path, json=payload, params=params or None,
-                timeout=self.timeout,
+            resp = retry_request(
+                lambda: self.session.request(
+                    method, self.base + path, json=payload, params=params or None,
+                    timeout=self.timeout,
+                ),
+                max_retries=3,
+                context=f"Cloudflare {method} {path}",
             )
             resp.raise_for_status()
             return resp.json()

@@ -36,7 +36,9 @@ async def list_jobs(
 
 
 @router.get('/get', summary='查看任务详情')
-async def get_job(id: int = Query(...)):
+async def get_job(id: int = Query(None, description='任务ID')):
+    if id is None:
+        return Fail(msg='缺少任务ID参数')
     obj = await operation_job_controller.get(id=id)
     if not obj:
         return Fail(code=404, msg='任务不存在')

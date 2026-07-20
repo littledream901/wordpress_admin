@@ -65,4 +65,20 @@ for name, path in _modules.items():
     _register_module(name, path)
 
 # 重新导出所有公开 API，保持外部导入兼容
-from app.services.onepanel import *  # noqa: E402, F403
+from app.services.onepanel import (  # noqa: E402
+    OnePanelAPI,
+    OnePanelDatabaseRestorer,
+    OnePanelFileManager,
+    OnePanelSiteManager,
+    OnePanelSSLManager,
+    OnePanelWordPressRestorer,
+    RollbackManager,
+    mask_secret,
+    safe_log_data,
+    normalize_domain,
+    safe_alias,
+    wait_until,
+    parse_env_text,
+    random_str,
+    replace_domain_in_sql,
+)

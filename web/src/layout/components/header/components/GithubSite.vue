@@ -6,6 +6,6 @@
 
 <script setup>
 function handleLinkClick() {
-  window.open('https://github.com/littledream901/wordpress_admin')
+  window.open('https://github.com/')
 }
 </script>

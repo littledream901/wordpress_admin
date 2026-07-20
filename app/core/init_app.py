@@ -79,6 +79,7 @@ def make_middlewares():
             methods=["GET", "POST", "PUT", "DELETE"],
             exclude_paths=settings.AUDIT_EXCLUDE_PATHS or [
                 "/api/v1/base/access_token",
+                "/api/v1/base/refresh_token",
                 "/api/v1/import",
                 "/api/v1/site-pipeline/feed/download",
                 "/api/v1/user/avatar/upload",
@@ -154,19 +155,37 @@ MENU_DEFINITIONS = [
 #  Section 3: Schema Migration
 # ════════════════════════════════════════════════════════════════════════════
 
-async def init_db():
-    """初始化数据库表结构（幂等，可重复执行）。
+# ── 3.0 回退方案：无法获取数据库名时使用 ──
 
-    仅做建表检查，不做主键修复、数据去重等高风险操作。
-    这些操作已移至独立的修复脚本 scripts/repair_*.py。
+async def _legacy_alter_fallback(conn):
+    """旧版逐条 ALTER TABLE 回退方案"""
+    _alter_table_migrations = [
+        "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'",
+        "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)",
+        "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'",
+        "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+        "ALTER TABLE `account` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+        "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+        "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+        "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'",
+        "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'",
+        "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)",
+        "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)",
+    ]
+    for sql in _alter_table_migrations:
+        try:
+            await conn.execute_query(sql)
+        except Exception:
+            pass
+
+
+async def init_db():
+    """检查业务表是否已建表，首次自动建表（幂等）。
+
+    ORM 初始化由 app/__init__.py lifespan 负责，本函数不再调用 Tortoise.init()。
+    增量列补齐：先查询 INFORMATION_SCHEMA 确认缺哪些列/索引，只对缺失的执行 ALTER。
     """
     from tortoise import Tortoise, connections
-    from tortoise.exceptions import ConfigurationError
-
-    try:
-        await Tortoise.init(config=settings.TORTOISE_ORM)
-    except ConfigurationError:
-        pass
 
     conn = connections.get("default")
 
@@ -180,9 +199,83 @@ async def init_db():
 
     if not tables_ready:
         await Tortoise.generate_schemas(safe=True)
-        logger.info("[init_db] 首次建表完成 (safe=True)")
+        logger.info("[DB] 首次建表完成")
     else:
-        logger.info("[init_db] 业务表已存在，跳过建表")
+        logger.debug("[DB] 业务表已存在，跳过建表")
+
+        # 提取数据库名
+        db_name = ""
+        try:
+            db_name = settings.TORTOISE_ORM["connections"]["default"]["credentials"].get("database", "")
+        except Exception:
+            pass
+
+        if not db_name:
+            # 回退：逐条尝试 ALTER（无法获取数据库名时）
+            await _legacy_alter_fallback(conn)
+            return
+
+        # ── 定义需要补齐的列 ──
+        _needed_columns: list[dict] = [
+            {"table": "menu", "col": "parent_id", "sql": "ALTER TABLE `menu` ADD COLUMN `parent_id` INT NOT NULL DEFAULT 0 COMMENT '父菜单ID'"},
+            {"table": "menu", "col": "remark",    "sql": "ALTER TABLE `menu` ADD COLUMN `remark` JSON NULL COMMENT '保留字段'"},
+            {"table": "site_pipeline_gmail_account", "col": "assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_id` INT NULL COMMENT '分配站点ID'"},
+            {"table": "site_pipeline_gmail_account", "col": "assigned_site_domain", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD COLUMN `assigned_site_domain` VARCHAR(255) DEFAULT '' COMMENT '分配站点域名'"},
+        ]
+
+        # ── 定义需要补齐的索引 ──
+        _needed_indexes: list[dict] = [
+            {"table": "menu", "idx": "idx_menu_parent_id", "sql": "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)"},
+            {"table": "site_pipeline_site", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_site` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+            {"table": "account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+            {"table": "ads_env", "idx": "idx_is_deleted", "sql": "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+            {"table": "site_pipeline_gmail_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+            {"table": "site_pipeline_gmail_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
+            {"table": "config_provider", "idx": "idx_is_deleted", "sql": "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        ]
+
+        # ── 一次查询：获取所有已存在的列 ──
+        existing_cols: set[tuple] = set()
+        col_pairs = ", ".join(f"('{c['table']}', '{c['col']}')" for c in _needed_columns)
+        try:
+            rows = await conn.execute_query(
+                f"SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, COLUMN_NAME) IN ({col_pairs})"
+            )
+            for row in rows[1]:
+                existing_cols.add((row[0], row[1]))
+        except Exception:
+            pass
+
+        # ── 一次查询：获取所有已存在的索引 ──
+        existing_idxs: set[tuple] = set()
+        idx_pairs = ", ".join(f"('{c['table']}', '{c['idx']}')" for c in _needed_indexes)
+        try:
+            rows = await conn.execute_query(
+                f"SELECT TABLE_NAME, INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS "
+                f"WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME, INDEX_NAME) IN ({idx_pairs})"
+            )
+            for row in rows[1]:
+                existing_idxs.add((row[0], row[1]))
+        except Exception:
+            pass
+
+        # ── 只对缺失的列/索引执行 ALTER ──
+        for c in _needed_columns:
+            if (c["table"], c["col"]) not in existing_cols:
+                try:
+                    await conn.execute_query(c["sql"])
+                    logger.info(f"[DB] 补齐列: {c['table']}.{c['col']}")
+                except Exception as e:
+                    logger.warning(f"[DB] 补齐列失败 {c['table']}.{c['col']}: {e}")
+
+        for c in _needed_indexes:
+            if (c["table"], c["idx"]) not in existing_idxs:
+                try:
+                    await conn.execute_query(c["sql"])
+                    logger.info(f"[DB] 补齐索引: {c['table']}.{c['idx']}")
+                except Exception as e:
+                    logger.warning(f"[DB] 补齐索引失败 {c['table']}.{c['idx']}: {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -240,13 +333,16 @@ async def init_superuser():
         if not user.is_active:
             update_fields.append("is_active")
         await user.save(update_fields=update_fields)
-        logger.info("[init_superuser] 管理员关键字段已修复")
+        logger.info("[Admin] 管理员关键字段已修复")
+    else:
+        logger.debug("[Admin] 管理员账号已就绪")
 
 
 # ── 4.2 菜单 ──
 
 async def init_menus():
     """根据 MENU_DEFINITIONS 声明式同步菜单：创建/更新新增菜单，隐藏废弃菜单"""
+    t0 = time.perf_counter()
 
     all_menus = await Menu.all()
     menu_lookup = {}       # (path, parent_id) -> Menu
@@ -300,6 +396,8 @@ async def init_menus():
             m.is_hidden = True
             await m.save(update_fields=["is_hidden"])
             logger.info(f"[init_menus] 废弃菜单已隐藏: {m.name} ({m.path})")
+
+    logger.debug(f"[Init] 菜单同步完成 ({time.perf_counter() - t0:.2f}s)")
 
 
 async def _upsert_menu(item: dict, parent_id: int) -> Menu:
@@ -457,81 +555,99 @@ def _config_defaults():
 # ── 4.4 Provider 配置 ──
 
 async def init_providers():
-    """按自然键 upsert Provider 实例 + 配置项，并清理废弃配置"""
+    """按自然键 upsert Provider 实例 + 配置项，并清理废弃配置
 
+    优化：后续重启时大部分记录已存在且无变动，跳过 DB 写入；
+    首轮缺失记录使用 bulk_create 批量创建。
+    """
+    t0 = time.perf_counter()
     defaults = _provider_defaults()
 
-    # ── 第 1 轮：按 (provider_type, provider_name) upsert Provider ──
-    existing_providers = {
+    # ── 第 1 轮：按 (provider_type, provider_name) 批量 upsert Provider ──
+    existing_providers_map = {
         (p.provider_type, p.provider_name): p
         for p in await ConfigProvider.all()
     }
 
+    new_providers = []
+    providers_to_save = []
     for ptype, name, desc, priority, _ in defaults:
-        provider = existing_providers.get((ptype, name))
+        provider = existing_providers_map.get((ptype, name))
         if provider:
-
-            meta_changed = False
-            if provider.description != desc:
+            if provider.description != desc or provider.priority != priority or not provider.is_default:
                 provider.description = desc
-                meta_changed = True
-            if provider.priority != priority:
                 provider.priority = priority
-                meta_changed = True
-            if not provider.is_default:
                 provider.is_default = True
-                meta_changed = True
-            if meta_changed:
-                await provider.save()
+                providers_to_save.append(provider)
         else:
-            provider = await ConfigProvider.create(
+            new_providers.append(ConfigProvider(
                 provider_type=ptype, provider_name=name,
                 description=desc, is_default=True, priority=priority,
                 status="active",
-            )
-            existing_providers[(ptype, name)] = provider
-            logger.info(f"[init_providers] 新增 Provider: {ptype}/{name}")
+            ))
 
-    # ── 第 2 轮：按 (provider_id, config_key) upsert Item ──
-    existing_items = {
+    if new_providers:
+        await ConfigProvider.bulk_create(new_providers)
+        # 刷新映射，确保第 2 轮能找到新创建的 provider
+        for p in await ConfigProvider.all():
+            existing_providers_map[(p.provider_type, p.provider_name)] = p
+        for p in new_providers:
+            logger.info(f"[init_providers] 新增 Provider: {p.provider_type}/{p.provider_name}")
+
+    if providers_to_save:
+        await asyncio.gather(*[p.save() for p in providers_to_save])
+
+    t1 = time.perf_counter()
+
+    # ── 第 2 轮：按 (provider_id, config_key) 批量 upsert Item ──
+    existing_items_map = {
         (ci.provider_id, ci.config_key): ci
         for ci in await ProviderConfigItem.all()
     }
 
+    new_items = []
+    items_to_save = []
     for ptype, name, _, _, items in defaults:
-        provider = existing_providers[(ptype, name)]
+        provider = existing_providers_map[(ptype, name)]
         for i, (key, value, item_desc, config_type, is_secret, is_required) in enumerate(items):
-            existing_item = existing_items.get((provider.id, key))
+            existing_item = existing_items_map.get((provider.id, key))
             if existing_item:
-
-                meta_changed = False
-                if existing_item.config_type != config_type:
+                if (existing_item.config_type != config_type
+                        or existing_item.is_secret != is_secret
+                        or existing_item.is_required != is_required
+                        or existing_item.description != item_desc
+                        or existing_item.sort != i):
                     existing_item.config_type = config_type
-                    meta_changed = True
-                if existing_item.is_secret != is_secret:
                     existing_item.is_secret = is_secret
-                    meta_changed = True
-                if existing_item.is_required != is_required:
                     existing_item.is_required = is_required
-                    meta_changed = True
-                if existing_item.description != item_desc:
                     existing_item.description = item_desc
-                    meta_changed = True
-                if existing_item.sort != i:
                     existing_item.sort = i
-                    meta_changed = True
-                if meta_changed:
-                    await existing_item.save()
+                    items_to_save.append(existing_item)
             else:
-                await ProviderConfigItem.create(
+                new_items.append(ProviderConfigItem(
                     provider_id=provider.id, config_key=key,
-                    config_value=value, config_type=config_type,
+                    config_value=str(value or ''), config_type=config_type,
                     is_secret=is_secret, is_required=is_required,
                     description=item_desc, sort=i,
-                )
+                ))
+
+    if new_items:
+        await ProviderConfigItem.bulk_create(new_items)
+    if items_to_save:
+        await asyncio.gather(*[it.save() for it in items_to_save])
+
+    t2 = time.perf_counter()
 
     # ── 清理已废弃的配置项 ──
     await _cleanup_deprecated_provider_items()
+
+    t3 = time.perf_counter()
+    logger.info(
+        f"[Init] Provider 同步完成 | Providers: {(t1 - t0):.2f}s"
+        f" | Items: {(t2 - t1):.2f}s | Cleanup: {(t3 - t2):.2f}s"
+        f" | 新增 Provider: {len(new_providers)} | 新增 Item: {len(new_items)}"
+        f" | 更新 Provider: {len(providers_to_save)} | 更新 Item: {len(items_to_save)}"
+    )
 
 
 def _provider_defaults():
@@ -836,7 +952,9 @@ async def recover_stale_jobs():
             finished_at=datetime.now(),
         )
         if own_count or orphan_count:
-            logger.info(f"僵尸任务清理：本实例 {own_count} 个 + 心跳超时 {orphan_count} 个")
+            logger.info(f"[Jobs] 僵尸任务清理: 本实例 {own_count} 个 + 心跳超时 {orphan_count} 个")
+        else:
+            logger.debug("[Jobs] 无僵尸任务")
     except Exception as e:
         logger.warning(f"僵尸任务清理跳过: {e}")
 
@@ -844,9 +962,15 @@ async def recover_stale_jobs():
 # ── 5.2 分布式锁 ──
 
 async def _ensure_lock_table():
-    """确保分布式锁表存在"""
+    """确保分布式锁表存在（先查再建，避免 MySQL IF NOT EXISTS 仍打 warning）"""
     from tortoise import connections
     conn = connections.get("default")
+    try:
+        result = await conn.execute_query("SHOW TABLES LIKE 'system_init_lock'")
+        if result[1]:
+            return  # 表已存在，跳过
+    except Exception:
+        pass
     await conn.execute_script("""
         CREATE TABLE IF NOT EXISTS system_init_lock (
             lock_key VARCHAR(64) PRIMARY KEY,
@@ -875,10 +999,10 @@ async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> b
             "INSERT INTO system_init_lock (lock_key, instance_id, acquired_at, expires_at) VALUES (%s, %s, %s, %s)",
             [lock_key, _INSTANCE_ID, now.isoformat(), expires.isoformat()]
         )
-        logger.info(f"[InitLock] 获取锁成功: {lock_key}, instance={_INSTANCE_ID}")
+        logger.debug(f"[InitLock] 获取锁: {lock_key}, instance={_INSTANCE_ID}")
         return True
     except Exception:
-        logger.info(f"[InitLock] 锁被其他实例持有: {lock_key}，跳过")
+        logger.debug(f"[InitLock] 锁被其他实例持有: {lock_key}，跳过")
         return False
 
 
@@ -934,8 +1058,8 @@ async def init_essential():
     steps.append(("Provider 同步", time.perf_counter() - t))
 
     total = time.perf_counter() - t0
-    detail = " | ".join(f"{name}: {elapsed:.2f}s" for name, elapsed in steps)
-    logger.info(f"[Init] 启动初始化完成 ({total:.2f}s) - {detail}")
+    detail = " | ".join(f"{name}: {elapsed:.1f}s" for name, elapsed in steps)
+    logger.info(f"[Init] 初始化完成 ({total:.1f}s) - {detail}")
 
 
 async def init_data():

@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 import traceback
 
 from fastapi import APIRouter, Body, File, Query, UploadFile
@@ -8,7 +10,7 @@ from tortoise.expressions import Q
 from app.controllers.dept import dept_controller
 from app.controllers.user import user_controller
 from app.schemas.base import Fail, Success, SuccessExtra
-from app.schemas.users import *
+from app.schemas.users import UserCreate, UserUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ async def list_user(
     email: str = Query("", description="邮箱地址"),
     dept_id: int = Query(None, description="部门ID"),
 ):
+    t0 = time.perf_counter()
     q = Q()
     if username:
         q &= Q(username__contains=username)
@@ -30,12 +33,32 @@ async def list_user(
         q &= Q(email__contains=email)
     if dept_id is not None:
         q &= Q(dept_id=dept_id)
-    total, user_objs = await user_controller.list(page=page, page_size=page_size, search=q)
-    data = [await obj.to_dict(m2m=True, exclude_fields=["password"]) for obj in user_objs]
+    # 使用 prefetch_related 预加载角色，避免 to_dict(m2m=True) 的 N+1 查询
+    total, user_objs = await user_controller.list(
+        page=page, page_size=page_size, search=q, prefetch_related=['roles'],
+    )
+    t1 = time.perf_counter()
+    data = await asyncio.gather(*[obj.to_dict(m2m=True, exclude_fields=["password"]) for obj in user_objs])
+    data = list(data)
+
+    # 批量查询部门（避免 N+1）
+    dept_ids = {item["dept_id"] for item in data if item.get("dept_id")}
+    dept_map = {}
+    if dept_ids:
+        depts = await dept_controller.model.filter(id__in=list(dept_ids)).all()
+        dept_dicts = await asyncio.gather(*[d.to_dict() for d in depts])
+        dept_map = {d.id: dd for d, dd in zip(depts, dept_dicts)}
+
     for item in data:
         dept_id = item.pop("dept_id", None)
-        item["dept"] = await (await dept_controller.get(id=dept_id)).to_dict() if dept_id else {}
+        item["dept"] = dept_map.get(dept_id) or {}
 
+    t2 = time.perf_counter()
+    total_ms = int((t2 - t0) * 1000)
+    logger.info(
+        "[user/list] 耗时: %dms | DB查询: %dms | 序列化+部门: %dms | total=%d page_size=%d",
+        total_ms, int((t1 - t0) * 1000), int((t2 - t1) * 1000), total, page_size,
+    )
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
 
 

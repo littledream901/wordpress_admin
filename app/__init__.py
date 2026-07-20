@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 import asyncio
+import time
 
 try:
     from fastapi import FastAPI
@@ -46,20 +47,35 @@ if _HAS_FASTAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        """应用启动：DB 迁移 + 定时清理 + 僵尸任务清理。
+        """应用启动：横幅 → ORM → 建表/种子 → 定时任务 → 总结"""
 
-        完整初始化请运行: python scripts/init_system.py
-        """
-        await init_essential()
-        await init_superuser()
+        # ── 启动横幅 ──
+        conn_cfg = settings.TORTOISE_ORM["connections"]["default"]
+        engine = conn_cfg.get("engine", "").split(".")[-1]  # tortoise.backends.mysql → mysql
+        db_name = conn_cfg.get("credentials", {}).get("database", "")
+        db_info = f"{engine}://{db_name}"[:60]
+        env_tag = "开发模式" if settings.DEBUG else "生产模式"
+        logger.info(f"── {settings.APP_TITLE} v{settings.VERSION} ──")
+        logger.info(f"   {env_tag}  |  {db_info}")
 
-        # 将所有 Provider 配置加载到线程安全缓存，避免 run_in_executor 线程中
-        # 通过 asyncio.run 访问 Tortoise 导致 event loop 绑定冲突
+        t0 = time.perf_counter()
+
+        await Tortoise.init(config=settings.TORTOISE_ORM)
+
+        # 预热连接池：必须在 init_essential() 之前执行
+        # 把 minsize 个连接全部并行建好，避免首波请求排队等连接
+        # 单次 MySQL 连接耗时 ~4.5s，不预热则首波请求全部阻塞
         try:
-            from app.utils.provider_resolver import _load_configs_to_cache
-            await _load_configs_to_cache()
+            from tortoise import connections
+            conn = connections.get("default")
+            minsize = settings.TORTOISE_ORM["connections"]["default"].get("minsize", 5)
+            await asyncio.gather(*[conn.execute_query("SELECT 1") for _ in range(minsize)])
+            logger.info("[Startup] 连接池已预热 (%d 连接)", minsize)
         except Exception:
             pass
+
+        await init_essential()
+        await init_superuser()
 
         # 后台任务：每小时清理过期的 Feed 文件
         async def _cleanup_loop():
@@ -80,13 +96,17 @@ if _HAS_FASTAPI:
                                 os.remove(fpath)
                         await feed.delete()
                     if expired:
-                        logger.info(f"[feed] 定时清理: 已删除 {len(expired)} 个过期文件")
+                        logger.info(f"[Feed] 定时清理: 已删除 {len(expired)} 个过期文件")
                 except Exception:
                     pass  # 静默忽略，避免阻塞主流程
 
         asyncio.create_task(_cleanup_loop())
 
+        total = time.perf_counter() - t0
+        logger.info(f"[Startup] 启动完成 ({total:.1f}s)")
+
         yield
+        logger.info("[Shutdown] 应用关闭")
         await Tortoise.close_connections()
 
     def create_app() -> FastAPI:

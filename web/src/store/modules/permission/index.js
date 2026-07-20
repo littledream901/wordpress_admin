@@ -96,7 +96,14 @@ export const usePermissionStore = defineStore('permission', {
     },
     async getAccessApis() {
       const res = await api.getUserApi()
-      this.accessApis = res.data
+      // 后端返回 [{id, path, method, ...}] → 前端转为权限字符串 "method/path"
+      const data = res.data || []
+      this.accessApis = data.map((item) => {
+        if (typeof item === 'string') return item
+        const method = (item.method || '').toLowerCase()
+        const path = item.path || ''
+        return method + path
+      })
       return this.accessApis
     },
     resetPermission() {

@@ -2,9 +2,9 @@
   <CommonPage title="Gmail 管理">
     <template #action>
       <n-space>
-        <n-button type="primary" @click="handleAdd">新增 Gmail</n-button>
+        <n-button v-permission="'post/api/v1/gmail/create'" type="primary" @click="handleAdd">新增 Gmail</n-button>
         <input ref="fileInputEl" type="file" accept=".xlsx,.csv" style="display:none" @change="handleFileChange" />
-        <n-button @click="fileInputEl.click()" :loading="uploadLoading">导入 Excel</n-button>
+        <n-button v-permission="'post/api/v1/gmail/batch-create'" @click="fileInputEl.click()" :loading="uploadLoading">导入 Excel</n-button>
       </n-space>
     </template>
 
@@ -16,7 +16,7 @@
         <template v-if="checkedRowKeys.length">
           <n-divider vertical />
           <span style="white-space: nowrap; font-size: 14px">已选 {{ checkedRowKeys.length }} 项</span>
-          <n-button type="error" @click="showBatchDeleteConfirm = true">批量删除</n-button>
+          <n-button v-permission="'post/api/v1/gmail/batch-delete'" type="error" @click="showBatchDeleteConfirm = true">批量删除</n-button>
           <n-button @click="checkedRowKeys = []">取消选择</n-button>
         </template>
       </template>

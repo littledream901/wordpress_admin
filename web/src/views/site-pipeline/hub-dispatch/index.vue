@@ -44,7 +44,7 @@
           />
           <n-switch v-model:value="batchExecuteNow" size="small" />
           <n-text depth="3" style="font-size: 12px">同步执行</n-text>
-          <n-button type="primary" size="small" :loading="batchLoading" @click="batchDispatch">
+          <n-button v-permission="'post/api/v1/site-pipeline/site/batch-hub-dispatch'" type="primary" size="small" :loading="batchLoading" @click="batchDispatch">
             批量派发
           </n-button>
         </template>
@@ -69,7 +69,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showDispatch = false">取消</n-button>
-          <n-button type="primary" @click="confirmDispatch">确认派发</n-button>
+          <n-button v-permission="'post/api/v1/site-pipeline/site/batch-hub-dispatch'" type="primary" @click="confirmDispatch">确认派发</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -77,11 +77,13 @@
 </template>
 
 <script setup>
-import { h, ref, reactive, onMounted } from 'vue'
+import { h, ref, reactive, onMounted, resolveDirective, withDirectives } from 'vue'
 import { NButton, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
+
+const vPermission = resolveDirective('permission')
 
 const message = useMessage()
 const crudRef = ref(null)
@@ -169,21 +171,21 @@ const columns = [
     title: '操作', key: 'actions', width: 440, fixed: 'right',
     render: (r) => {
         const buttons = [
-        { label: '创建环境', type: 'primary', action: 'create_env', ghost: !!r.hub_env_id },
-        { label: '创建账号', type: 'info', action: 'create_account', ghost: !!r.hub_account_id },
-        { label: '更新环境', type: 'warning', action: 'update_env', ghost: !r.hub_env_id },
-        { label: '登录WP', type: 'success', action: 'wp_login', ghost: !r.hub_env_id, disabled: r.platform === 'shopify' },
-        { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !!r.gmc_status },
-        { label: '打开环境', type: 'error', action: 'open_env', ghost: !r.hub_env_id },
+        { label: '创建环境', type: 'primary', action: 'create_env', ghost: !!r.hub_env_id, permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-env' },
+        { label: '创建账号', type: 'info', action: 'create_account', ghost: !!r.hub_account_id, permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-account' },
+        { label: '更新环境', type: 'warning', action: 'update_env', ghost: !r.hub_env_id, permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-update' },
+        { label: '登录WP', type: 'success', action: 'wp_login', ghost: !r.hub_env_id, disabled: r.platform === 'shopify', permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-control' },
+        { label: 'GMC检查', type: 'tertiary', action: 'gmc_check', ghost: !!r.gmc_status, permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-gmc-check' },
+        { label: '打开环境', type: 'error', action: 'open_env', ghost: !r.hub_env_id, permission: 'post/api/v1/site-pipeline/site/{site_id}/hub-open-env' },
       ]
       return h('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' }, buttons.map(btn =>
-        h(NButton, {
+        withDirectives(h(NButton, {
           size: 'tiny',
           type: btn.disabled ? 'default' : btn.type,
           ghost: btn.ghost,
           disabled: btn.disabled,
           onClick: () => handleAction(r, btn.action),
-        }, { default: () => btn.label })
+        }, { default: () => btn.label }), [[vPermission, btn.permission]])
       ))
     },
   },

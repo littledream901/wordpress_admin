@@ -139,13 +139,6 @@ async def batch_provision(site_ids: list[int] = Body(...)):
     return Success(data=data)
 
 
-@router.post('/site/batch-dynadot-ns', summary='批量执行 Dynadot NS（独立操作，手动指定 NS）')
-async def batch_dynadot_ns(site_ids: list[int] = Body(...), ns_list: list[str] = Body(None)):
-    result = await site_pipeline_controller.batch_dynadot_ns(site_ids, ns_list)
-    data = result['data']
-    return Success(data=data)
-
-
 @router.post('/site/batch-redirect', summary='批量执行 301 重定向（根域名 + www 各一条规则）')
 async def batch_redirect(site_ids: list[int] = Body(...), target_url: str = Body('')):
     result = await site_pipeline_controller.batch_redirect(site_ids, target_url)

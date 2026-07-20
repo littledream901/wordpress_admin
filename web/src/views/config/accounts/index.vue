@@ -1,7 +1,7 @@
 <template>
   <CommonPage title="账号管理">
     <template #action>
-      <n-button type="primary" @click="handleAdd">
+      <n-button v-permission="'post/api/v1/account/create'" type="primary" @click="handleAdd">
         <TheIcon icon="material-symbols:add" :size="16" class="mr-5" />
         新增账号
       </n-button>

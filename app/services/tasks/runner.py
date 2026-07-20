@@ -163,10 +163,15 @@ class TaskRunner:
             job.step = "done"
         await job.save()
 
-        # 自动追加站点日志
+        # 自动追加站点日志（site 允许为 None，资源不存时不崩）
         if not site and job.resource_id:
-            from app.controllers.site_pipeline import site_controller
-            site = await site_controller.get(id=job.resource_id)
+            try:
+                from app.controllers.site_pipeline import site_controller
+                site = await site_controller.get(id=job.resource_id)
+            except Exception:
+                _log.warning("_complete_job: 无法获取关联站点 resource_id=%s action=%s job_id=%s",
+                             job.resource_id, job.action_type, job.id)
+                pass
         if site:
             self._append_site_log(
                 site, job.action_type,

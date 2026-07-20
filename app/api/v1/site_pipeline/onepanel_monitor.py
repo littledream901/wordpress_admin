@@ -64,11 +64,18 @@ async def _query_provider(provider: ConfigProvider, use_cache: bool = True) -> D
     try:
         loop = asyncio.get_event_loop()
 
-        # 基础信息 + 实时性能
+        # 基础信息 + 实时性能（每个 Provider 独立 10s 超时）
         def fetch_base():
-            return httpx.get(f"{base}/dashboard/base/sda/sda", headers=headers, timeout=30).json()
+            return httpx.get(
+                f"{base}/dashboard/base/sda/sda",
+                headers=headers,
+                timeout=httpx.Timeout(10),
+            ).json()
 
-        base_resp = await loop.run_in_executor(None, fetch_base)
+        base_resp = await asyncio.wait_for(
+            loop.run_in_executor(None, fetch_base),
+            timeout=12,
+        )
         if base_resp.get('code') == 200:
             data = base_resp['data']
             result["hostname"] = data.get("hostname", "")
@@ -162,10 +169,11 @@ async def get_onepanel_monitor(refresh: bool = Query(default=True, description='
         return Success(data=[])
 
     if refresh:
-        results = []
-        for p in providers:
-            results.append(await _query_provider(p))
-        return Success(data=results)
+        results = await asyncio.wait_for(
+            asyncio.gather(*[_query_provider(p) for p in providers]),
+            timeout=15,
+        )
+        return Success(data=list(results))
     else:
         data = [
             {

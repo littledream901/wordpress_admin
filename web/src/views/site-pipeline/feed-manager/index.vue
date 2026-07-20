@@ -4,7 +4,7 @@
       <div style="margin-left: auto;">
         <div style="display:flex;align-items:center;gap:8px">
           <n-upload :show-file-list="false" accept=".csv,.xml,.txt" :custom-request="handleUpload" :disabled="uploading">
-            <n-button type="primary" :loading="uploading">
+            <n-button v-permission="'post/api/v1/site-pipeline/feed/upload'" type="primary" :loading="uploading">
               <span style="display:inline-flex;align-items:center;gap:6px">
                 <span class="i-mdi:cloud-upload-outline" />
                 上传 Feed 文件
@@ -84,6 +84,7 @@
             <n-button @click="showCreate = false">{{ createResult ? '关闭' : '取消' }}</n-button>
             <n-button
               v-if="!createResult"
+              v-permission="'post/api/v1/site-pipeline/feed/{id}/create-feed'"
               type="primary"
               :loading="creating"
               :disabled="!createTargetDomain"

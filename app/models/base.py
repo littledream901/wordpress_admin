@@ -63,5 +63,5 @@ class TimestampMixin:
 
 
 class SoftDeleteMixin:
-    is_deleted = fields.BooleanField(default=False, description="软删除标记")
+    is_deleted = fields.BooleanField(default=False, description="软删除标记", db_index=True)
     deleted_at = fields.DatetimeField(null=True, description="删除时间")

@@ -108,6 +108,8 @@ import { WarningFilled } from '@vicons/carbon'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'
 
+const vPermission = resolveDirective('permission')
+
 const message = useMessage()
 const warningIcon = WarningFilled
 const crudRef = ref(null)
@@ -214,13 +216,13 @@ const columns = [
       const btns = []
       btns.push(h(NButton, { size: 'small', quaternary: true, onClick: () => { detail.value = r; showDetail.value = true } }, { default: () => '详情' }))
       if (['failed', 'timeout'].includes(r.status)) {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => retryJob(r.id, false) }, { default: () => '重试' }))
+        btns.push(withDirectives(h(NButton, { size: 'small', quaternary: true, type: 'warning', onClick: () => retryJob(r.id, false) }, { default: () => '重试' }), [[vPermission, 'post/api/v1/site-pipeline/hub-job/{job_id}/retry']]))
       }
       if (['failed', 'timeout', 'pending'].includes(r.status)) {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => retryJob(r.id, true) }, { default: () => '同步执行' }))
+        btns.push(withDirectives(h(NButton, { size: 'small', quaternary: true, type: 'info', onClick: () => retryJob(r.id, true) }, { default: () => '同步执行' }), [[vPermission, 'post/api/v1/site-pipeline/hub-job/{job_id}/retry']]))
       }
       if (['pending', 'running'].includes(r.status)) {
-        btns.push(h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => cancelJob(r.id) }, { default: () => '取消' }))
+        btns.push(withDirectives(h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => cancelJob(r.id) }, { default: () => '取消' }), [[vPermission, 'post/api/v1/site-pipeline/hub-job/{job_id}/cancel']]))
       }
       return h(NSpace, { size: 4 }, btns)
     },

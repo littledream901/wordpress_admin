@@ -23,10 +23,22 @@ async def list_providers(provider_type: str = Query('')):
         objs = await provider_controller.get_by_type(provider_type)
     else:
         objs = await provider_controller.model.all().order_by('provider_type', '-priority')
+
+    # 批量查询 item_count（避免 N+1）
+    pids = [p.id for p in objs]
+    count_map = {}
+    if pids:
+        from tortoise.expressions import RawSQL
+        rows = await provider_item_controller.model.filter(provider_id__in=pids) \
+            .annotate(cnt=RawSQL("COUNT(*)")) \
+            .group_by('provider_id') \
+            .values('provider_id', 'cnt')
+        count_map = {r['provider_id']: r['cnt'] for r in rows}
+
     data = []
     for p in objs:
         d = await p.to_dict()
-        d['item_count'] = await safe_count(provider_item_controller.model.filter(provider_id=p.id))
+        d['item_count'] = count_map.get(p.id, 0)
         data.append(d)
     return SuccessExtra(data=data, total=len(data))
 

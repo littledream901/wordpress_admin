@@ -57,7 +57,7 @@
 </template>
 
 <script setup>
-import { lStorage, setTokens } from '@/utils'
+import { lStorage, setTokens, resetForceLogoutFlag } from '@/utils'
 import bgImg from '@/assets/images/login_bg.webp'
 import api from '@/api'
 import { addDynamicRoutes } from '@/router'
@@ -98,6 +98,7 @@ async function handleLogin() {
     const res = await api.login({ username, password: password.toString() })
     $message.success(t('views.login.message_login_success'))
     setTokens(res.data.access_token, res.data.refresh_token)
+    resetForceLogoutFlag() // 登录成功后解除退出闸门
     // 记住密码
     if (rememberPwd.value) {
       lStorage.set('loginInfo', { username, password: password.toString() })
@@ -107,7 +108,6 @@ async function handleLogin() {
     await addDynamicRoutes()
     if (query.redirect) {
       const path = query.redirect
-      console.log('path', { path, query })
       Reflect.deleteProperty(query, 'redirect')
       router.push({ path, query })
     } else {

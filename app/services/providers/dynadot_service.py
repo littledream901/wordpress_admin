@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.utils.provider_resolver import ProviderResolver
+from app.utils.http_retry import retry_request
 
 logger = logging.getLogger(__name__)
 

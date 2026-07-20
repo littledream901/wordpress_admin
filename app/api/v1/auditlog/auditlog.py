@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from tortoise.expressions import Q
 
 from app.controllers.auditlog import auditlog_controller
-from app.schemas import SuccessExtra
+from app.schemas.base import SuccessExtra
 
 router = APIRouter(tags=["AuditLog"])
 

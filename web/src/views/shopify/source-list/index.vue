@@ -2,7 +2,7 @@
   <CommonPage show-header title="Shopify 待采集列表">
     <template #action>
       <n-space>
-        <n-button type="primary" @click="handleAdd">新增采集源</n-button>
+        <n-button v-permission="'post/api/v1/shopify/source/create'" type="primary" @click="handleAdd">新增采集源</n-button>
         <n-button @click="showBatchImport = true">批量导入</n-button>
       </n-space>
     </template>
@@ -27,9 +27,9 @@
         <template v-if="checkedRowKeys.length">
           <n-divider vertical />
           <span style="white-space: nowrap; font-size: 14px">已选 {{ checkedRowKeys.length }} 项</span>
-          <n-button type="primary" size="small" @click="handleBatchCollect">批量采集</n-button>
-          <n-button type="warning" size="small" @click="showBatchMaxProducts = true">批量设置最大数量</n-button>
-          <n-button type="error" size="small" @click="handleBatchDelete">批量删除</n-button>
+          <n-button v-permission="'post/api/v1/shopify/source/batch-collect'" type="primary" size="small" @click="handleBatchCollect">批量采集</n-button>
+          <n-button v-permission="'post/api/v1/shopify/source/batch-set-max-products'" type="warning" size="small" @click="showBatchMaxProducts = true">批量设置最大数量</n-button>
+          <n-button v-permission="'post/api/v1/shopify/source/batch-delete'" type="error" size="small" @click="handleBatchDelete">批量删除</n-button>
         </template>
       </template>
     </CrudTable>
@@ -84,7 +84,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showBatchImport = false; batchImportText = ''; batchImportPreview.length = 0; batchImportResult = ''">取消</n-button>
-          <n-button type="primary" :loading="batchImportLoading" :disabled="!batchImportPreview.some(r => r.valid)" @click="doBatchImport">导入有效链接 ({{ batchImportPreview.filter(r => r.valid).length }})</n-button>
+          <n-button v-permission="'post/api/v1/shopify/source/batch-create'" type="primary" :loading="batchImportLoading" :disabled="!batchImportPreview.some(r => r.valid)" @click="doBatchImport">导入有效链接 ({{ batchImportPreview.filter(r => r.valid).length }})</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -120,7 +120,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showBatchMaxProducts = false">取消</n-button>
-          <n-button type="primary" @click="handleBatchSetMaxProducts">确定</n-button>
+          <n-button v-permission="'post/api/v1/shopify/source/batch-set-max-products'" type="primary" @click="handleBatchSetMaxProducts">确定</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -128,13 +128,15 @@
 </template>
 
 <script setup>
-import { h, reactive, ref, computed, onMounted } from 'vue'
+import { h, reactive, ref, computed, onMounted, resolveDirective, withDirectives } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NTag, NSpace, useMessage } from 'naive-ui'
+import { NButton, NTag, NSpace, NTooltip, useMessage } from 'naive-ui'
 import api from '@/api/shopify'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import CrudModal from '@/components/table/CrudModal.vue'
+
+const vPermission = resolveDirective('permission')
 
 const message = useMessage()
 const router = useRouter()
@@ -160,7 +162,13 @@ function onChecked(keys) { checkedRowKeys.value = keys }
 function statusTag(status) {
   const map = { pending: 'default', collected: 'success', 'collect_failed': 'error' }
   const type = Object.entries(map).find(([k]) => (status || '').startsWith(k))?.[1] || 'default'
-  return h(NTag, { type, size: 'small' }, { default: () => status || 'pending' })
+  const isFailed = (status || '').startsWith('collect_failed')
+  const label = isFailed ? 'failed' : (status || 'pending')
+  const tag = h(NTag, { type, size: 'small' }, { default: () => label })
+  if (isFailed && status !== 'collect_failed') {
+    return h(NTooltip, null, { trigger: () => tag, default: () => status })
+  }
+  return tag
 }
 
 // 自动推断采集类型（仅支持集合和单品）
@@ -256,8 +264,8 @@ const columns = [
     render: (row) => h(NSpace, { size: 'small' }, {
       default: () => [
         h(NButton, { size: 'tiny', onClick: () => handleEdit(row) }, { default: () => '编辑' }),
-        h(NButton, { size: 'tiny', type: 'primary', onClick: () => doCollect(row) }, { default: () => '采集' }),
-        h(NButton, { size: 'tiny', type: 'error', onClick: () => doDelete(row) }, { default: () => '删除' }),
+        withDirectives(h(NButton, { size: 'tiny', type: 'primary', onClick: () => doCollect(row) }, { default: () => '采集' }), [[vPermission, 'post/api/v1/shopify/source/{source_id}/collect']]),
+        withDirectives(h(NButton, { size: 'tiny', type: 'error', onClick: () => doDelete(row) }, { default: () => '删除' }), [[vPermission, 'post/api/v1/shopify/source/{source_id}/delete']]),
       ],
     }),
   },

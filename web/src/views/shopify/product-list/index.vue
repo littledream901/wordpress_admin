@@ -18,13 +18,13 @@
               </n-button>
             </template>
             <n-button-group vertical size="small" style="text-align: left">
-              <n-button @click="handleBatchAction('import')" style="justify-content: flex-start">
+              <n-button v-permission="'post/api/v1/shopify/product/batch-import'" @click="handleBatchAction('import')" style="justify-content: flex-start">
                 <template #icon>
                   <TheIcon icon="mdi:import" :size="18" />
                 </template>
                 批量导入到站点
               </n-button>
-              <n-button @click="handleBatchAction('delete')" style="justify-content: flex-start">
+              <n-button v-permission="'post/api/v1/shopify/product/batch-delete'" @click="handleBatchAction('delete')" style="justify-content: flex-start">
                 <template #icon>
                   <TheIcon icon="mdi:delete" :size="18" />
                 </template>
@@ -50,7 +50,7 @@
         <template #footer>
           <n-space justify="end">
             <n-button @click="showDomainModal = false">取消</n-button>
-            <n-button type="primary" :disabled="!selectedDomain" @click="confirmImport">确认导入</n-button>
+            <n-button v-permission="'post/api/v1/shopify/product/batch-import'" type="primary" :disabled="!selectedDomain" @click="confirmImport">确认导入</n-button>
           </n-space>
         </template>
       </n-card>
@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { h, reactive, ref, computed, onMounted } from 'vue'
+import { h, reactive, ref, computed, onMounted, resolveDirective, withDirectives } from 'vue'
 import {
   NButton, NButtonGroup, NCard, NCheckbox, NDivider,
   NEmpty, NInput, NModal, NPopconfirm,
@@ -102,6 +102,8 @@ import api from '@/api/shopify'
 import siteApi from '@/api/site-pipeline'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import JsonEditor from '@/components/editor/JsonEditor.vue'
+
+const vPermission = resolveDirective('permission')
 
 const queryItems = reactive({ title: '' })
 const pagination = reactive({ page: 1, pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50] })
@@ -292,10 +294,10 @@ const columns = [
   {
     title: '操作', key: 'actions', width: 200,
     render: row => h(NSpace, { size: 'small' }, { default: () => [
-      h(NButton, { size: 'small', type: 'primary', onClick: () => importOne(row) }, { default: () => '导入' }),
+      withDirectives(h(NButton, { size: 'small', type: 'primary', onClick: () => importOne(row) }, { default: () => '导入' }), [[vPermission, 'post/api/v1/shopify/product/{product_id}/import-to-site']]),
       h(NPopconfirm, { onPositiveClick: () => deleteOne(row) }, {
         default: () => '确定删除该产品？',
-        trigger: () => h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }),
+        trigger: () => withDirectives(h(NButton, { size: 'small', type: 'error', quaternary: true }, { default: () => '删除' }), [[vPermission, 'post/api/v1/shopify/product/{product_id}/delete']]),
       }),
     ] }),
   },

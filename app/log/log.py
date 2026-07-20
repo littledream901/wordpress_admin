@@ -11,6 +11,7 @@
     - DEBUG=false  → 控制台 INFO 级别 + 文件持久化（保留 30 天）
 """
 
+import logging as std_logging
 import os
 import sys
 import uuid
@@ -58,6 +59,29 @@ def _trace_filter(record: dict) -> bool:
     tid = _trace_id.get()
     record["extra"]["trace_id"] = tid or "-"
     return True
+
+
+# ── 标准 logging → loguru 桥接 ──
+
+class _InterceptHandler(std_logging.Handler):
+    """将标准 logging 日志重定向到 loguru，统一输出格式"""
+
+    def emit(self, record: std_logging.LogRecord):
+        # 找到调用栈中第一个非 logging 模块的帧作为 caller
+        try:
+            level = loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame = std_logging.currentframe()
+        depth = 2
+        while frame and frame.f_code.co_filename == std_logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        loguru_logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 
 class LogConfig:
@@ -108,6 +132,16 @@ class LogConfig:
                 backtrace=True,
                 diagnose=True,
             )
+
+        # ── 将标准 logging 重定向到 loguru ──
+        root_logger = std_logging.getLogger()
+        root_logger.handlers = [_InterceptHandler()]
+        root_logger.setLevel(self.level)
+
+        # 抑制第三方库噪音
+        std_logging.getLogger("asyncmy").setLevel(std_logging.WARNING)
+        std_logging.getLogger("tortoise.db_client").setLevel(std_logging.WARNING)
+        # uvicorn 有自己的 LOGGING_CONFIG，不做额外处理（避免重复日志）
 
         return loguru_logger
 

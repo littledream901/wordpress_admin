@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, Generic, List, NewType, Tuple, Type, TypeVar, Union
 import logging
+import time
 
 from pydantic import BaseModel
 from tortoise.exceptions import MultipleObjectsReturned
@@ -40,20 +41,29 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     async def exists(self, **filters) -> bool:
         return await self.model.filter(**filters).exists()
 
-    async def list(self, page: int, page_size: int, search: Q = Q(), order: list = []) -> Tuple[Total, List[ModelType]]:
+    async def list(self, page: int, page_size: int, search: Q = Q(), order: list = [],
+                   prefetch_related: list[str] = None) -> Tuple[Total, List[ModelType]]:
+        t0 = time.perf_counter()
         query = self.model.filter(search)
         _use_soft_delete = hasattr(self.model, 'is_deleted')
         if _use_soft_delete:
-            # MySQL 下 BooleanField → TINYINT(1)，__not=True 等价于 =False
-            query = query.filter(is_deleted__not=True)
+            query = query.filter(is_deleted=False)
+        if prefetch_related:
+            query = query.prefetch_related(*prefetch_related)
         try:
-            return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+            total, objs = await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
         except Exception as e:
             if _use_soft_delete:
                 _log.warning("list() 查询异常: %s, 回退无过滤查询", e)
                 query = self.model.filter(search)
-                return await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
-            raise
+                total, objs = await safe_count(query), await query.offset((page - 1) * page_size).limit(page_size).order_by(*order)
+            else:
+                raise
+        elapsed = int((time.perf_counter() - t0) * 1000)
+        if elapsed > 500:
+            _log.info("[CRUD.list] %s 慢查询: %dms (page=%d size=%d total=%d)",
+                      self.model.__name__, elapsed, page, page_size, total)
+        return total, objs
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
         if isinstance(obj_in, Dict):

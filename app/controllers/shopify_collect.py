@@ -81,7 +81,7 @@ class ShopifyCollectController:
             return {"ok": False, "error": "source not found"}
         job = await self._create_job(0, source.source_url, "collect_shopify", {"source_id": source_id})
         try:
-            result = await asyncio.to_thread(_get_shopify_collect_service().collect_source, source)
+            result = await _get_shopify_collect_service().collect_source(source)
             await self._update_source_status(source, result)
             await self._complete_job(job, ok=result.get('ok', False), result=result, error=result.get('error', ''))
             return {"ok": result.get('ok', False), "result": result, "job_id": job.id}
@@ -224,7 +224,7 @@ class ShopifyCollectController:
             if not source:
                 await self._complete_job(await OperationJob.get(id=job_id), ok=False, error='source not found')
                 return
-            result = await asyncio.to_thread(_get_shopify_collect_service().collect_source, source)
+            result = await _get_shopify_collect_service().collect_source(source)
             await self._update_source_status(source, result)
             if result.get('ok'):
                 await self._complete_job(await OperationJob.get(id=job_id), ok=True, result=result)

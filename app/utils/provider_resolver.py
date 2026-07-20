@@ -32,7 +32,11 @@ _cache_initialized = False
 
 
 def _ensure_cache():
-    """确认缓存已加载，若未初始化则同步从 DB 加载（兜底逻辑）"""
+    """确认缓存已加载，若未初始化则同步从 DB 加载（兜底逻辑）
+
+    注意：在线程中调用时不初始化（依赖启动时预加载），
+    在事件循环内且 Tortoise 已初始化时触发懒加载。
+    """
     global _cache_initialized
     if _cache_initialized:
         return
@@ -41,14 +45,28 @@ def _ensure_cache():
             return
         # 在线程中调用时无法访问 DB，此时跳过（依赖启动时预加载）
         try:
-            asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        _cache_initialized = True
+        # 检查 Tortoise 是否已初始化（否则 DB 查询会报 ConfigurationError）
+        try:
+            from tortoise import Tortoise
+            if not Tortoise._connections:
+                return
+        except Exception:
+            return
+        # 事件循环内且 Tortoise 已初始化但缓存未加载 → 异步懒加载
+        _log.warning("[provider_resolver] 缓存未预加载，触发懒加载")
+        try:
+            loop.create_task(_load_configs_to_cache())
+        except Exception:
+            pass
 
 
 async def _load_configs_to_cache():
     """将所有 provider config 加载到线程安全缓存（必须在主事件循环调用）"""
+    import time
+    t0 = time.perf_counter()
     global _cache_initialized
     providers = await ConfigProvider.filter(status='active').all()
     # 先收集所有数据，再加锁写入
@@ -61,6 +79,7 @@ async def _load_configs_to_cache():
     with _cache_lock:
         _config_cache.update(entries)
         _cache_initialized = True
+    _log.debug(f"[provider_resolver] 缓存已加载 ({len(entries)} 项, {time.perf_counter() - t0:.2f}s)")
 
 
 def _read_cache(provider_type: str, config_key: str, default: str = "") -> str:
@@ -84,12 +103,20 @@ def _read_cache_map(provider_type: str) -> dict:
 
 
 def _run_sync(coro):
-    """在同步上下文中安全执行 async 协程（兼容事件循环内外场景）"""
+    """在同步上下文中安全执行 async 协程（兼容事件循环内外场景）
+
+    警告：在事件循环内调用会阻塞整个事件循环线程，导致所有并发请求排队。
+    请优先使用 async 版本（get_config_async / ProviderResolver.get_config）。
+    """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    # 已在事件循环内 → 用线程池隔离执行
+    # 已在事件循环内 → 这是性能反模式！
+    _log.warning(
+        "_run_sync 在事件循环内被调用，阻塞事件循环（最长30s）！"
+        "请改用 async 版本 (get_config_async / ProviderResolver.get_config)"
+    )
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(asyncio.run, coro).result(timeout=30)
 

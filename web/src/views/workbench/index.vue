@@ -196,7 +196,7 @@ const shortcuts = [
   { title: '配置中心', desc: '管理 Provider 和配置项', path: '/config/manage', icon: 'material-symbols:settings', color: '#63e2b7', bg: 'rgba(99,226,183,.12)' },
   { title: '账号管理', desc: '管理账号密码与 Provider 绑定', path: '/config/accounts', icon: 'material-symbols:group', color: '#70c0e8', bg: 'rgba(112,192,232,.12)' },
   { title: '域名管理', desc: '域名解析与 DNS 配置', path: '/config/manage', icon: 'material-symbols:language', color: '#f472b6', bg: 'rgba(244,114,182,.12)' },
-  { title: 'Gmail 邮箱', desc: '批量邮箱采集管理', path: '/gmail/account-list', icon: 'material-symbols:mail', color: '#38bdf8', bg: 'rgba(56,189,248,.12)' },
+  { title: 'Gmail 邮箱', desc: '批量邮箱管理', path: '/gmail/account-list', icon: 'material-symbols:mail', color: '#38bdf8', bg: 'rgba(56,189,248,.12)' },
 
 ]
 

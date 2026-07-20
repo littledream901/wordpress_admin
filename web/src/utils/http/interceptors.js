@@ -1,43 +1,24 @@
-import { getToken, getRefreshToken, setTokens } from '@/utils'
+import { getToken } from '@/utils'
+import { tryRefreshToken, forceLogout, isForceLoggingOut } from '@/utils/auth-manager'
 import { resolveResError } from './helpers'
-import { useUserStore } from '@/store'
-import api from '@/api'
 import axios from 'axios'
 
-let isRefreshing = false
-let refreshSubscribers = []
-
-function onRefreshed(newToken) {
-  refreshSubscribers.forEach((cb) => cb(newToken))
-  refreshSubscribers = []
-}
-
-function addRefreshSubscriber(cb) {
-  refreshSubscribers.push(cb)
-}
-
-async function tryRefreshToken() {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) return false
-
-  try {
-    const res = await api.refreshToken({ refresh_token: refreshToken })
-    setTokens(res.data.access_token, res.data.refresh_token)
-    return res.data.access_token
-  } catch {
-    return false
-  }
-}
-
+// ── 请求拦截器 ──
 export function reqResolve(config) {
-  // 处理不需要token的请求
+  // 全局退出闸门：拦截所有新请求
+  if (isForceLoggingOut()) {
+    return Promise.reject({ code: 0, message: '', __forceLogout: true })
+  }
+
+  // 不需要 token 的请求直接放行
   if (config.noNeedToken) {
     return config
   }
 
   const token = getToken()
   if (token) {
-    config.headers.Authorization = config.headers.Authorization || `Bearer ${token}`
+    config.headers = config.headers || {}
+    config.headers.Authorization = `Bearer ${token}`
   }
 
   return config
@@ -47,71 +28,88 @@ export function reqReject(error) {
   return Promise.reject(error)
 }
 
+// ── 成功响应 ──
 export function resResolve(response) {
   const { data, status, statusText, config } = response
-  // blob 等二进制响应跳过 code 检查，直接透传
+
+  // blob / arraybuffer 等二进制响应跳过 code 检查
   if (config.responseType === 'blob' || config.responseType === 'arraybuffer') {
     return Promise.resolve(data)
   }
+
   if (data?.code !== 200) {
     const code = data?.code ?? status
-    /** 根据code处理对应的操作，并返回处理后的message */
     const message = resolveResError(code, data?.msg ?? statusText)
     window.$message?.error(message, { keepAliveOnHover: true })
     return Promise.reject({ code, message, error: data || response })
   }
+
   return Promise.resolve(data)
 }
 
+// ── 错误响应 ──
 export async function resReject(error) {
+  // 由请求拦截器闸门拦截的请求，静默丢弃
+  if (error?.__forceLogout) {
+    return Promise.reject(error)
+  }
+
+  // 无 response 的网络错误
   if (!error || !error.response) {
     const code = error?.code
-    /** 根据code处理对应的操作，并返回处理后的message */
     const message = resolveResError(code, error.message)
     window.$message?.error(message)
     return Promise.reject({ code, message, error })
   }
+
   const { data, status, config } = error.response
 
-  if (data?.code === 401 && !config._retry) {
-    // 尝试用 refresh_token 刷新
-    if (!isRefreshing) {
-      isRefreshing = true
-      const newToken = await tryRefreshToken()
-      isRefreshing = false
+  // 全局退出进行中：静默拒绝
+  if (isForceLoggingOut()) {
+    return Promise.reject({ code: status, message: '', __forceLogout: true })
+  }
 
-      if (newToken) {
-        onRefreshed(newToken)
-        config._retry = true
-        config.headers.Authorization = `Bearer ${newToken}`
-        return new Promise((resolve) => {
-          resolve(axios(config))
-        })
-      }
-    }
+  // skipAuthRefresh + 401 → 会话已死，直接退出
+  if (config?.skipAuthRefresh && (data?.code === 401 || status === 401)) {
+    await forceLogout()
+    return Promise.reject({
+      code: 401,
+      message: '登录已失效，请重新登录',
+      error: error.response?.data || error.response,
+    })
+  }
 
-    // 已在刷新中，排队等待
-    if (isRefreshing) {
-      return new Promise((resolve) => {
-        addRefreshSubscriber((newToken) => {
-          config._retry = true
-          config.headers.Authorization = `Bearer ${newToken}`
-          resolve(axios(config))
-        })
+  // 401 → 委托 auth-manager 刷新 → 重放或退出
+  if (data?.code === 401 || status === 401) {
+    if (config._retry) {
+      await forceLogout()
+      return Promise.reject({
+        code: 401,
+        message: '登录已失效，请重新登录',
+        error: error.response?.data || error.response,
       })
     }
 
-    // 刷新失败，登出
-    try {
-      const userStore = useUserStore()
-      userStore.logout()
-    } catch {
-      return
+    const refreshed = await tryRefreshToken()
+    if (refreshed) {
+      config._retry = true
+      config.headers = config.headers || {}
+      config.headers.Authorization = `Bearer ${getToken()}`
+      return new Promise((resolve) => {
+        resolve(axios(config))
+      })
     }
-    return Promise.reject({ code: 401, message: '登录已过期', error: error.response?.data || error.response })
+
+    // 刷新失败 → 退出（tryRefreshToken 内部已做 userinfo 校验）
+    await forceLogout()
+    return Promise.reject({
+      code: 401,
+      message: '登录已过期，请重新登录',
+      error: error.response?.data || error.response,
+    })
   }
 
-  // 后端返回的response数据
+  // 其他错误：显示提示
   const code = data?.code ?? status
   const message = resolveResError(code, data?.msg ?? error.message)
   window.$message?.error(message, { keepAliveOnHover: true })
