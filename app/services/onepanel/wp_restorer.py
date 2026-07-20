@@ -140,7 +140,7 @@ class OnePanelWordPressRestorer:
         full_backup = self._backup_full_path()
         # 使用唯一临时目录解压，避免复用固定目录导致旧文件污染
         temp_dir = f'/opt/1panel/tmp/restore_wp_{uuid.uuid4().hex[:12]}'
-        self.file_manager.decompress(full_backup, temp_dir, 'tar.gz', wait=10)
+        self.file_manager.decompress(full_backup, temp_dir, 'tar.gz')
         base = os.path.basename(full_backup).replace('.tar.gz', '')
         outer = f'{temp_dir}/{base}'
 
@@ -155,7 +155,7 @@ class OnePanelWordPressRestorer:
             app_tar = self._find_child_path([outer, temp_dir], 'app.tar.gz', max_depth=4)
 
         if app_tar:
-            self.file_manager.decompress(app_tar, temp_dir, 'tar.gz', wait=10)
+            self.file_manager.decompress(app_tar, temp_dir, 'tar.gz')
             extracted_roots.extend([f'{temp_dir}/wordpress', temp_dir])
             # app.tar.gz 解压后可能带有 data/ 目录结构
             decomp_data = f'{temp_dir}/data'
@@ -319,44 +319,69 @@ $tables = $wpdb->get_col('SHOW TABLES');
 $changedRows = 0;
 $changedCells = 0;
 $processedTables = [];
+$failedTables = [];
+$totalTables = 0;
 
 // 只处理当前 WordPress 前缀的表，避免误扫其他系统表
 $prefix = $wpdb->prefix;
 foreach ($tables as $table) {{
   if ($prefix && strpos($table, $prefix) !== 0) {{ continue; }}
-  $columns = $wpdb->get_results('SHOW COLUMNS FROM `' . str_replace('`', '``', $table) . '`');
-  if (!$columns) {{ continue; }}
-  $primary = '';
-  $textCols = [];
-  foreach ($columns as $col) {{
-    if ($col->Key === 'PRI' && !$primary) {{ $primary = $col->Field; }}
-    if (preg_match('/char|text|blob|json/i', $col->Type)) {{ $textCols[] = $col->Field; }}
-  }}
-  if (!$primary || !$textCols) {{ continue; }}
-  $selectCols = array_merge([$primary], $textCols);
-  $selectSql = 'SELECT `' . implode('`,`', array_map(function($c){{ return str_replace('`','``',$c); }}, $selectCols)) . '` FROM `' . str_replace('`','``',$table) . '`';
-  $rows = $wpdb->get_results($selectSql, ARRAY_A);
-  if (!$rows) {{ continue; }}
-  foreach ($rows as $row) {{
-    $updates = [];
-    foreach ($textCols as $col) {{
-      if (!array_key_exists($col, $row)) {{ continue; }}
-      $oldVal = $row[$col];
-      $newVal = fc_replace_value($oldVal, $oldList, $newList);
-      if ($newVal !== $oldVal) {{ $updates[$col] = $newVal; $changedCells++; }}
+  $totalTables++;
+  try {{
+    $columns = $wpdb->get_results('SHOW COLUMNS FROM `' . str_replace('`', '``', $table) . '`');
+    if (!$columns) {{ continue; }}
+    $primary = '';
+    $textCols = [];
+    foreach ($columns as $col) {{
+      if ($col->Key === 'PRI' && !$primary) {{ $primary = $col->Field; }}
+      if (preg_match('/char|text|blob|json/i', $col->Type)) {{ $textCols[] = $col->Field; }}
     }}
-    if ($updates) {{
-      $wpdb->update($table, $updates, [$primary => $row[$primary]]);
-      $changedRows++;
+    if (!$primary || !$textCols) {{ continue; }}
+    $selectCols = array_merge([$primary], $textCols);
+    $selectSql = 'SELECT `' . implode('`,`', array_map(function($c){{ return str_replace('`','``',$c); }}, $selectCols)) . '` FROM `' . str_replace('`','``',$table) . '`';
+    $rows = $wpdb->get_results($selectSql, ARRAY_A);
+    if (!$rows) {{ continue; }}
+    foreach ($rows as $row) {{
+      $updates = [];
+      foreach ($textCols as $col) {{
+        if (!array_key_exists($col, $row)) {{ continue; }}
+        $oldVal = $row[$col];
+        try {{
+          $newVal = fc_replace_value($oldVal, $oldList, $newList);
+        }} catch (\Throwable $e) {{
+          // 单字段替换失败：跳过该字段，继续处理其他字段
+          continue;
+        }}
+        if ($newVal !== $oldVal) {{ $updates[$col] = $newVal; $changedCells++; }}
+      }}
+      if ($updates) {{
+        try {{
+          $wpdb->update($table, $updates, [$primary => $row[$primary]]);
+          $changedRows++;
+        }} catch (\Throwable $e) {{
+          // 单行更新失败：记录但不中断整个脚本
+          if (!isset($failedTables[$table])) {{ $failedTables[$table] = 0; }}
+          $failedTables[$table]++;
+        }}
+      }}
     }}
+    $processedTables[] = $table;
+  }} catch (\Throwable $e) {{
+    // 单张表整体处理失败：记录并继续下一张表
+    $failedTables[$table] = $failedTables[$table] ?? 0;
+    $failedTables[$table]++;
+    $errorTables[] = ['table' => $table, 'error' => $e->getMessage()];
   }}
-  $processedTables[] = $table;
 }}
 
 if (function_exists('update_option')) {{
-  update_option('siteurl', $targetUrl);
-  update_option('home', $targetUrl);
-  update_option('blogname', $newDomain);
+  try {{
+    update_option('siteurl', $targetUrl);
+    update_option('home', $targetUrl);
+    update_option('blogname', $newDomain);
+  }} catch (\Throwable $e) {{
+    // option 更新失败不影响主流程
+  }}
 }}
 
 echo json_encode([
@@ -368,6 +393,10 @@ echo json_encode([
   'changed_rows' => $changedRows,
   'changed_cells' => $changedCells,
   'tables' => count($processedTables),
+  'total_tables' => $totalTables,
+  'failed_tables' => count($failedTables),
+  'failed_rows' => array_sum($failedTables),
+  'error_tables' => $errorTables ?? [],
 ], JSON_UNESCAPED_UNICODE);
 '''
         self.file_manager.save(path, php)
@@ -391,11 +420,25 @@ echo json_encode([
         """
         path = f"domain-replace.php?token={token}"
         try:
-            return self.php_client.fetch_with_fallback(
+            data = self.php_client.fetch_with_fallback(
                 domain=domain, path=path, step="domain_replace",
                 success_check=lambda d: d.get("code") == 200,
                 max_retries=1,
             )
+            _log.info(
+                "domain replace 响应: domain=%s, rows=%s, cells=%s, tables=%s/%s, failed_tables=%s, failed_rows=%s",
+                domain,
+                data.get("changed_rows"),
+                data.get("changed_cells"),
+                data.get("tables"),
+                data.get("total_tables"),
+                data.get("failed_tables"),
+                data.get("failed_rows"),
+            )
+            errors = data.get("error_tables")
+            if errors:
+                _log.warning("domain replace 部分表失败: %s", errors)
+            return data
         except PHPClientResponseError as e:
             msg = str(e)
             if "HTTP 404" in msg:
@@ -453,7 +496,7 @@ echo json_encode([
         """注入 WooCommerce API Key 生成 PHP 脚本，返回 security token"""
         token = secrets.token_urlsafe(32)
         path = f'{self._data_root(service_name)}/{self.woo_script}'
-        php = f'''<?php
+        php = rf'''<?php
 header('Content-Type: application/json; charset=utf-8');
 
 $token = '{token}';
@@ -590,7 +633,7 @@ echo json_encode([
         """注入 CTX 刷新 PHP 脚本，返回 CTX Refresh URL"""
         token = secrets.token_urlsafe(32)
         path = f'{self._data_root(service_name)}/{self.ctx_script}'
-        php = f'''<?php
+        php = rf'''<?php
 /**
  * CTX Feed 自动化刷新与链接获取桥接脚本 - JSON 输出版
  */

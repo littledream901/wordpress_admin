@@ -56,11 +56,34 @@ class OnePanelFileManager:
         _log.warning("删除文件失败但不中断：%s | %s", path, msg)
 
     def decompress(self, src: str, dst: str, typ: str = 'tar.gz', wait: int = 8) -> None:
-        """解压文件"""
-        ok, msg = self.api.post('/files/decompress', {'path': src, 'dst': dst, 'type': typ, 'secret': '', 'taskID': str(uuid.uuid4())})
+        """解压文件（异步任务，轮询等待完成）"""
+        task_id = str(uuid.uuid4())
+        ok, msg = self.api.post('/files/decompress', {'path': src, 'dst': dst, 'type': typ, 'secret': '', 'taskID': task_id})
         if not ok:
             raise OnePanelError("decompress", detail=src)
-        time.sleep(wait)
+        self._wait_task_done(task_id, f'解压 {os.path.basename(src)}', timeout=300, interval=3)
+
+    def _wait_task_done(self, task_id: str, desc: str, timeout: int = 300, interval: int = 3) -> None:
+        """轮询 1Panel 异步任务状态（解压 / 移动等）"""
+        success_words = {'success', 'successful', 'done', 'completed', 'finish', 'finished'}
+        failed_words = {'failed', 'fail', 'error', 'err', 'timeout', 'canceled', 'cancelled'}
+        start = time.time()
+        while time.time() - start < timeout:
+            ok, data = self.api.post('/logs/tasks/search', {'page': 1, 'pageSize': 10, 'taskID': task_id})
+            status = ''
+            if ok and isinstance(data, dict):
+                items = data.get('items') or []
+                if items:
+                    item = items[0]
+                    status = str(item.get('status') or item.get('Status') or item.get('state') or '')
+            low = status.lower()
+            if any(w in low for w in success_words):
+                _log.info("%s 完成：taskID=%s", desc, task_id)
+                return
+            if any(w in low for w in failed_words):
+                raise OnePanelError(desc, detail=f"taskID={task_id} status={status}")
+            time.sleep(interval)
+        raise TimeoutError(f'{desc} 等待超时：taskID={task_id}')
 
     def move(self, old_paths: List[str], new_path: str, typ: str = 'cut', wait: int = 3) -> None:
         """移动文件"""
