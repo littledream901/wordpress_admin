@@ -71,6 +71,10 @@ class CloudflareService:
                     pass
             logger.error("Cloudflare API error: %s %s -> %s", method, path, err_detail)
             return {"success": False, "errors": [{"message": err_detail}]}
+        except RuntimeError as exc:
+            # retry_request 对 4xx(非401/403/404) 抛出 RuntimeError
+            logger.warning("Cloudflare API non-retryable: %s %s -> %s", method, path, str(exc))
+            return {"success": False, "errors": [{"message": str(exc)}]}
 
     def _get(self, path: str, **params) -> Dict[str, Any]:
         return self._request("GET", path, payload=None, **params)
