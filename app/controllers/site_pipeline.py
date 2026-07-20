@@ -299,6 +299,7 @@ class HubStudioJobController(CRUDBase[HubStudioJob, HubStudioJobCreate, HubStudi
 
     async def report_job(self, job_id: int, status: str, result_json: str,
                          error_message: str, worker_name: str) -> Optional[HubStudioJob]:
+        """Agent 回传结果（已弃用：请走 hubstudio_service.report_job_result）"""
         job = await self.get(id=job_id)
         if not job:
             return None
@@ -309,7 +310,7 @@ class HubStudioJobController(CRUDBase[HubStudioJob, HubStudioJobCreate, HubStudi
         await job.save()
         site = await Site.filter(id=job.site_id).first()
         if site:
-            site.hub_status = status
+            site.hub_status = f"{job.job_type}:{status}"
             site.pipeline_status = f'hubstudio:{status}'
             old_log = site.pipeline_log or ''
             from app.utils.config_reader import get_provider_info_async as get_provider_info
