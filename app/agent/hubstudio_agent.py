@@ -241,11 +241,18 @@ class HubStudioAgent:
         body = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(url, data=body, method="POST")
         req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("code") and data["code"] != 200:
-                raise RuntimeError(f"登录失败: {data.get('msg', 'unknown error')}")
-            return data
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("code") and data["code"] != 200:
+                    raise RuntimeError(f"登录失败: {data.get('msg', 'unknown error')}")
+                return data
+        except urllib.error.HTTPError as e:
+            self.logger.error(f"登录请求失败 [{url}]: HTTP {e.code}，请检查 HUB_AGENT_SERVER_URL 配置是否正确")
+            raise
+        except Exception as e:
+            self.logger.error(f"登录请求失败 [{url}]: {e}")
+            raise
 
     def _verify_permissions(self) -> bool:
         """验证登录后的 token 是否有效、用户状态是否正常 — 启动时自检"""
@@ -338,8 +345,8 @@ class HubStudioAgent:
                                                  max_retries=max_retries,
                                                  quiet_final_error=quiet_final_error,
                                                  _is_retry_after_login=True)
-                    except Exception:
-                        pass
+                    except Exception as login_err:
+                        self.logger.error(f"重新登录失败: {login_err}，放弃本次请求")
                 error_body = e.read().decode("utf-8") if e.fp else str(e)
                 self.logger.error(f"API [{method} {path}]: HTTP {e.code} {error_body}")
                 raise

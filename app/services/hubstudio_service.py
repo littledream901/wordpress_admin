@@ -925,18 +925,22 @@ class HubStudioOrchestrationService:
             return
 
         ok = status == "success"
-        op_job.status = "success" if ok else "failed"
+        now = datetime.now()
+        update_fields = {
+            "status": "success" if ok else "failed",
+            "finished_at": now,
+        }
         if ok:
             try:
                 result = json.loads(result_json or "{}")
             except Exception:
                 result = {"raw": result_json}
             result["provider"] = get_provider_info("hubstudio")
-            op_job.result_json = json.dumps(result, ensure_ascii=False)
+            update_fields["result_json"] = json.dumps(result, ensure_ascii=False)
         if error_message:
-            op_job.error_message = error_message
-        op_job.finished_at = datetime.now()
-        await op_job.save()
+            update_fields["error_message"] = error_message
+
+        await OperationJob.filter(id=op_job.id).update(**update_fields)
 
 
 HubStudioService = HubStudioOrchestrationService
