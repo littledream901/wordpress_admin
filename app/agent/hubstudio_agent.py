@@ -330,7 +330,10 @@ class HubStudioAgent:
                 if e.code == 401 and not _is_retry_after_login:
                     self.logger.warning("Token 已过期，自动重新登录...")
                     try:
-                        self._login()
+                        new_token = self._login()
+                        if not self._verify_permissions():
+                            self.logger.error("重新登录后权限自检失败，放弃本次请求")
+                            raise RuntimeError("登录后权限验证失败")
                         return self._api_request(method, path, payload, params,
                                                  max_retries=max_retries,
                                                  quiet_final_error=quiet_final_error,
@@ -679,7 +682,11 @@ class HubStudioAgent:
             except urllib.error.HTTPError as e:
                 # 按状态码精细分类，避免把 403/400 当成"网络不通"
                 self._consecutive_http_errors += 1
-                delay = min(30 * self._consecutive_http_errors, self._max_backoff)
+                # 403 是配置错误（非瞬时），用更长退避；其他 HTTP 错误正常递增
+                if e.code == 403:
+                    delay = min(60 * self._consecutive_http_errors, self._max_backoff)
+                else:
+                    delay = min(30 * self._consecutive_http_errors, self._max_backoff)
                 if self._consecutive_http_errors == 1:
                     if e.code == 403:
                         self.logger.error(
