@@ -1,6 +1,13 @@
 #!/bin/sh
 set -e
 
+# 加载 .env 环境变量（shell 脚本不自动读取 .env）
+if [ -f /app/.env ]; then
+    set -a
+    . /app/.env
+    set +a
+fi
+
 echo "========================================="
 echo "  Wordpress Admin - Docker Entrypoint"
 echo "========================================="
