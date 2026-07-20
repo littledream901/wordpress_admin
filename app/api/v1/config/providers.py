@@ -105,6 +105,12 @@ async def batch_save_items(payload: BatchSaveItemsRequest):
     return Success(data={'saved': count}, msg=f'批量保存 {count} 项成功')
 
 
+@router.post('/items/delete', summary='删除单个配置项')
+async def delete_item(id: int = Query(..., description='配置项ID')):
+    await provider_item_controller.remove(id=id)
+    return Success(msg='删除成功')
+
+
 # ── Resource Binding ──
 
 @router.get('/bindings/list', summary='资源绑定列表')

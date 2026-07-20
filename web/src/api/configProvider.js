@@ -13,6 +13,7 @@ export default {
   getItems(params) { return request.get('/config-provider/items/list', { params }) },
   updateItem(data) { return request.post('/config-provider/items/update', data) },
   batchSaveItems(data) { return request.post('/config-provider/items/batch-save', data) },
+  deleteItem(params) { return request.post('/config-provider/items/delete', null, { params }) },
   // Bindings
   getBindings(params) { return request.get('/config-provider/bindings/list', { params }) },
   getBindingSites(params) { return request.get('/config-provider/bindings/sites', { params }) },

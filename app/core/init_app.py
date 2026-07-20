@@ -1141,6 +1141,7 @@ async def init_essential():
     if await _try_acquire_init_lock("init_menus_roles", timeout_seconds=300):
         try:
             await init_menus()
+            await init_apis()
             await init_roles()
         finally:
             await _release_init_lock("init_menus_roles")
@@ -1164,13 +1165,12 @@ async def init_essential():
 async def init_data():
     """种子数据初始化入口（幂等，不做数据库修复/迁移）。
 
-    职责：超级用户、全局配置、API 同步。
-    菜单/角色/Provider 同步由 init_essential() 完成。
+    职责：超级用户、全局配置。
+    菜单/API/角色/Provider 同步由 init_essential() 完成。
     """
     await init_essential()
     await init_superuser()
     await init_configs()
-    await init_apis()
 
 
 async def _ensure_tortoise_initialized():

@@ -115,6 +115,14 @@
             >
               {{ item.config_type }}
             </n-tag>
+            <n-button
+              size="tiny"
+              type="error"
+              quaternary
+              @click="deleteConfigItem(item)"
+            >
+              <TheIcon icon="material-symbols:delete-outline" :size="14" />
+            </n-button>
           </n-input-group>
         </n-form-item-gi>
       </n-grid>
@@ -444,6 +452,19 @@ function toggleEditMode() {
 function onFormChange() {
   if (editMode.value === 'json') {
     syncFormToJson()
+  }
+}
+
+async function deleteConfigItem(item) {
+  try {
+    await api.deleteItem({ id: item.id })
+    itemList.value = itemList.value.filter(it => it.id !== item.id)
+    if (editMode.value === 'json') {
+      syncFormToJson()
+    }
+    message.success('已删除')
+  } catch {
+    message.error('删除失败')
   }
 }
 
