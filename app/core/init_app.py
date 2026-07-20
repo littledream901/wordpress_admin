@@ -39,10 +39,12 @@ from app.core.exceptions import (
     ProviderConfigError,
     ResourceBusyError,
 )
+from tortoise.exceptions import MultipleObjectsReturned
 from app.core.exception_handlers import (
     DoesNotExistHandle,
     HttpExcHandle,
     IntegrityHandle,
+    MultipleObjectsReturnedHandle,
     ProviderConfigErrorHandle,
     RequestValidationHandle,
     ResourceBusyHandle,
@@ -103,6 +105,7 @@ def register_exceptions(app: FastAPI):
     app.add_exception_handler(ExternalAPIError, ServiceErrorHandle)
     app.add_exception_handler(ResourceBusyError, ResourceBusyHandle)
     app.add_exception_handler(ProviderConfigError, ProviderConfigErrorHandle)
+    app.add_exception_handler(MultipleObjectsReturned, MultipleObjectsReturnedHandle)
 
 
 def register_routers(app: FastAPI, prefix: str = "/api"):

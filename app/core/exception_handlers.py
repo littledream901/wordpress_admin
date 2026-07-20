@@ -5,7 +5,7 @@ from typing import Any
 from fastapi.exceptions import HTTPException, RequestValidationError, ResponseValidationError
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
-from tortoise.exceptions import DoesNotExist, IntegrityError
+from tortoise.exceptions import DoesNotExist, IntegrityError, MultipleObjectsReturned
 
 from app.core.exceptions import (
     ErrorCode,
@@ -74,3 +74,8 @@ async def ProviderConfigErrorHandle(_: Request, exc: ProviderConfigError) -> JSO
         msg=str(exc),
         data={"provider": exc.provider, "key": exc.key},
     )
+
+
+async def MultipleObjectsReturnedHandle(_: Request, exc: MultipleObjectsReturned) -> JSONResponse:
+    """多对象返回异常 — 通常由 DB 脏数据引起，降级返回 409"""
+    return _error_response(exc, 409, msg=f"数据重复，请清理脏数据: {exc}")

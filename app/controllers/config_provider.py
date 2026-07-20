@@ -60,12 +60,6 @@ class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, Co
     def __init__(self):
         super().__init__(model=ConfigProvider)
 
-    async def create(self, obj_in: ConfigProviderCreate) -> ConfigProvider:
-        """创建 Provider，同时自动初始化该类型的默认配置项。"""
-        provider = await super().create(obj_in=obj_in)
-        await _init_default_items(provider)
-        return provider
-
     async def get_by_type(self, provider_type: str):
         return await self.model.filter(provider_type=provider_type, is_deleted=False, status="active").order_by("-priority").all()
 
@@ -124,12 +118,14 @@ class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, Co
         await self.model.filter(id=provider_id).update(is_default=True)
 
     async def create(self, *, obj_in: ConfigProviderCreate):
-        """创建 Provider：如果 is_default=True 则固化和取消同类型其他默认"""
+        """创建 Provider：自动初始化默认配置项，若 is_default=True 则固化和取消同类型其他默认"""
         data = obj_in.model_dump()
         if data.get("is_default"):
             await self._lock_bindings_for_default_change(data["provider_type"], 0)
             await self.model.filter(provider_type=data["provider_type"]).update(is_default=False)
-        return await super().create(obj_in=obj_in)
+        provider = await super().create(obj_in=obj_in)
+        await _init_default_items(provider)
+        return provider
 
     async def update(self, *, id: int, obj_in: ConfigProviderUpdate):
         """更新 Provider：如果 is_default=True 则联动取消同类型其他默认，并固化绑定"""
