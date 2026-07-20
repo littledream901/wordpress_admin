@@ -65,7 +65,11 @@ class PermissionControl:
         if not roles:
             raise HTTPException(status_code=403, detail="The user is not bound to a role")
         apis = [await role.apis for role in roles]
-        permission_apis = list(set((api.method, api.path) for api in sum(apis, [])))
+        permission_apis = list(set(
+            (getattr(api, "method", ""), getattr(api, "path", ""))
+            for api in sum(apis, [])
+            if getattr(api, "method", None) and getattr(api, "path", None)
+        ))
         if (method, path) not in permission_apis:
             raise HTTPException(status_code=403, detail=f"Permission denied method:{method} path:{path}")
 
