@@ -7,6 +7,7 @@
 └── Infrastructure   : 僵尸任务清理、分布式锁、启动入口
 """
 
+import asyncio
 from datetime import datetime, timedelta
 import os
 import time
@@ -20,6 +21,7 @@ from fastapi.exceptions import (
     RequestValidationError,
     ResponseValidationError,
 )
+from tortoise import Tortoise, connections
 from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
 
@@ -185,8 +187,6 @@ async def init_db():
     ORM 初始化由 app/__init__.py lifespan 负责，本函数不再调用 Tortoise.init()。
     增量列补齐：先查询 INFORMATION_SCHEMA 确认缺哪些列/索引，只对缺失的执行 ALTER。
     """
-    from tortoise import Tortoise, connections
-
     conn = connections.get("default")
 
     tables_ready = False
@@ -963,7 +963,6 @@ async def recover_stale_jobs():
 
 async def _ensure_lock_table():
     """确保分布式锁表存在（先查再建，避免 MySQL IF NOT EXISTS 仍打 warning）"""
-    from tortoise import connections
     conn = connections.get("default")
     try:
         result = await conn.execute_query("SHOW TABLES LIKE 'system_init_lock'")
@@ -984,7 +983,6 @@ async def _ensure_lock_table():
 async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> bool:
     """尝试获取分布式锁。过期锁自动清理。"""
     await _ensure_lock_table()
-    from tortoise import connections
     conn = connections.get("default")
     now = datetime.now()
     expires = now + timedelta(seconds=timeout_seconds)
@@ -1009,7 +1007,6 @@ async def _try_acquire_init_lock(lock_key: str, timeout_seconds: int = 300) -> b
 async def _release_init_lock(lock_key: str):
     """释放本实例持有的分布式锁"""
     try:
-        from tortoise import connections
         conn = connections.get("default")
         await conn.execute_query(
             "DELETE FROM system_init_lock WHERE lock_key = %s AND instance_id = %s",
@@ -1076,7 +1073,6 @@ async def init_data():
 
 async def _ensure_tortoise_initialized():
     """确保 ORM 已初始化（幂等）。"""
-    from tortoise import Tortoise, connections
     from app.settings import TORTOISE_ORM
 
     try:
@@ -1091,7 +1087,6 @@ async def _run_init_data_with_orm() -> None:
     try:
         await init_data()
     finally:
-        from tortoise import Tortoise
         try:
             await Tortoise.close_connections()
         except Exception:
@@ -1104,5 +1099,4 @@ def init_default_data():
     容器 entrypoint 不是 FastAPI lifespan，不能依赖其自动完成 ORM 初始化，
     因此本函数内部自行完成 Tortoise.init → init_data → close 的完整生命周期。
     """
-    import asyncio
     asyncio.run(_run_init_data_with_orm())
