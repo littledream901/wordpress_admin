@@ -1074,21 +1074,35 @@ async def init_data():
     await init_apis()
 
 
-def init_default_data():
-    """同步包装器，供 Docker entrypoint / 脚本调用
-
-    entrypoint.sh 中迁移步骤和种子数据步骤各自运行在独立的 asyncio.run()
-    上下文中，因此必须在本函数内部完成 Tortoise.init → 业务 → close 的完整生命周期。
-    """
-    import asyncio
-    from tortoise import Tortoise
+async def _ensure_tortoise_initialized():
+    """确保 ORM 已初始化（幂等）。"""
+    from tortoise import Tortoise, connections
     from app.settings import TORTOISE_ORM
 
-    async def _run():
+    try:
+        connections.get("default")
+    except Exception:
         await Tortoise.init(config=TORTOISE_ORM)
-        try:
-            await init_data()
-        finally:
-            await Tortoise.close_connections()
 
-    asyncio.run(_run())
+
+async def _run_init_data_with_orm() -> None:
+    """独立脚本启动时使用：初始化 ORM → 执行种子数据 → 关闭连接。"""
+    await _ensure_tortoise_initialized()
+    try:
+        await init_data()
+    finally:
+        from tortoise import Tortoise
+        try:
+            await Tortoise.close_connections()
+        except Exception:
+            pass
+
+
+def init_default_data():
+    """供 entrypoint.sh / 独立脚本调用的初始化入口。
+
+    容器 entrypoint 不是 FastAPI lifespan，不能依赖其自动完成 ORM 初始化，
+    因此本函数内部自行完成 Tortoise.init → init_data → close 的完整生命周期。
+    """
+    import asyncio
+    asyncio.run(_run_init_data_with_orm())
