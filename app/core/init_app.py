@@ -1075,6 +1075,20 @@ async def init_data():
 
 
 def init_default_data():
-    """同步包装器，供 Docker entrypoint / 脚本调用"""
+    """同步包装器，供 Docker entrypoint / 脚本调用
+
+    entrypoint.sh 中迁移步骤和种子数据步骤各自运行在独立的 asyncio.run()
+    上下文中，因此必须在本函数内部完成 Tortoise.init → 业务 → close 的完整生命周期。
+    """
     import asyncio
-    asyncio.run(init_data())
+    from tortoise import Tortoise
+    from app.settings import TORTOISE_ORM
+
+    async def _run():
+        await Tortoise.init(config=TORTOISE_ORM)
+        try:
+            await init_data()
+        finally:
+            await Tortoise.close_connections()
+
+    asyncio.run(_run())
