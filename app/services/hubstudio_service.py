@@ -24,6 +24,7 @@ from app.controllers.gmail_account import gmail_account_controller
 from app.core.exceptions import HubStudioError, SiteNotFoundError
 from app.log import logger
 from tortoise.exceptions import MultipleObjectsReturned
+from tortoise.expressions import F
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import HubStudioAgentHeartbeat, HubStudioJob, Site
@@ -352,25 +353,37 @@ class HubStudioOrchestrationService:
 
     async def agent_heartbeat(self, worker_name: str, provider_id: int = 0,
                               task_id: int = 0, task_status: str = "") -> dict:
-        """Agent 上报心跳"""
-        heartbeat, created = await HubStudioAgentHeartbeat.get_or_create(
-            worker_name=worker_name,
-            defaults={
-                "provider_id": provider_id,
-                "status": "online",
-                "last_heartbeat": datetime.now(),
-                "total_tasks": 0,
-            }
-        )
-        if not created:
-            heartbeat.last_heartbeat = datetime.now()
-            heartbeat.status = "online"
-            heartbeat.provider_id = provider_id or heartbeat.provider_id
+        """Agent 上报心跳（直接 update + create，避免 partial model bug）"""
+        now = datetime.now()
+
+        update_fields = {
+            "status": "online",
+            "last_heartbeat": now,
+        }
+        if provider_id:
+            update_fields["provider_id"] = provider_id
         if task_id:
-            heartbeat.last_task_id = task_id
-            heartbeat.last_task_status = task_status
-            heartbeat.total_tasks = (heartbeat.total_tasks or 0) + 1
-        await heartbeat.save()
+            update_fields["last_task_id"] = task_id
+            update_fields["last_task_status"] = task_status
+
+        updated = await HubStudioAgentHeartbeat.filter(worker_name=worker_name).update(**update_fields)
+
+        if task_id and updated:
+            await HubStudioAgentHeartbeat.filter(worker_name=worker_name).update(
+                total_tasks=F("total_tasks") + 1
+            )
+
+        if updated == 0:
+            await HubStudioAgentHeartbeat.create(
+                worker_name=worker_name,
+                provider_id=provider_id,
+                status="online",
+                last_heartbeat=now,
+                total_tasks=1 if task_id else 0,
+                last_task_id=task_id if task_id else 0,
+                last_task_status=task_status if task_id else "",
+            )
+
         return {"ok": True, "worker_name": worker_name, "online": True}
 
     async def get_agents_status(self) -> List[dict]:
@@ -485,30 +498,27 @@ class HubStudioOrchestrationService:
     # ── Agent 领取/回传 ──
 
     async def claim_next_pending_job(self, worker_name: str, provider_id: int = None) -> Optional[HubStudioJob]:
-        """Agent 领取下一个待执行任务"""
+        """Agent 领取下一个待执行任务（CAS 原子更新，防并发重复领取）"""
         q = HubStudioJob.filter(status="pending")
         if provider_id:
             q = q.filter(provider_id=provider_id)
         job = await q.order_by("id").first()
         if not job:
             return None
-        job.status = "running"
-        job.worker_name = worker_name
-        job.started_at = datetime.now()
 
         # 刷新 payload：create_account/update_env/wp_login/gmc_check 依赖 hub_env_id，
         # 任务创建时 hub_env_id 可能为空（先于 create_env 完成），此时从 site 重新获取
+        new_payload_json = job.payload_json
         if job.job_type in ("create_account", "update_env", "wp_login", "gmc_check"):
             site = await Site.filter(id=job.site_id).first()
             if site and site.hub_env_id:
                 try:
                     payload = json.loads(job.payload_json or "{}")
-                    need_save = False
+                    need_update = False
                     if not payload.get("hub_env_id"):
                         payload["hub_env_id"] = site.hub_env_id
-                        need_save = True
+                        need_update = True
                         logger.info(f"任务 [{job.id}] payload.hub_env_id 已刷新: {site.hub_env_id}")
-                    # create_account: 也刷新 Gmail 凭证（任务可能在 _enrich_create_account_payload 之前创建）
                     if job.job_type == "create_account":
                         from app.models.gmail_account import GmailAccount
                         if not payload.get("gmail_username"):
@@ -519,14 +529,29 @@ class HubStudioOrchestrationService:
                                 payload["gmail_username"] = gmail.username
                                 payload["gmail_password"] = gmail.password
                                 payload["gmail_2fa_key"] = gmail.two_fa_key or ""
-                                need_save = True
+                                need_update = True
                                 logger.info(f"任务 [{job.id}] Gmail 凭证已刷新: {gmail.username}")
-                    if need_save:
-                        job.payload_json = json.dumps(payload, ensure_ascii=False)
+                    if need_update:
+                        new_payload_json = json.dumps(payload, ensure_ascii=False)
                 except Exception:
                     pass
 
-        await job.save()
+        # CAS 原子更新：只有 status=pending 才能抢到，避免并发重复领取
+        updated = await HubStudioJob.filter(id=job.id, status="pending").update(
+            status="running",
+            worker_name=worker_name,
+            started_at=datetime.now(),
+            payload_json=new_payload_json,
+        )
+        if updated == 0:
+            logger.info(f"Agent [{worker_name}] 任务 {job.id} 已被其他节点领取，跳过")
+            return None
+
+        # 更新 job 对象用于后续日志和返回
+        job.status = "running"
+        job.worker_name = worker_name
+        job.started_at = datetime.now()
+        job.payload_json = new_payload_json
 
         # 心跳更新
         await self.agent_heartbeat(worker_name, provider_id=job.provider_id or 0,
@@ -542,18 +567,45 @@ class HubStudioOrchestrationService:
         error_message: str = "",
         worker_name: str = "",
     ) -> Optional[HubStudioJob]:
-        """Agent 回传任务结果（同时更新 Site 和 OperationJob）"""
+        """Agent 回传任务结果（幂等：已终态不重复更新，CAS 防并发）"""
         job = await self._get_job_safe(job_id)
         if not job:
             return None
 
+        # 幂等检查：已进入终态则不重复处理
+        if job.status in ("success", "failed"):
+            logger.info(
+                f"HubStudio 任务 {job_id} 已处于终态 ({job.status})，"
+                f"忽略重复上报 (worker={worker_name})"
+            )
+            return job
+
+        # CAS 原子更新：只接受从 running（或 pending）到终态的转换
+        now = datetime.now()
+        updated = await HubStudioJob.filter(
+            id=job_id, status__in=("running", "pending")
+        ).update(
+            status=status,
+            result_json=result_json,
+            error_message=error_message,
+            finished_at=now,
+        )
+        if updated == 0:
+            # 并发上报，已被另一个请求先处理
+            job_refreshed = await self._get_job_safe(job_id)
+            logger.info(
+                f"HubStudio 任务 {job_id} 状态已变更 (当前={job_refreshed.status if job_refreshed else '?'})，"
+                f"忽略并发重复上报"
+            )
+            return job_refreshed
+
+        # 更新内存对象用于后续同步
         job.status = status
         job.result_json = result_json
         job.error_message = error_message
         if worker_name:
             job.worker_name = worker_name
-        job.finished_at = datetime.now()
-        await job.save()
+        job.finished_at = now
 
         # 心跳更新
         if worker_name:

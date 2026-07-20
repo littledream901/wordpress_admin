@@ -245,6 +245,43 @@ class HubStudioAgent:
                 raise RuntimeError(f"登录失败: {data.get('msg', 'unknown error')}")
             return data
 
+    def _verify_permissions(self) -> bool:
+        """验证登录后的 token 是否有效、用户状态是否正常 — 启动时自检"""
+        try:
+            userinfo = self._api_get("/base/userinfo")
+            user_data = userinfo.get("data", {})
+            username = user_data.get("username", "?")
+            is_active = user_data.get("is_active", False)
+            is_superuser = user_data.get("is_superuser", False)
+
+            self.logger.info(f"当前登录用户: {username}, is_active={is_active}, is_superuser={is_superuser}")
+
+            if not is_active:
+                self.logger.error("当前用户已被禁用，Agent 无法正常工作！")
+                return False
+
+            if not is_superuser:
+                self.logger.warning(
+                    "当前用户非超级管理员，如果是普通用户，请确保：\n"
+                    "    1. 用户已绑定角色\n"
+                    "    2. 角色拥有以下 API 权限：\n"
+                    "       POST /site-pipeline/hub-job/claim\n"
+                    "       POST /site-pipeline/hub-job/{id}/report\n"
+                    "       POST /site-pipeline/hub-job/heartbeat\n"
+                    "       GET  /site-pipeline/hub-job/agent-config"
+                )
+
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                self.logger.error("Token 验证失败 (401)：登录可能无效，token 已过期或用户不存在")
+            else:
+                self.logger.warning(f"验证权限时出错 (HTTP {e.code}): {e}")
+            return False
+        except Exception as e:
+            self.logger.warning(f"验证权限时出错: {e}（userinfo 接口可能不可用）")
+            return True  # 不阻塞启动
+
     # ── HTTP 客户端（直连后端 API） ──
 
     def _api_request(
@@ -399,7 +436,7 @@ class HubStudioAgent:
     # ── 心跳 ──
 
     def _send_heartbeat(self, task_id: int = 0, task_status: str = ""):
-        """发送心跳到后端"""
+        """发送心跳到后端（按 HTTP 状态码分类报错）"""
         try:
             params = {
                 "worker_name": self.worker_name,
@@ -410,7 +447,18 @@ class HubStudioAgent:
             self._api_post("/site-pipeline/hub-job/heartbeat", params=params, max_retries=1,
                            quiet_final_error=True)
             self._heartbeat_fail_count = 0
-        except (*_NETWORK_ERRORS, urllib.error.HTTPError):
+        except urllib.error.HTTPError as e:
+            self._heartbeat_fail_count += 1
+            if self._heartbeat_fail_count == 1:
+                if e.code == 403:
+                    self.logger.warning("心跳 403：账号权限不足，请检查角色/API 授权")
+                elif e.code == 401:
+                    self.logger.warning("心跳 401：登录失效，将在下次 API 调用时自动重新登录")
+                elif e.code == 400:
+                    self.logger.warning("心跳 400：后端请求参数/保存逻辑错误，请检查服务端日志")
+                else:
+                    self.logger.warning(f"心跳失败 (HTTP {e.code}): {e}")
+        except _NETWORK_ERRORS:
             self._heartbeat_fail_count += 1
             if self._heartbeat_fail_count == 1:
                 self.logger.warning(f"心跳发送失败，后端可能不可达 (server={self.server_url})")
@@ -420,27 +468,39 @@ class HubStudioAgent:
     # ── 任务领取 / 回传 ──
 
     def claim_job(self) -> Optional[dict]:
-        """从后端领取一个待执行任务"""
+        """从后端领取一个待执行任务（精细错误分类）"""
         params = {"worker_name": self.worker_name}
         if self.provider_id:
             params["provider_id"] = self.provider_id
-        resp = self._api_post("/site-pipeline/hub-job/claim", params=params)
-        if resp.get("code") == 200 and resp.get("data", {}).get("ok"):
-            job = resp["data"]["job"]
-            self.logger.info(f"领取任务: id={job.get('id')}, type={job.get('job_type')}, "
-                           f"domain={job.get('domain')}")
-            return job
-        return None
+        try:
+            resp = self._api_post("/site-pipeline/hub-job/claim", params=params)
+            if resp.get("code") == 200 and resp.get("data", {}).get("ok"):
+                job = resp["data"]["job"]
+                self.logger.info(f"领取任务: id={job.get('id')}, type={job.get('job_type')}, "
+                               f"domain={job.get('domain')}")
+                return job
+            # 空任务（后端返回 ok=False / code != 200）
+            return None
+        except urllib.error.HTTPError as e:
+            if e.code == 204:
+                return None  # 无待执行任务，正常情况
+            raise  # 401/403/500 等上抛给主循环分类处理
 
     def report_job(self, job_id: int, status: str, result: dict, error: str = ""):
-        """回传任务执行结果"""
+        """回传任务执行结果（404 静默，其他错误上抛）"""
         payload = {
             "status": status,
             "result_json": json.dumps(result, ensure_ascii=False),
             "error_message": error,
             "worker_name": self.worker_name,
         }
-        self._api_post(f"/site-pipeline/hub-job/{job_id}/report", payload=payload)
+        try:
+            self._api_post(f"/site-pipeline/hub-job/{job_id}/report", payload=payload)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                self.logger.warning(f"任务 {job_id} 在后端已不存在 (404)，放弃上报")
+                return
+            raise  # 401/403/500 等上抛
 
     # ── 主循环 ──
 
@@ -514,6 +574,10 @@ class HubStudioAgent:
         if not login_ok:
             self.logger.error("后端登录失败，已达最大重试次数，退出")
             return
+
+        # ── 启动自检：验证 token 有效 + 用户有角色 ──
+        if not self._verify_permissions():
+            self.logger.warning("权限自检未通过，Agent 将继续运行但 API 可能返回 403")
 
         # ── 从服务端拉取 Provider 配置（带退避重试）──
         config_ok = False
@@ -606,13 +670,35 @@ class HubStudioAgent:
                 )
                 time.sleep(delay)
             except urllib.error.HTTPError as e:
-                # HTTP 错误（401/403/5xx 等）→ 长间隔退避
+                # 按状态码精细分类，避免把 403/400 当成"网络不通"
                 self._consecutive_http_errors += 1
                 delay = min(30 * self._consecutive_http_errors, self._max_backoff)
                 if self._consecutive_http_errors == 1:
-                    self.logger.warning(
-                        f"后端返回 HTTP {e.code}，请检查配置 (server={self.server_url})"
-                    )
+                    if e.code == 403:
+                        self.logger.error(
+                            f"后端返回 403 权限不足！请检查：\n"
+                            f"  1. 用户 '{self.username}' 是否绑定了角色\n"
+                            f"  2. 角色是否授予了 site-pipeline/hub-job API 权限\n"
+                            f"  (server={self.server_url})"
+                        )
+                    elif e.code == 401:
+                        self.logger.warning(
+                            f"后端返回 401 登录失效，Agent 将尝试重新登录 (server={self.server_url})"
+                        )
+                    elif e.code == 400:
+                        self.logger.error(
+                            f"后端返回 400 请求参数/业务逻辑错误，请检查服务端日志 (server={self.server_url})"
+                        )
+                    elif e.code == 404:
+                        self.logger.warning(f"后端返回 404 接口不存在，请检查路由配置 (server={self.server_url})")
+                    elif e.code >= 500:
+                        self.logger.error(
+                            f"后端返回 {e.code} 内部错误，将退避重试 (server={self.server_url})"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"后端返回 HTTP {e.code}，请检查配置 (server={self.server_url})"
+                        )
                 self.logger.info(f"等待 {delay}s 后重试 (第 {self._consecutive_http_errors} 次)")
                 time.sleep(delay)
             except Exception as e:
