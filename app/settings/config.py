@@ -1,7 +1,9 @@
+import json
 import os
 import typing
 import warnings
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -18,11 +20,31 @@ class Settings(BaseSettings):
     APP_DESCRIPTION: str = "Wordpress 站点管理平台"
 
     # ── CORS ──
-    CORS_ORIGINS: typing.List = ["*"]
+    CORS_ORIGINS: typing.List[str] = ["*"]
     """允许的跨域来源，生产环境必须指定具体域名，如 ["https://your-domain.com"]"""
     CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: typing.List = ["*"]
-    CORS_ALLOW_HEADERS: typing.List = ["*"]
+    CORS_ALLOW_METHODS: typing.List[str] = ["*"]
+    CORS_ALLOW_HEADERS: typing.List[str] = ["*"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        """兼容各种 CORS_ORIGINS 格式：JSON 数组、反引号、多余空格等。"""
+        if v is None:
+            return ["*"]
+        if isinstance(v, list):
+            return v
+        # 清理反引号、多余空格
+        cleaned = str(v).replace("`", "").strip()
+        try:
+            origins = json.loads(cleaned)
+            if isinstance(origins, list):
+                return origins
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # 回退：按逗号分割
+        parts = [p.strip().strip("\"'") for p in cleaned.strip("[]").split(",") if p.strip()]
+        return parts if parts else ["*"]
 
     PROJECT_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     BASE_DIR: str = os.path.abspath(os.path.join(PROJECT_ROOT, os.pardir))
