@@ -2,11 +2,15 @@
 set -e
 
 # 加载 .env 环境变量（shell 脚本不自动读取 .env）
-ENV_FILE="${APP_ENV_FILE:-.env}"
-if [ -f "$ENV_FILE" ]; then
+ENV_FILE="${APP_ENV_FILE:-./.env}"
+if [ -r "$ENV_FILE" ]; then
     set -a
+    # shellcheck disable=SC1090
     . "$ENV_FILE"
     set +a
+    echo "[INFO] 已加载环境变量: $ENV_FILE"
+else
+    echo "[WARN] 未找到 $ENV_FILE，使用系统环境变量"
 fi
 
 echo "========================================="
