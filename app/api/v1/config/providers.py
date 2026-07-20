@@ -22,7 +22,7 @@ async def list_providers(provider_type: str = Query('')):
     if provider_type:
         objs = await provider_controller.get_by_type(provider_type)
     else:
-        objs = await provider_controller.model.all().order_by('provider_type', '-priority')
+        objs = await provider_controller.model.filter(is_deleted=False).all().order_by('provider_type', '-priority')
 
     # 批量查询 item_count（避免 N+1）
     pids = [p.id for p in objs]

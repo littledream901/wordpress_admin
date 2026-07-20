@@ -36,7 +36,7 @@ class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, Co
         super().__init__(model=ConfigProvider)
 
     async def get_by_type(self, provider_type: str):
-        return await self.model.filter(provider_type=provider_type, status="active").order_by("-priority").all()
+        return await self.model.filter(provider_type=provider_type, is_deleted=False, status="active").order_by("-priority").all()
 
     async def _lock_bindings_for_default_change(self, provider_type: str, new_provider_id: int):
         """固定方案：切换默认 Provider 前，将隐式依赖旧默认的站点固化为显式绑定。
