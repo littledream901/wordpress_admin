@@ -3,7 +3,7 @@ import logging
 import time
 import traceback
 
-from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Body, File, Query, UploadFile
 from fastapi.exceptions import HTTPException
 from tortoise.expressions import Q
 
@@ -89,7 +89,7 @@ async def create_user(
 @router.post("/update", summary="更新用户")
 async def update_user(
     user_in: UserUpdate,
-    request_user: User = Depends(DependAuth),
+    request_user: User = DependAuth,
 ):
     # 非超级管理员只能更新自己的信息
     if not request_user.is_superuser and user_in.id != CTX_USER_ID.get():
