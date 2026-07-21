@@ -131,7 +131,6 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { NCard, NGrid, NGridItem, NTag, NButton, NEmpty, NSkeleton } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import { useUserStore, usePermissionStore } from '@/store'
@@ -189,7 +188,6 @@ const statCards = computed(() => [
 const agentOnline = ref(null)
 
 // ─── 快捷入口 ───
-const router = useRouter()
 const permissionStore = usePermissionStore()
 
 const allShortcuts = [
@@ -204,23 +202,25 @@ const allShortcuts = [
 ]
 
 const shortcuts = computed(() => {
-  // 收集所有可访问的路由路径（含子路由路径）
-  const accessiblePaths = new Set()
-  for (const route of permissionStore.routes) {
-    accessiblePaths.add(route.path)
+  // 超级管理员看全部
+  if (userStore.isSuperUser) return allShortcuts
+
+  // 从 dynamic routes 提取所有子路由完整路径
+  const accessRoutes = permissionStore.accessRoutes
+  if (!accessRoutes || accessRoutes.length === 0) return []
+
+  const allowed = new Set()
+  for (const route of accessRoutes) {
     if (route.children) {
       for (const child of route.children) {
-        const fullPath = `${route.path}/${child.path}`.replace('//', '/')
-        accessiblePaths.add(fullPath)
+        // 跳过空路径的子路由（父级自己渲染的占位）
+        if (!child.path) continue
+        const fullPath = route.path + '/' + child.path
+        allowed.add(fullPath)
       }
     }
   }
-  return allShortcuts.filter(s => {
-    // 超级管理员看全部
-    if (userStore.isSuperUser) return true
-    // 子用户：去重 + 过滤无权访问的路径
-    return accessiblePaths.has(s.path)
-  })
+  return allShortcuts.filter(s => allowed.has(s.path))
 })
 
 // ─── 1Panel 监控 ───
