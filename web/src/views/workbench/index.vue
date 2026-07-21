@@ -133,7 +133,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { NCard, NGrid, NGridItem, NTag, NButton, NEmpty, NSkeleton } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
-import { useUserStore, usePermissionStore } from '@/store'
+import { useUserStore } from '@/store'
 import api from '@/api'
 import providerApi from '@/api/configProvider'
 import shopifyApi from '@/api/shopify'
@@ -188,9 +188,7 @@ const statCards = computed(() => [
 const agentOnline = ref(null)
 
 // ─── 快捷入口 ───
-const permissionStore = usePermissionStore()
-
-const allShortcuts = [
+const shortcuts = [
   { title: '域名重定向', desc: '域名 301 重定向配置', path: '/site-pipeline/site-list', icon: 'material-symbols:swap-horiz', color: '#f0a020', bg: 'rgba(240,160,32,.12)' },
   { title: 'Feed 管理', desc: '数据源上传与 Feed 生成', path: '/site-pipeline/feed-manager', icon: 'material-symbols:rss-feed', color: '#a3a3a3', bg: 'rgba(163,163,163,.12)' },
   { title: 'Hub 调度', desc: '浏览器环境创建与管理', path: '/site-pipeline/hub-dispatch', icon: 'material-symbols:memory', color: '#e88080', bg: 'rgba(232,128,128,.12)' },
@@ -199,29 +197,8 @@ const allShortcuts = [
   { title: '账号管理', desc: '管理账号密码与 Provider 绑定', path: '/config/accounts', icon: 'material-symbols:group', color: '#70c0e8', bg: 'rgba(112,192,232,.12)' },
   { title: '域名管理', desc: '域名解析与 DNS 配置', path: '/config/manage', icon: 'material-symbols:language', color: '#f472b6', bg: 'rgba(244,114,182,.12)' },
   { title: 'Gmail 邮箱', desc: '批量邮箱管理', path: '/gmail/account-list', icon: 'material-symbols:mail', color: '#38bdf8', bg: 'rgba(56,189,248,.12)' },
+
 ]
-
-const shortcuts = computed(() => {
-  // 超级管理员看全部
-  if (userStore.isSuperUser) return allShortcuts
-
-  // 从 dynamic routes 提取所有子路由完整路径
-  const accessRoutes = permissionStore.accessRoutes
-  if (!accessRoutes || accessRoutes.length === 0) return []
-
-  const allowed = new Set()
-  for (const route of accessRoutes) {
-    if (route.children) {
-      for (const child of route.children) {
-        // 跳过空路径的子路由（父级自己渲染的占位）
-        if (!child.path) continue
-        const fullPath = route.path + '/' + child.path
-        allowed.add(fullPath)
-      }
-    }
-  }
-  return allShortcuts.filter(s => allowed.has(s.path))
-})
 
 // ─── 1Panel 监控 ───
 const onePanelServers = ref([])
