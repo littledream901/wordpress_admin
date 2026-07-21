@@ -5,6 +5,7 @@ from fastapi.exceptions import HTTPException
 from tortoise.expressions import Q
 
 from app.controllers import role_controller
+from app.models.admin import Role
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.roles import RoleCreate, RoleUpdate, RoleUpdateMenusApis
 
@@ -41,7 +42,20 @@ async def create_role(role_in: RoleCreate):
             status_code=400,
             detail="The role with this rolename already exists in the system.",
         )
-    await role_controller.create(obj_in=role_in)
+    # 自动生成 code（取自 name 的 slug 化，code 用于系统逻辑判断且有唯一约束）
+    import re
+    code = re.sub(r'[^a-z0-9_]', '', role_in.name.lower().replace(' ', '_'))
+    if not code:
+        code = f"role_{role_in.name.encode('utf-8').hex()[:8]}"
+    # 检查 code 唯一性，冲突时追加序号
+    base_code = code
+    counter = 1
+    while await Role.filter(code=code).exists():
+        code = f"{base_code}_{counter}"
+        counter += 1
+    obj_dict = role_in.model_dump()
+    obj_dict["code"] = code
+    await role_controller.create(obj_in=obj_dict)
     return Success(msg="Created Successfully")
 
 

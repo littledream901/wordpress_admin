@@ -109,13 +109,15 @@ class OnePanelAPI:
                     continue
                 try:
                     data = resp.json()
-                except Exception:
+                except Exception as json_err:
                     # 1Panel 批量操作可能返回多个拼接的 JSON 对象
+                    _log.debug("1Panel %s %s resp.json() 失败: %s，尝试拼接 JSON 解析",
+                               method, endpoint, json_err)
                     data = _parse_concatenated_json(text)
                     if data is None:
                         last_err = f'HTTP {resp.status_code}: invalid JSON'
-                        _log.warning("1Panel %s %s 第 %s/%s 次非 JSON 响应：%s",
-                                     method, endpoint, attempt, self.max_retries, text[:200])
+                        _log.warning("1Panel %s %s 第 %s/%s 次非 JSON 响应(json_err=%s)：%s",
+                                     method, endpoint, attempt, self.max_retries, json_err, text[:200])
                         time.sleep(self.retry_interval)
                         continue
 

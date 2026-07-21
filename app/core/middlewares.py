@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import uuid
 from datetime import datetime
@@ -14,6 +15,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.core.dependency import decode_token_lightweight
 from app.log.log import set_trace_id
 from app.models.admin import AuditLog
+
+logger = logging.getLogger(__name__)
 
 from .bgtask import BgTasks
 
@@ -143,19 +146,14 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
                     args.update(body)
                 elif isinstance(body, list):
                     args["_body"] = body
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                try:
-                    body = await request.form()
-                    # args.update(body)
-                    for k, v in body.items():
-                        if hasattr(v, "filename"):  # 文件上传行为
-                            args[k] = v.filename
-                        elif isinstance(v, list) and v and hasattr(v[0], "filename"):
-                            args[k] = [file.filename for file in v]
-                        else:
-                            args[k] = v
-                except Exception:
-                    pass
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "审计日志解析请求体 JSON 失败: %s %s | err=%s",
+                    request.method, request.url.path, e,
+                )
+                # 不 fallback 到 form：JSON 解析失败说明 body 不是 JSON，不应猜测为 form
+            except Exception:
+                pass
 
         return args
 
