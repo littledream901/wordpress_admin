@@ -19,9 +19,13 @@ from app.utils.password import get_password_hash, verify_password
 router = APIRouter()
 
 
-def _build_userinfo_dict(user: User) -> Dict[str, Any]:
+def _build_userinfo_dict(user: User, roles: list[Role] | None = None) -> Dict[str, Any]:
     """稳定构造用户信息，避免依赖 ORM to_dict 在脏对象场景下抛异常。"""
     last_login = getattr(user, "last_login", None)
+    role_list = [
+        {"id": r.id, "code": getattr(r, "code", ""), "name": getattr(r, "name", "")}
+        for r in (roles or [])
+    ]
     return {
         "id": getattr(user, "id", None),
         "username": getattr(user, "username", "") or "",
@@ -33,6 +37,7 @@ def _build_userinfo_dict(user: User) -> Dict[str, Any]:
         "is_superuser": bool(getattr(user, "is_superuser", False)),
         "last_login": last_login.isoformat() if last_login else None,
         "dept_id": getattr(user, "dept_id", None),
+        "roles": role_list,
     }
 
 
@@ -106,6 +111,10 @@ def _build_menu_tree(menu_rows: List[Dict[str, Any]], *, user_id: int | None = N
                 row.get("path"),
                 user_id,
             )
+            # 确保根菜单路径以 / 开头，否则 Vue Router 拒绝注册
+            path = row.get("path", "") or ""
+            if path and not path.startswith("/"):
+                row["path"] = "/" + path
             roots.append(row)
             continue
 
@@ -200,7 +209,8 @@ async def refresh_access_token(payload: RefreshTokenIn):
 @router.get("/userinfo", summary="查看用户信息")
 async def get_userinfo(current_user: User = DependAuth):
     """返回当前登录用户信息。认证状态已由 DependAuth 保障。"""
-    data = _build_userinfo_dict(current_user)
+    roles = await current_user.roles if getattr(current_user, "id", None) else []
+    data = _build_userinfo_dict(current_user, roles=roles)
     if not data.get("id"):
         logger.warning("[userinfo] 用户对象异常，缺少 id")
         raise HTTPException(status_code=401, detail="登录已失效")
@@ -226,7 +236,8 @@ async def get_user_menu(current_user: User = DependAuth):
             roles = []
 
         if not roles:
-            raise HTTPException(status_code=403, detail="当前用户未绑定角色")
+            logger.warning("[usermenu] 当前用户未绑定角色 user_id=%s", user_id)
+            return Success(data=[], msg="当前用户未绑定角色，请联系管理员分配权限")
 
         all_menu_lists: List[List[Menu]] = []
         for role in roles:
@@ -281,7 +292,8 @@ async def get_user_api(current_user: User = DependAuth):
         roles = []
 
     if not roles:
-        raise HTTPException(status_code=403, detail="当前用户未绑定角色")
+        logger.warning("[userapi] 当前用户未绑定角色 user_id=%s", user_id)
+        return Success(data=[], msg="当前用户未绑定角色，请联系管理员分配权限")
 
     api_seen: set[tuple] = set()
     result: List[Dict[str, Any]] = []
