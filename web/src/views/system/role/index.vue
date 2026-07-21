@@ -96,10 +96,20 @@ const drawerDataScopes = ref(
   }))
 )
 
+// 公共只读 API（白名单）：后端对所有认证用户放行，无需在角色权限中分配
+const PUBLIC_API_PATHS = new Set([
+  '/api/v1/dept/list', '/api/v1/dept/get',
+  '/api/v1/user/list', '/api/v1/user/get',
+  '/api/v1/menu/list', '/api/v1/menu/get',
+  '/api/v1/role/list', '/api/v1/role/get', '/api/v1/role/authorized',
+])
+
 function buildApiTree(data) {
   // 按 tags（模块）分组，每组用 path 作为子节点
   const groupedData = {}
   data.forEach((item) => {
+    // 跳过白名单 API（后端已全局放行，无需在角色权限中分配）
+    if (PUBLIC_API_PATHS.has(item['path'])) return
     const tag = item['tags'] || 'default'
     const groupLabel = tag.charAt(0).toUpperCase() + tag.slice(1)
     const groupKey = tag
@@ -421,15 +431,17 @@ const columns = [
 
                   // 填充数据权限配置
                   const apiDataScopes = roleAuthorizedResponse.data.data_scopes || []
-                  if (apiDataScopes.length > 0) {
-                    drawerDataScopes.value.forEach((ds) => {
-                      const matched = apiDataScopes.find((s) => s.resource === ds.resource)
-                      if (matched) {
-                        ds.data_scope = matched.data_scope ?? 3
-                        ds.custom_dept_ids = (matched.custom_depts || []).map((v) => v.id)
-                      }
-                    })
-                  }
+                  drawerDataScopes.value.forEach((ds) => {
+                    const matched = apiDataScopes.find((s) => s.resource === ds.resource)
+                    if (matched) {
+                      ds.data_scope = matched.data_scope ?? 3
+                      ds.custom_dept_ids = (matched.custom_depts || []).map((v) => v.id)
+                    } else {
+                      // 无模块级配置 → 默认使用角色全局 data_scope
+                      ds.data_scope = row.data_scope ?? 3
+                      ds.custom_dept_ids = []
+                    }
+                  })
 
                   active.value = true
                   role_id.value = row.id

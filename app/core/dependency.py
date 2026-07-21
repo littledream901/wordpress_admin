@@ -53,6 +53,19 @@ class AuthControl:
 
 
 class PermissionControl:
+    # 公共只读 API：跨模块通用，所有已认证用户可访问，不参与权限校验
+    PUBLIC_API: set[tuple[str, str]] = {
+        ("GET", "/api/v1/dept/list"),
+        ("GET", "/api/v1/dept/get"),
+        ("GET", "/api/v1/user/list"),
+        ("GET", "/api/v1/user/get"),
+        ("GET", "/api/v1/menu/list"),
+        ("GET", "/api/v1/menu/get"),
+        ("GET", "/api/v1/role/list"),
+        ("GET", "/api/v1/role/get"),
+        ("GET", "/api/v1/role/authorized"),
+    }
+
     @classmethod
     async def has_permission(cls, request: Request, current_user: User = Depends(AuthControl.is_authed)) -> None:
         if getattr(current_user, "is_superuser", False):
@@ -62,6 +75,10 @@ class PermissionControl:
         route = request.scope.get("route")
         root_path = request.scope.get("root_path", "")
         path = (root_path + route.path) if route else request.url.path
+
+        # 公共只读 API 直接放行
+        if (method, path) in cls.PUBLIC_API:
+            return
         roles: list[Role] = await current_user.roles
         if not roles:
             logger.warning(
