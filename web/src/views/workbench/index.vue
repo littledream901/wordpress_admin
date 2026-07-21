@@ -131,9 +131,10 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { NCard, NGrid, NGridItem, NTag, NButton, NEmpty, NSkeleton } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
-import { useUserStore } from '@/store'
+import { useUserStore, usePermissionStore } from '@/store'
 import api from '@/api'
 import providerApi from '@/api/configProvider'
 import shopifyApi from '@/api/shopify'
@@ -172,23 +173,62 @@ const subtitle = computed(() => {
   return '回顾今日，规划明天'
 })
 
-// ─── 统计卡片 ───
-const stats = ref({ providers: 0, accounts: 0, products: 0, sites: 0 })
-
-const statCards = computed(() => [
-  { label: '流水线站点', value: stats.value.sites, icon: 'material-symbols:dns', color: '#e88080', link: '/site-pipeline/site-list' },
-{ label: '配置 Provider', value: stats.value.providers, icon: 'material-symbols:settings', color: '#63e2b7', link: '/config/manage' },
-  { label: '托管账号', value: stats.value.accounts, icon: 'material-symbols:group', color: '#70c0e8', link: '/config/accounts' },
-  { label: 'Shopify 产品', value: stats.value.products, icon: 'material-symbols:shopping-cart', color: '#f0a020', link: '/shopify/product-list' },
-  { label: 'Hub 环境', value: '-', icon: 'material-symbols:memory', color: '#a78bfa', link: '/site-pipeline/hub-dispatch', sub: '查询中' },
-  { label: 'Gmail 邮箱', value: '-', icon: 'material-symbols:mail', color: '#38bdf8', link: '/gmail/account-list', sub: '查询中' },
-])
-
 // ─── Agent 状态 ───
 const agentOnline = ref(null)
 
+// ─── 可访问路径（共享给统计卡片和快捷入口过滤使用）───
+const router = useRouter()
+const permissionStore = usePermissionStore()
+const accessiblePaths = computed(() => {
+  if (userStore.isSuperUser) return null // null 表示不过滤
+  const paths = new Set()
+  for (const route of permissionStore.routes) {
+    paths.add(route.path)
+    if (route.children) {
+      for (const child of route.children) {
+        const fullPath = `${route.path}/${child.path}`.replace('//', '/')
+        paths.add(fullPath)
+      }
+    }
+  }
+  return paths
+})
+
+// ─── 统计卡片 ───
+const stats = ref({ providers: 0, accounts: 0, products: 0, sites: 0 })
+
+const allStatCards = [
+  { label: '流水线站点', value: null, icon: 'material-symbols:dns', color: '#e88080', link: '/site-pipeline/site-list' },
+  { label: '配置 Provider', value: null, icon: 'material-symbols:settings', color: '#63e2b7', link: '/config/manage' },
+  { label: '托管账号', value: null, icon: 'material-symbols:group', color: '#70c0e8', link: '/config/accounts' },
+  { label: 'Shopify 产品', value: null, icon: 'material-symbols:shopping-cart', color: '#f0a020', link: '/shopify/product-list' },
+  { label: 'Hub 环境', value: null, icon: 'material-symbols:memory', color: '#a78bfa', link: '/site-pipeline/hub-dispatch' },
+  { label: 'Gmail 邮箱', value: null, icon: 'material-symbols:mail', color: '#38bdf8', link: '/gmail/account-list' },
+]
+
+const statCards = computed(() => {
+  // 合并实时数据
+  const cards = allStatCards.map(c => {
+    if (c.label === '流水线站点') return { ...c, value: stats.value.sites }
+    if (c.label === '配置 Provider') return { ...c, value: stats.value.providers }
+    if (c.label === '托管账号') return { ...c, value: stats.value.accounts }
+    if (c.label === 'Shopify 产品') return { ...c, value: stats.value.products }
+    if (c.label === 'Hub 环境') return { ...c, value: '-', sub: '查询中' }
+    if (c.label === 'Gmail 邮箱') return { ...c, value: '-', sub: '查询中' }
+    return c
+  })
+  // 子用户过滤无权访问的卡片
+  if (userStore.isSuperUser) return cards
+  const paths = accessiblePaths.value
+  if (!paths) return cards
+  return cards.filter(c => {
+    if (!c.link) return true
+    return paths.has(c.link)
+  })
+})
+
 // ─── 快捷入口 ───
-const shortcuts = [
+const allShortcuts = [
   { title: '域名重定向', desc: '域名 301 重定向配置', path: '/site-pipeline/site-list', icon: 'material-symbols:swap-horiz', color: '#f0a020', bg: 'rgba(240,160,32,.12)' },
   { title: 'Feed 管理', desc: '数据源上传与 Feed 生成', path: '/site-pipeline/feed-manager', icon: 'material-symbols:rss-feed', color: '#a3a3a3', bg: 'rgba(163,163,163,.12)' },
   { title: 'Hub 调度', desc: '浏览器环境创建与管理', path: '/site-pipeline/hub-dispatch', icon: 'material-symbols:memory', color: '#e88080', bg: 'rgba(232,128,128,.12)' },
@@ -197,8 +237,12 @@ const shortcuts = [
   { title: '账号管理', desc: '管理账号密码与 Provider 绑定', path: '/config/accounts', icon: 'material-symbols:group', color: '#70c0e8', bg: 'rgba(112,192,232,.12)' },
   { title: '域名管理', desc: '域名解析与 DNS 配置', path: '/config/manage', icon: 'material-symbols:language', color: '#f472b6', bg: 'rgba(244,114,182,.12)' },
   { title: 'Gmail 邮箱', desc: '批量邮箱管理', path: '/gmail/account-list', icon: 'material-symbols:mail', color: '#38bdf8', bg: 'rgba(56,189,248,.12)' },
-
 ]
+
+const shortcuts = computed(() => {
+  if (userStore.isSuperUser) return allShortcuts
+  return allShortcuts.filter(s => accessiblePaths.value.has(s.path))
+})
 
 // ─── 1Panel 监控 ───
 const onePanelServers = ref([])
