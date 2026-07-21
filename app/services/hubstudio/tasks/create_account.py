@@ -148,44 +148,50 @@ def _call_hub_api_direct(path: str, payload: dict, executor, timeout: int = ADD_
                 pass
 
 
-def clear_container_accounts_direct(executor, container_code: int) -> int:
-    """清空容器内所有已有账号（先查后删），返回删除数量。
+def clear_accounts_by_name_direct(executor, account_names: list) -> int:
+    """按账号名查询并删除已有账号，返回删除数量。
 
-    HubStudio /api/v1/account/del 要求 accountIds 不能为空，
-    所以必须先通过 /api/v1/account/list 查出已有账号 ID。
+    HubStudio /api/v1/account/list 不支持 containerCode 过滤，
+    只能按 accountName 精确查找。先查出每个名称对应的 accountId，
+    再通过 /api/v1/account/del 批量删除。
     """
-    try:
-        resp = _call_hub_api_direct(
-            ACCOUNT_LIST_PATH,
-            {"containerCode": container_code, "current": 1, "size": 500},
-            executor,
-        )
-        data = resp.get("data", {})
-        account_list = data.get("list") or data.get("records") or []
-        account_ids = []
-        for item in account_list:
-            aid = item.get("id") or item.get("accountId")
-            if aid:
-                account_ids.append(int(aid))
-
-        if not account_ids:
-            executor.logger.info(
-                f"[create_account] 容器 {container_code} 无已有账号，跳过清空"
+    account_ids = []
+    for name in account_names:
+        if not name:
+            continue
+        try:
+            resp = _call_hub_api_direct(
+                ACCOUNT_LIST_PATH,
+                {"accountName": name, "current": 1, "size": 50},
+                executor,
             )
-            return 0
+            data = resp.get("data", {})
+            items = data.get("list") or []
+            for item in items:
+                aid = item.get("accountId")
+                if aid:
+                    account_ids.append(int(aid))
+        except Exception as e:
+            executor.logger.warning(
+                f"[create_account] 查询账号 {name} 失败: {e}"
+            )
 
-        executor.logger.info(
-            f"[create_account] 容器 {container_code} 已有 {len(account_ids)} 个账号，即将删除: {account_ids}"
-        )
+    if not account_ids:
+        executor.logger.info("[create_account] 未查到已有账号，跳过清空")
+        return 0
+
+    executor.logger.info(
+        f"[create_account] 查到 {len(account_ids)} 个已有账号，即将删除: {account_ids}"
+    )
+    try:
         _call_hub_api_direct(ACCOUNT_DEL_PATH, {"accountIds": account_ids}, executor)
         executor.logger.info(f"[create_account] 已删除 {len(account_ids)} 个旧账号")
         return len(account_ids)
-
     except HubStudioError:
         raise
     except Exception as e:
         executor.logger.warning(
-            f"[create_account] 清空账号失败（非致命，继续创建）: {e}"
+            f"[create_account] 删除账号失败（非致命，继续创建）: {e}"
         )
         return 0
 
@@ -212,9 +218,14 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
 
     env_id_int = int(hub_env_id)
 
-    # ── 0. 清空已有账号（先查后删）──
+    # ── 0. 清空已有同名账号（先查后删）──
+    # account/list API 只能按 accountName 过滤，无 containerCode 参数
     try:
-        deleted = clear_container_accounts_direct(executor, env_id_int)
+        names_to_clear = []
+        if gmail_username:
+            names_to_clear.append(gmail_username)
+        names_to_clear.append(executor.admin_account_name)
+        deleted = clear_accounts_by_name_direct(executor, names_to_clear)
         if deleted > 0:
             time.sleep(1.0)
     except Exception as e:
