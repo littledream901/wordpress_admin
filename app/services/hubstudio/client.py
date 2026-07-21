@@ -66,6 +66,14 @@ class HubStudioClient:
     def add_container_account(self, **kwargs) -> dict:
         return self.post("/api/v1/container/add-account", kwargs)
 
+    def get_account_list(self, **kwargs) -> dict:
+        """查询账号列表，常用参数: containerCode, current, size"""
+        return self.post("/api/v1/account/list", kwargs)
+
+    def delete_accounts(self, accountIds: list) -> dict:
+        """删除账号，accountIds 必须至少包含一个账号 ID"""
+        return self.post("/api/v1/account/del", {"accountIds": [int(a) for a in accountIds]})
+
     # ── 浏览器控制 ──
     def start_browser(self, containerCode: int, isHeadless: bool = False, **kwargs) -> dict:
         payload = {"containerCode": str(containerCode), "isHeadless": isHeadless,
