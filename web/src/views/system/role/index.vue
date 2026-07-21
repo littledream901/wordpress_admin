@@ -135,15 +135,16 @@ function buildApiTree(data) {
   return Object.values(groupedData)
 }
 
-// 计算 API 分组在菜单树中的顺序索引（深度优先遍历）
-function computeApiGroupOrder(nodes, apiSummary) {
+// 计算 API 分组在菜单树中的顺序索引（深度优先遍历，合并父子路径匹配）
+function computeApiGroupOrder(nodes, apiSummary, apiPrefix = '') {
   let order = 0
-  function walk(list) {
+  function walk(list, parentPath = '') {
     for (const node of list) {
-      if (matchMenuToApiGroup(node.path, apiSummary)) return order
+      const fullPath = parentPath ? parentPath + '/' + node.path : node.path
+      if (matchMenuToApiGroup(fullPath, apiSummary, apiPrefix)) return order
       order++
       if (node.children?.length) {
-        const found = walk(node.children)
+        const found = walk(node.children, node.path)
         if (found !== -1) return found
       }
     }
@@ -159,7 +160,7 @@ const apiOption = computed(() => {
   const tree = buildApiTree(rawApiData.value)
   if (!menuOption.value.length) return tree
   tree.sort((a, b) => {
-    return computeApiGroupOrder(menuOption.value, a.summary) - computeApiGroupOrder(menuOption.value, b.summary)
+    return computeApiGroupOrder(menuOption.value, a.summary, a.apiPrefix) - computeApiGroupOrder(menuOption.value, b.summary, b.apiPrefix)
   })
   return tree
 })
@@ -551,6 +552,9 @@ async function updateRoleAuthorized() {
           />
         </NFormItem>
       </NForm>
+      <div style="margin-top: 12px; font-size: 12px; color: #999; line-height: 1.5;">
+        全局默认值。若在"设置权限 → 数据权限"中配置了分模块权限，则以模块配置为准。
+      </div>
     </CrudModal>
 
     <!-- 权限设置抽屉 -->
@@ -591,6 +595,22 @@ async function updateRoleAuthorized() {
               @update:checked-keys="(v) => (menu_ids = v)"
             />
           </NTabPane>
+          <NTabPane name="button" tab="按钮权限" display-directive="show">
+            <NTree
+              :data="buttonApiOption"
+              :checked-keys="api_ids"
+              :pattern="pattern"
+              :show-irrelevant-nodes="false"
+              key-field="unique_id"
+              label-field="summary"
+              checkable
+              :default-expand-all="true"
+              :block-line="true"
+              :selectable="false"
+              cascade
+              @update:checked-keys="(v) => (api_ids = v)"
+            />
+          </NTabPane>
           <NTabPane name="resource" tab="接口权限" display-directive="show">
             <NTree
               ref="apiTree"
@@ -608,23 +628,10 @@ async function updateRoleAuthorized() {
               @update:checked-keys="(v) => (api_ids = v)"
             />
           </NTabPane>
-          <NTabPane name="button" tab="按钮权限" display-directive="show">
-            <NTree
-              :data="buttonApiOption"
-              :checked-keys="api_ids"
-              :pattern="pattern"
-              :show-irrelevant-nodes="false"
-              key-field="unique_id"
-              label-field="summary"
-              checkable
-              :default-expand-all="true"
-              :block-line="true"
-              :selectable="false"
-              cascade
-              @update:checked-keys="(v) => (api_ids = v)"
-            />
-          </NTabPane>
           <NTabPane name="data_scope" tab="数据权限" display-directive="show">
+            <div style="font-size: 12px; color: #999; margin-bottom: 12px;">
+              按业务模块的独立权限配置，优先级高于角色编辑中的全局默认值。未配置的模块将回退到全局默认。
+            </div>
             <NForm label-placement="left" label-align="left" :label-width="100">
               <NFormItem
                 v-for="ds in drawerDataScopes"
