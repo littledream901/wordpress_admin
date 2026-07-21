@@ -1,8 +1,7 @@
 """创建环境 (create_env)"""
 
-import os
-
 from app.core.exceptions import HubStudioError
+from app.utils.config_reader import get_config
 from ..runtime import HubStudioRuntime
 
 
@@ -78,7 +77,7 @@ def execute_create_env(executor, job: dict, payload: dict) -> dict:
     client = executor.rt.ensure_client()
 
     # 获取分组 code
-    target_tag_name = os.getenv("HUB_BUSINESS_GROUP_NAME", "Gmc申请")
+    target_tag_name = get_config("HUBSTUDIO_BUSINESS_GROUP_NAME", "")
     tag_code = None
     tag_name = target_tag_name
     try:

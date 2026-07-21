@@ -90,6 +90,7 @@ _KEY_MAP = {
     "HUBSTUDIO_ADMIN_SITE_ALIAS": "admin_site_alias",
     "HUBSTUDIO_ADMIN_ACCOUNT_NAME": "admin_account_name",
     "HUBSTUDIO_ADMIN_ACCOUNT_PASSWORD": "admin_account_password",
+    "HUBSTUDIO_BUSINESS_GROUP_NAME": "business_group_name",
     # Shopify
     "SHOPIFY_API_TIMEOUT": "request_timeout",
     "SHOPIFY_MAX_PRODUCTS_PER_SOURCE": "default_max_products",

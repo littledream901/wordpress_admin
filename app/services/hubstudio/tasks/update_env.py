@@ -1,15 +1,6 @@
 """更新环境：备注 + 代理 (update_env)"""
 
-
-# ── 备注来源字段 ──
-REMARK_FIELD_MAP = [
-    ("Address", "ShippingAddress_1"),
-    ("City", "City"),
-    ("State", "Province/State"),
-    ("Zip", "Zip_code"),
-    ("Country", "Country"),
-    ("Email", "Recovery_Email"),
-]
+from .create_env import build_container_name, build_remark, REMARK_FIELD_MAP
 
 # ── 默认固定代理配置 ──
 DEFAULT_FIXED_PROXY_CONFIG = {
@@ -43,23 +34,6 @@ PROXY_FIELD_MAP = {
     "ipGetRuleType": "ip_get_rule_type",
     "linkCode": "link_code",
 }
-
-
-def build_remark(payload: dict) -> str:
-    """构建环境备注文本"""
-    remark_fields = payload.get("remark_fields", {})
-    if not remark_fields:
-        return ""
-
-    parts = []
-    for _label, field_key in REMARK_FIELD_MAP:
-        val = remark_fields.get(field_key, "")
-        if val:
-            val_str = str(val).strip()
-            if val_str:
-                parts.append(val_str)
-
-    return " , ".join(parts) if parts else ""
 
 
 def build_proxy_config(executor, payload: dict) -> dict:
@@ -116,8 +90,6 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
     executor.logger.info(f"[update_env] 开始: domain={domain}, env_id={hub_env_id}")
     executor.rt.start_connector()
     client = executor.rt.ensure_client()
-
-    from .create_env import build_container_name
 
     result = {"status": "success", "env_id": hub_env_id, "domain": domain, "actions": {}}
 

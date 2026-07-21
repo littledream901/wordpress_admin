@@ -96,6 +96,7 @@ _PROVIDER_DEFAULTS: List[_ProviderDef] = [
         ("proxy_city",                "New York", "代理城市", "string", False, False),
         ("proxy_province",            "CA", "代理省份", "string", False, False),
         ("ip_get_rule_type",          "1", "IP 获取规则类型", "int", False, False),
+        ("business_group_name",       "Gmc申请", "HubStudio 业务分组名称（创建环境时匹配 tag）", "string", False, False),
     ]),
     # ── Shopify ──
     ("shopify", "Shopify采集默认配置", "默认 Shopify 采集配置", 100, [

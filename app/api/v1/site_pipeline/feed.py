@@ -34,10 +34,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHUNK_DIR, exist_ok=True)
 CHUNK_SIZE = 5 * 1024 * 1024  # 5MB per chunk
 
-DEFAULT_TARGET_DOMAIN = os.getenv("FEED_DEFAULT_TARGET_DOMAIN", "")
 # feed_expire_days 从全局 settings 读取（也可通过 FEED_EXPIRE_DAYS 环境变量覆盖）
 from app.settings import settings as app_settings
 FEED_EXPIRE_DAYS_DEFAULT = app_settings.FEED_EXPIRE_DAYS
+DEFAULT_TARGET_DOMAIN = app_settings.FEED_DEFAULT_TARGET_DOMAIN
 
 
 async def _get_feed_expire_days() -> int:

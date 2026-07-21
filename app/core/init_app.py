@@ -641,7 +641,6 @@ async def _cleanup_deprecated_provider_items():
     cleanup = {
         "woo":        ["random_import", "rate_limit_rpm", "rate_limit_retry"],
         "shopify":    ["page_sleep", "default_max_products", "user_agent"],
-        "hubstudio":  ["business_group_name"],
         "pipeline":   ["random_assign_default_count", "shopify_default_max_products",
                        "woo_import_sample_count", "woo_request_timeout",
                        "retry_limit", "timeout_limit", "wp_container_memory_limit",

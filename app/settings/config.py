@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     # ── 流水线 / Feed ──
     FEED_EXPIRE_DAYS: int = 3
     """Feed 文件下载有效期（天），过期后不可下载"""
+    FEED_DEFAULT_TARGET_DOMAIN: str = ""
+    """Feed 域名替换的默认目标域名"""
 
     @property
     def TORTOISE_ORM(self) -> dict:

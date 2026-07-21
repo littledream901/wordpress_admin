@@ -237,8 +237,7 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
     # ── 3. 写备注 ──
     remark_fields = payload.get("remark_fields", {})
     if remark_fields and any(v for v in remark_fields.values()):
-        from .update_env import build_remark
-        from .create_env import build_container_name
+        from .create_env import build_remark, build_container_name
 
         remark_text = build_remark(payload)
         if remark_text:
@@ -249,7 +248,6 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
                 client.update_env(
                     containerCode=env_id_int,
                     containerName=container_name,
-                    remarks=remark_text,
                     remark=remark_text,
                 )
                 results["remark"] = "ok"

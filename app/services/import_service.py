@@ -108,12 +108,15 @@ class ImportService:
 
     @staticmethod
     def map_fields(raw: dict, field_map: dict) -> dict:
-        """按字段映射表转换原始行"""
+        """按字段映射表转换原始行（大小写不敏感匹配）"""
+        # 构建 small_case → model_field 索引
+        _ci_map = {k.lower(): v for k, v in field_map.items()}
+        _ci_keys = set(_ci_map.keys())
         result = {}
         for key, value in raw.items():
-            cleaned = key.strip()
-            if cleaned in field_map:
-                result[field_map[cleaned]] = value.strip()
+            cleaned = key.strip().lower()
+            if cleaned in _ci_keys:
+                result[_ci_map[cleaned]] = value.strip()
         return result
 
     # ── 数据校验与类型转换 ──
