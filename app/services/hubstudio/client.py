@@ -67,7 +67,7 @@ class HubStudioClient:
         return self.post("/api/v1/container/add-account", kwargs)
 
     def get_account_list(self, **kwargs) -> dict:
-        """查询账号列表，常用参数: containerCode, current, size"""
+        """查询账号列表，常用参数: containerCode(试), accountName, current, size"""
         return self.post("/api/v1/account/list", kwargs)
 
     def delete_accounts(self, accountIds: list) -> dict:

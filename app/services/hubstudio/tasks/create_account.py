@@ -148,23 +148,22 @@ def _call_hub_api_direct(path: str, payload: dict, executor, timeout: int = ADD_
                 pass
 
 
-def clear_accounts_by_name_direct(executor, account_names: list) -> int:
+def clear_accounts_by_name_direct(executor, account_names: list, container_code: int = 0) -> int:
     """按账号名查询并删除已有账号，返回删除数量。
 
-    HubStudio /api/v1/account/list 不支持 containerCode 过滤，
-    只能按 accountName 精确查找。先查出每个名称对应的 accountId，
-    再通过 /api/v1/account/del 批量删除。
+    HubStudio /api/v1/account/list 文档未列出 containerCode 过滤参数，
+    但实际可能支持（作为额外过滤条件传入）。不支持时会被服务端忽略，
+    不会报错，仅失去容器级隔离。
     """
     account_ids = []
     for name in account_names:
         if not name:
             continue
         try:
-            resp = _call_hub_api_direct(
-                ACCOUNT_LIST_PATH,
-                {"accountName": name, "current": 1, "size": 50},
-                executor,
-            )
+            params = {"accountName": name, "current": 1, "size": 50}
+            if container_code:
+                params["containerCode"] = container_code
+            resp = _call_hub_api_direct(ACCOUNT_LIST_PATH, params, executor)
             data = resp.get("data", {})
             items = data.get("list") or []
             for item in items:
@@ -219,13 +218,13 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
     env_id_int = int(hub_env_id)
 
     # ── 0. 清空已有同名账号（先查后删）──
-    # account/list API 只能按 accountName 过滤，无 containerCode 参数
+    # 尝试传入 containerCode 防止误删其他环境的同名账号
     try:
         names_to_clear = []
         if gmail_username:
             names_to_clear.append(gmail_username)
         names_to_clear.append(executor.admin_account_name)
-        deleted = clear_accounts_by_name_direct(executor, names_to_clear)
+        deleted = clear_accounts_by_name_direct(executor, names_to_clear, container_code=env_id_int)
         if deleted > 0:
             time.sleep(1.0)
     except Exception as e:
