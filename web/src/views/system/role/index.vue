@@ -622,7 +622,8 @@ async function updateRoleAuthorized() {
               :default-expand-all="true"
               :block-line="true"
               :selectable="false"
-              @update:checked-keys="(v) => (api_ids = v)"
+              cascade
+              @update:checked-keys="(v) => (api_ids = v.filter(k => k.includes('/')))"
             />
           </NTabPane>
           <NTabPane name="resource" tab="接口权限" display-directive="show">
