@@ -29,7 +29,7 @@ class UserCreate(BaseModel):
     password: str = Field(description="密码")
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
-    role_ids: Optional[List[int]] = []
+    role_ids: Optional[List[int]] = None
     dept_id: Optional[int] = Field(0, description="部门ID")
 
     def create_dict(self):
@@ -42,7 +42,7 @@ class UserUpdate(BaseModel):
     username: str
     is_active: Optional[bool] = True
     is_superuser: Optional[bool] = False
-    role_ids: Optional[List[int]] = []
+    role_ids: Optional[List[int]] = None
     dept_id: Optional[int] = 0
 
 

@@ -15,27 +15,29 @@ class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
     async def is_exist(self, name: str) -> bool:
         return await self.model.filter(name=name).exists()
 
-    async def update_roles(self, role: Role, menu_ids: List[int], api_infos: List[dict]) -> None:
-        await role.menus.clear()
-        for menu_id in menu_ids:
-            menu_obj = await Menu.filter(id=menu_id).first()
-            if menu_obj is not None:
-                await role.menus.add(menu_obj)
+    async def update_roles(self, role: Role, menu_ids: List[int] | None, api_infos: List[dict] | None) -> None:
+        if menu_ids is not None:
+            await role.menus.clear()
+            for menu_id in menu_ids:
+                menu_obj = await Menu.filter(id=menu_id).first()
+                if menu_obj is not None:
+                    await role.menus.add(menu_obj)
 
-        await role.apis.clear()
-        for item in api_infos:
-            api_obj = await Api.filter(path=item.get("path"), method=item.get("method")).first()
-            if api_obj is not None:
-                await role.apis.add(api_obj)
+        if api_infos is not None:
+            await role.apis.clear()
+            for item in api_infos:
+                api_obj = await Api.filter(path=item.get("path"), method=item.get("method")).first()
+                if api_obj is not None:
+                    await role.apis.add(api_obj)
 
         _log.info("角色权限已更新: role_id=%s name=%s menus=%s apis=%s",
-                  role.id, role.name, len(menu_ids), len(api_infos))
+                  role.id, role.name, len(menu_ids) if menu_ids else 0, len(api_infos) if api_infos else 0)
 
     async def update_roles_full(
         self,
         role: Role,
-        menu_ids: List[int],
-        api_infos: List[dict],
+        menu_ids: List[int] | None,
+        api_infos: List[dict] | None,
         data_scope: int | None = None,
         custom_dept_ids: List[int] | None = None,
         data_scopes: List[dict] | None = None,

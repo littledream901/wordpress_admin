@@ -52,8 +52,8 @@ class RoleUpdate(BaseModel):
 
 class RoleUpdateMenusApis(BaseModel):
     id: int
-    menu_ids: list[int] = []
-    api_infos: list[dict] = []
+    menu_ids: Optional[list[int]] = None
+    api_infos: Optional[list[dict]] = None
     data_scope: DataScope | None = None
     custom_dept_ids: list[int] | None = None
     data_scopes: list[RoleDataScopeSchema] | None = None

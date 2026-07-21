@@ -82,7 +82,8 @@ async def create_user(
     if user:
         return Fail(code=400, msg="The user with this email already exists in the system.")
     new_user = await user_controller.create_user(obj_in=user_in)
-    await user_controller.update_roles(new_user, user_in.role_ids)
+    if user_in.role_ids is not None:
+        await user_controller.update_roles(new_user, user_in.role_ids)
     return Success(msg="Created Successfully")
 
 
@@ -95,7 +96,8 @@ async def update_user(
     if not request_user.is_superuser and user_in.id != CTX_USER_ID.get():
         raise HTTPException(status_code=403, detail="仅能更新自己的个人信息")
     user = await user_controller.update(id=user_in.id, obj_in=user_in)
-    await user_controller.update_roles(user, user_in.role_ids)
+    if user_in.role_ids is not None:
+        await user_controller.update_roles(user, user_in.role_ids)
     return Success(msg="Updated Successfully")
 
 
