@@ -194,7 +194,7 @@
         <template #footer>
           <n-space justify="end">
             <n-button @click="showSingleRedirect = false">取消</n-button>
-            <n-button v-permission="'post/api/v1/site-pipeline/site/siteId/redirect'" type="primary" @click="doSingleRedirectConfirm" :loading="singleRedirectLoading">确认</n-button>
+            <n-button v-permission="'post/api/v1/site-pipeline/site/{site_id}/redirect'" type="primary" @click="doSingleRedirectConfirm" :loading="singleRedirectLoading">确认</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -589,12 +589,12 @@ const columns = [
         default: () => [
           h(NButton, { size: 'tiny', onClick: () => goDetail(row.id) }, { default: () => '详情' }),
           withDirectives(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' }), [[vPermission, 'post/api/v1/site-pipeline/site/update']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'info', ghost: !dnsOk, onClick: () => doSingleAction('dns', row.id) }, { default: () => 'DNS+NS' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/dns']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'info', ghost: !dnsOk, onClick: () => doSingleAction('dns', row.id) }, { default: () => 'DNS+NS' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/dns']]),
           row.platform === 'shopify'
             ? h(NButton, { size: 'tiny', type: 'default', disabled: true }, { default: () => '建站' })
-            : withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/provision']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !importOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/woo-import']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/siteId/redirect']]),
+            : withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/provision']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !importOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/woo-import']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/redirect']]),
           row.gmail_username
             ? withDirectives(h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' }), [[vPermission, 'post/api/v1/gmail/unassign']])
             : withDirectives(h(NButton, { size: 'tiny', type: 'tertiary', ghost: true, onClick: () => doSingleAction('assign-gmail', row.id) }, { default: () => '分配Gmail' }), [[vPermission, 'post/api/v1/gmail/assign']]),
