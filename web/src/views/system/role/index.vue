@@ -96,12 +96,18 @@ const drawerDataScopes = ref(
   }))
 )
 
-// 公共只读 API（白名单）：后端对所有认证用户放行，无需在角色权限中分配
+// 公共API（白名单）
 const PUBLIC_API_PATHS = new Set([
+
+//只读API：后端对所有认证用户放行，无需在角色权限中分配，也无需在角色权限中分配
   '/api/v1/dept/list', '/api/v1/dept/get',
   '/api/v1/user/list', '/api/v1/user/get',
   '/api/v1/menu/list', '/api/v1/menu/get',
   '/api/v1/role/list', '/api/v1/role/get', '/api/v1/role/authorized',
+
+//个人设置：所有用户可管理自己的信息
+  '/api/v1/user/update', '/api/v1/user/avatar/upload', '/api/v1/user/avatar/url',
+
 ])
 
 function buildApiTree(data) {

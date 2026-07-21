@@ -64,6 +64,10 @@ class PermissionControl:
         ("GET", "/api/v1/role/list"),
         ("GET", "/api/v1/role/get"),
         ("GET", "/api/v1/role/authorized"),
+        # ── 个人设置（所有用户可管理自己的信息）──
+        ("POST", "/api/v1/user/update"),
+        ("POST", "/api/v1/user/avatar/upload"),
+        ("POST", "/api/v1/user/avatar/url"),
     }
 
     @classmethod

@@ -3,12 +3,15 @@ import logging
 import time
 import traceback
 
-from fastapi import APIRouter, Body, File, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 from fastapi.exceptions import HTTPException
 from tortoise.expressions import Q
 
 from app.controllers.dept import dept_controller
 from app.controllers.user import user_controller
+from app.core.ctx import CTX_USER_ID
+from app.core.depends import DependAuth
+from app.models.admin import User
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.users import UserCreate, UserUpdate
 
@@ -86,7 +89,11 @@ async def create_user(
 @router.post("/update", summary="更新用户")
 async def update_user(
     user_in: UserUpdate,
+    request_user: User = Depends(DependAuth),
 ):
+    # 非超级管理员只能更新自己的信息
+    if not request_user.is_superuser and user_in.id != CTX_USER_ID.get():
+        raise HTTPException(status_code=403, detail="仅能更新自己的个人信息")
     user = await user_controller.update(id=user_in.id, obj_in=user_in)
     await user_controller.update_roles(user, user_in.role_ids)
     return Success(msg="Updated Successfully")
