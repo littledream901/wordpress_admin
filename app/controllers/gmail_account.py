@@ -12,8 +12,8 @@ class GmailAccountController(CRUDBase[GmailAccount, GmailAccountCreate, GmailAcc
         return await self.model.filter(username=username).first()
 
     async def get_available(self):
-        """获取第一个健康且未分配的 Gmail 账号（按 ID 顺序，排除不正常的）"""
-        return await self.model.filter(assigned_site_id__isnull=True).exclude(status='不正常').order_by('id').first()
+        """获取第一个健康且未分配的 Gmail 账号（按 ID 顺序，排除不正常和已删除的）"""
+        return await self.model.filter(assigned_site_id__isnull=True, is_deleted=False).exclude(status='不正常').order_by('id').first()
 
     async def assign_to_site(self, gmail_id: int, site_id: int):
         gmail = await self.get(id=gmail_id)

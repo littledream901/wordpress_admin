@@ -17,7 +17,7 @@ router = APIRouter(tags=["Gmail"])
 @router.get('/list', summary='Gmail 列表')
 async def list_gmail(page: int = Query(1), page_size: int = Query(10), username: str = Query(''),
                      unassigned_only: bool = Query(False, description='只显示未分配的 Gmail')):
-    q = Q()
+    q = Q(is_deleted=False)
     if username:
         q &= Q(username__contains=username)
     if unassigned_only:
@@ -158,8 +158,8 @@ async def batch_auto_assign_gmail(site_ids: list[int] = Body(..., embed=True)):
             if not site:
                 results.append({"site_id": site_id, "ok": False, "error": "site not found"})
                 continue
-            # 跳过已有 Gmail 分配的站点
-            if await GmailAccount.filter(assigned_site_id=site_id).exists():
+            # 跳过已有 Gmail 分配的站点（排除已删除的 Gmail）
+            if await GmailAccount.filter(assigned_site_id=site_id, is_deleted=False).exists():
                 results.append({"site_id": site_id, "domain": site.domain, "ok": False, "error": "已有 Gmail 分配"})
                 continue
             gmail, _ = await gmail_account_controller.auto_assign_to_site(site_id)
