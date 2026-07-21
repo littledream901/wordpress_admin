@@ -84,7 +84,7 @@
             <n-button @click="showCreate = false">{{ createResult ? '关闭' : '取消' }}</n-button>
             <n-button
               v-if="!createResult"
-              v-permission="'post/api/v1/site-pipeline/feed/{id}/create-feed'"
+              v-permission="'post/api/v1/site-pipeline/feed/{feed_id}/create-feed'"
               type="primary"
               :loading="creating"
               :disabled="!createTargetDomain"
