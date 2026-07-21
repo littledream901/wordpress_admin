@@ -90,7 +90,12 @@ class TaskRunner:
 
     @staticmethod
     def _exec(fn: Callable, timeout: int = 600) -> Any:
-        """在线程池中执行同步函数，带超时保护"""
+        """在线程池中执行同步函数，避免阻塞事件循环。
+
+        严禁传入捕获 Tortoise ORM 模型实例的闭包！
+        fn 内部不能访问 ORM（模型查询/保存/关联属性懒加载），只能做 HTTP 调用或纯计算。
+        跨线程共享 ORM 模型实例会污染事件循环连接状态，导致数据丢失。
+        """
         loop = asyncio.get_event_loop()
         return asyncio.wait_for(loop.run_in_executor(None, fn), timeout=timeout)
 

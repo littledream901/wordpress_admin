@@ -7,7 +7,6 @@ import uuid
 from typing import Any, Dict, Optional
 
 from app.utils.provider_resolver import ProviderResolver
-from app.models.site_pipeline import Site
 from app.core.exceptions import OnePanelError, DomainAlreadyExistsError
 from .client import OnePanelAPI
 from .utils import _log, _provider_value, parse_env_text, safe_alias
@@ -192,8 +191,7 @@ class OnePanelSiteManager:
         time.sleep(wait)
         return bool(ok)
 
-    def create_wordpress_website(self, site: Site) -> Dict[str, Any]:
-        domain = site.domain
+    def create_wordpress_website(self, domain: str) -> Dict[str, Any]:
         existed = self.get_site_id(domain)
         if existed:
             if not self.auto_clean_conflict:

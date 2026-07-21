@@ -168,9 +168,11 @@ def _apply_dns_result_to_site(site, result: dict):
         site.dynadot_status = f'zone_{zone_status}' if zone_status else 'zone_active'
 
 
-def _run_dns_sync(site):
+def _run_dns_sync(domain: str, platform: str, server_ip: str):
     """在线程池中同步执行 DNS + NS 操作（避免阻塞事件循环）
-    注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB
+
+    注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB。
+    参数使用纯数据类型，严禁传入 Tortoise ORM 模型实例（跨线程共享 ORM 对象会污染状态）。
 
     Cloudflare zone 创建是最关键的前置步骤；完成后 Cloudflare 记录设置
     与 Dynadot NS 更新相互独立，并行执行以缩短总耗时。
@@ -180,12 +182,12 @@ def _run_dns_sync(site):
 
     cf = cloudflare_service
 
-    if site.platform == 'shopify':
+    if platform == 'shopify':
         SHOPIFY_IP = '23.227.38.65'
         SHOPIFY_CNAME = 'shops.myshopify.com.'
-        zone_id, ns, status = cf.get_or_create_zone(site.domain)
+        zone_id, ns, status = cf.get_or_create_zone(domain)
         if not zone_id:
-            return {'ok': False, 'error': f'Shopify zone 创建失败: domain={site.domain}'}
+            return {'ok': False, 'error': f'Shopify zone 创建失败: domain={domain}'}
 
         # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
         dynadot_result, cf_results = None, {}
@@ -193,10 +195,10 @@ def _run_dns_sync(site):
             futures = {}
             if status in ('pending', 'invalid_nameservers'):
                 futures['dynadot'] = executor.submit(
-                    lambda: DynadotService().set_nameserver(site.domain, ns)
+                    lambda: DynadotService().set_nameserver(domain, ns)
                 )
             futures['cf'] = executor.submit(
-                _setup_cf_records, cf, zone_id, site.domain,
+                _setup_cf_records, cf, zone_id, domain,
                 root_type='A', root_value=SHOPIFY_IP,
                 www_type='CNAME', www_value=SHOPIFY_CNAME,
                 www_name='www',
@@ -220,9 +222,9 @@ def _run_dns_sync(site):
             'dynadot_result': dynadot_result,
         }
     else:
-        zone_id, ns, status = cf.get_or_create_zone(site.domain)
+        zone_id, ns, status = cf.get_or_create_zone(domain)
         if not zone_id:
-            return {'ok': False, 'error': f'Zone 创建失败: domain={site.domain}'}
+            return {'ok': False, 'error': f'Zone 创建失败: domain={domain}'}
 
         # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
         dynadot_result, cf_results = None, {}
@@ -230,13 +232,13 @@ def _run_dns_sync(site):
             futures = {}
             if status in ('pending', 'invalid_nameservers'):
                 futures['dynadot'] = executor.submit(
-                    lambda: DynadotService().set_nameserver(site.domain, ns)
+                    lambda: DynadotService().set_nameserver(domain, ns)
                 )
             futures['cf'] = executor.submit(
-                _setup_cf_records, cf, zone_id, site.domain,
-                root_type='A', root_value=site.server_ip,
-                www_type='A', www_value=site.server_ip,
-                www_name=f'www.{site.domain}',
+                _setup_cf_records, cf, zone_id, domain,
+                root_type='A', root_value=server_ip,
+                www_type='A', www_value=server_ip,
+                www_name=f'www.{domain}',
             )
             for name, future in futures.items():
                 try:
@@ -838,7 +840,7 @@ class SitePipelineController:
     async def _run_dns_single_bg(self, job: OperationJob, site):
         try:
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, _run_dns_sync, site)
+            result = await loop.run_in_executor(None, _run_dns_sync, site.domain, site.platform, site.server_ip)
             _apply_dns_result_to_site(site, result)
             await site.save()
             await self._complete_job(job, ok=True, result=result, site=site)
@@ -872,7 +874,7 @@ class SitePipelineController:
                 async with sem:
                     try:
                         loop = asyncio.get_event_loop()
-                        r = await loop.run_in_executor(None, _run_dns_sync, site)
+                        r = await loop.run_in_executor(None, _run_dns_sync, site.domain, site.platform, site.server_ip)
                         # 判断 DNS 实际结果（r 中有 ok 字段的才是失败摘要响应）
                         dns_ok = r.get("ok") is not False
                         _apply_dns_result_to_site(site, r)

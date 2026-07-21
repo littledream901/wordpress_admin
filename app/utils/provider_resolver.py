@@ -103,22 +103,28 @@ def _read_cache_map(provider_type: str) -> dict:
 
 
 def _run_sync(coro):
-    """在同步上下文中安全执行 async 协程（兼容事件循环内外场景）
+    """在同步上下文中安全执行 async 协程
 
-    警告：在事件循环内调用会阻塞整个事件循环线程，导致所有并发请求排队。
-    请优先使用 async 版本（get_config_async / ProviderResolver.get_config）。
+    仅允许在纯同步上下文中使用（无运行中事件循环）。
+    严禁在事件循环内调用 —— 在线程池中 asyncio.run() 创建新事件循环访问
+    Tortoise ORM 会污染主事件循环的 ORM 连接状态，导致数据丢失、状态错乱。
+
+    如果在事件循环内需要配置，请使用 async 版本：
+    - get_config_async() 替代 get_config()
+    - ProviderResolver.get_config() 替代 sync_get_config()
     """
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        # 纯同步上下文：安全
         return asyncio.run(coro)
-    # 已在事件循环内 → 这是性能反模式！
-    _log.warning(
-        "_run_sync 在事件循环内被调用，阻塞事件循环（最长30s）！"
-        "请改用 async 版本 (get_config_async / ProviderResolver.get_config)"
+
+    # 已在事件循环内 → 严禁创建新事件循环访问 Tortoise ORM
+    raise RuntimeError(
+        "_run_sync 在事件循环内被调用，这会通过 asyncio.run() 在线程池中"
+        "创建新事件循环并访问 Tortoise ORM，严重污染主事件循环的数据库连接状态。"
+        "请改用 async 版本（如 get_config_async / ProviderResolver.get_config）。"
     )
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result(timeout=30)
 
 
 class ProviderResolver:
