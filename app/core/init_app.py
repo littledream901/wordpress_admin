@@ -775,10 +775,10 @@ async def _grant_menu_apis(role, menus, all_apis=None):
         for api in all_apis:
             if api in matched_apis:
                 continue
-            # 匹配规则1: API path 第三段命中任一前缀
+            # 匹配规则1: API path 第三段命中任一前缀（两边都 clean，兼容含 -/_ 的路径）
             api_parts = api.path.strip("/").split("/")
             if len(api_parts) >= 3 and api_parts[0] == "api" and api_parts[1] == "v1":
-                if api_parts[2] in prefixes:
+                if _clean_segment(api_parts[2]) in prefixes:
                     matched_apis.append(api)
                     continue
             # 匹配规则2: API tags 去掉特殊字符后命中任一前缀

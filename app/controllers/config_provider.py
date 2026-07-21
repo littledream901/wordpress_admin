@@ -1,4 +1,5 @@
 """Provider Controller"""
+import logging
 import re
 from urllib.parse import urlparse
 
@@ -11,6 +12,8 @@ from app.schemas.config_provider import (
     ResourceProviderBindingCreate,
 )
 from app.utils.provider_defaults import get_default_items
+
+_log = logging.getLogger(__name__)
 
 # ── 配置值类型校验 ──
 _VALIDATORS = {
@@ -113,9 +116,11 @@ class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, Co
         provider = await self.get(id=provider_id)
         if not provider:
             return
-        await self._lock_bindings_for_default_change(provider.provider_type, provider_id)
+        fixed_count = await self._lock_bindings_for_default_change(provider.provider_type, provider_id)
         await self.model.filter(provider_type=provider.provider_type).update(is_default=False)
         await self.model.filter(id=provider_id).update(is_default=True)
+        _log.info("Provider 默认切换: type=%s provider_id=%s name=%s fixed_bindings=%s",
+                  provider.provider_type, provider_id, provider.provider_name, fixed_count)
 
     async def create(self, *, obj_in: ConfigProviderCreate):
         """创建 Provider：自动初始化默认配置项，若 is_default=True 则固化和取消同类型其他默认"""
@@ -125,6 +130,8 @@ class ConfigProviderController(CRUDBase[ConfigProvider, ConfigProviderCreate, Co
             await self.model.filter(provider_type=data["provider_type"]).update(is_default=False)
         provider = await super().create(obj_in=obj_in)
         await _init_default_items(provider)
+        _log.info("Provider 已创建: type=%s provider_id=%s name=%s",
+                  provider.provider_type, provider.id, provider.provider_name)
         return provider
 
     async def update(self, *, id: int, obj_in: ConfigProviderUpdate):
@@ -173,6 +180,7 @@ class ProviderConfigItemController(CRUDBase[ProviderConfigItem, ProviderConfigIt
                     remark=item.remark or "",
                     sort=item.sort or 0,
                 )
+        _log.info("Provider 配置项已批量保存: provider_id=%s count=%s", provider_id, len(items))
         return len(items)
 
 

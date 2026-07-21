@@ -169,8 +169,7 @@ class OnePanelWordPressRestorer:
         src_data = os.path.dirname(wp_content_src)
 
         if self.restore_mode == 'full_data':
-            _logger = logging.getLogger(__name__)
-            _logger.warning(
+            _log.warning(
                 'full_data 模式已启用：将覆盖 wp-admin / wp-includes / wp-content。'
                 '这可能导致模板核心文件与当前 WordPress 镜像版本不兼容，'
                 '生产环境建议使用 safe 模式。'

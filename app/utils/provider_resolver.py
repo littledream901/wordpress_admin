@@ -28,7 +28,7 @@ _log = logging.getLogger(__name__)
 # 线程安全的配置缓存：{(provider_type, config_key): config_value}
 _config_cache: Dict[str, str] = {}
 _cache_lock = threading.Lock()
-_cache_initialized = False
+_cache_ready = threading.Event()
 
 
 def _ensure_cache():
@@ -36,12 +36,14 @@ def _ensure_cache():
 
     注意：在线程中调用时不初始化（依赖启动时预加载），
     在事件循环内且 Tortoise 已初始化时触发懒加载。
+
+    使用 threading.Event 替代普通 bool 确保跨线程内存可见性，
+    避免无 GIL 环境下双重检查锁读到过期值。
     """
-    global _cache_initialized
-    if _cache_initialized:
+    if _cache_ready.is_set():
         return
     with _cache_lock:
-        if _cache_initialized:
+        if _cache_ready.is_set():
             return
         # 在线程中调用时无法访问 DB，此时跳过（依赖启动时预加载）
         try:
@@ -67,7 +69,6 @@ async def _load_configs_to_cache():
     """将所有 provider config 加载到线程安全缓存（必须在主事件循环调用）"""
     import time
     t0 = time.perf_counter()
-    global _cache_initialized
     providers = await ConfigProvider.filter(status='active').all()
     # 先收集所有数据，再加锁写入
     entries = {}
@@ -78,8 +79,8 @@ async def _load_configs_to_cache():
             entries[cache_key] = value or ''
     with _cache_lock:
         _config_cache.update(entries)
-        _cache_initialized = True
-    _log.debug(f"[provider_resolver] 缓存已加载 ({len(entries)} 项, {time.perf_counter() - t0:.2f}s)")
+        _cache_ready.set()
+    _log.debug("[provider_resolver] 缓存已加载 (%s 项, %.2fs)", len(entries), time.perf_counter() - t0)
 
 
 def _read_cache(provider_type: str, config_key: str, default: str = "") -> str:
@@ -113,6 +114,9 @@ def _run_sync(coro):
     - get_config_async() 替代 get_config()
     - ProviderResolver.get_config() 替代 sync_get_config()
     """
+    import threading
+    import traceback
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -120,10 +124,25 @@ def _run_sync(coro):
         return asyncio.run(coro)
 
     # 已在事件循环内 → 严禁创建新事件循环访问 Tortoise ORM
+    thread_info = f"thread_id={threading.get_ident()} name={threading.current_thread().name}"
+    stack_summary = "".join(traceback.format_stack(limit=8)[:-1])
+
     raise RuntimeError(
-        "_run_sync 在事件循环内被调用，这会通过 asyncio.run() 在线程池中"
-        "创建新事件循环并访问 Tortoise ORM，严重污染主事件循环的数据库连接状态。"
-        "请改用 async 版本（如 get_config_async / ProviderResolver.get_config）。"
+        "\n"
+        + "=" * 60
+        + "\n[ORM] 拦截到潜在的跨线程 ORM 污染！\n"
+        + f"  _run_sync 在事件循环内被调用，这会通过 asyncio.run()\n"
+        + f"  在线程池中创建新事件循环并访问 Tortoise ORM，\n"
+        + f"  严重污染主事件循环的数据库连接状态。\n"
+        + f"\n"
+        + f"  当前线程: {thread_info}\n"
+        + f"  当前事件循环: id={id(loop)} running={loop.is_running()}\n"
+        + f"\n"
+        + f"  修复方案：改用 async 版本\n"
+        + f"    get_config_async()  /  ProviderResolver.get_config()\n"
+        + f"\n"
+        + f"  调用栈（最近 8 帧）:\n{stack_summary}"
+        + "=" * 60
     )
 
 
@@ -189,7 +208,8 @@ class ProviderResolver:
         try:
             return int(raw)
         except (ValueError, TypeError):
-            _log.warning(f"[ProviderResolver] {provider_type}.{config_key} 值 '{raw}' 无法转为 int，使用默认值 {default}")
+            _log.warning("[ProviderResolver] %s.%s 值 '%s' 无法转为 int，使用默认值 %s",
+                         provider_type, config_key, raw, default)
             return default
 
     @classmethod
@@ -209,7 +229,8 @@ class ProviderResolver:
         try:
             return float(raw)
         except (ValueError, TypeError):
-            _log.warning(f"[ProviderResolver] {provider_type}.{config_key} 值 '{raw}' 无法转为 float，使用默认值 {default}")
+            _log.warning("[ProviderResolver] %s.%s 值 '%s' 无法转为 float，使用默认值 %s",
+                         provider_type, config_key, raw, default)
             return default
 
     @classmethod

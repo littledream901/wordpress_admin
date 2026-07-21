@@ -30,6 +30,7 @@ from app.services.woo_import_service import WooImportService
 from app.services.importers import get_importer
 from app.utils.config_reader import get_config_async
 from app.utils.provider_resolver import ProviderResolver
+from app.utils.orm_guard import guard_thread_pool
 
 _log = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ def _apply_dns_result_to_site(site, result: dict):
         site.dynadot_status = f'zone_{zone_status}' if zone_status else 'zone_active'
 
 
+@guard_thread_pool
 def _run_dns_sync(domain: str, platform: str, server_ip: str):
     """在线程池中同步执行 DNS + NS 操作（避免阻塞事件循环）
 
@@ -177,6 +179,18 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
     Cloudflare zone 创建是最关键的前置步骤；完成后 Cloudflare 记录设置
     与 Dynadot NS 更新相互独立，并行执行以缩短总耗时。
     """
+    # 运行时守卫：必须在 run_in_executor 线程池中执行，严禁在事件循环内直接调用
+    try:
+        asyncio.get_running_loop()
+        raise RuntimeError(
+            "_run_dns_sync 必须在 run_in_executor 线程池中运行（当前处于事件循环内），"
+            "请通过 loop.run_in_executor(None, _run_dns_sync, ...) 调用"
+        )
+    except RuntimeError as e:
+        if "no running event loop" in str(e):
+            pass  # 正确：不在事件循环内，处于线程池线程
+        else:
+            raise
     from concurrent.futures import ThreadPoolExecutor
     from app.services.providers.dynadot_service import DynadotService
 
@@ -1073,13 +1087,13 @@ class SitePipelineController:
         ) as client:
             resp = await client.get(url)
             if resp.status_code != 200:
-                _log.warning(f'[ShopifyCount] HTTP {resp.status_code}: {resp.text[:200]}')
+                _log.warning('[ShopifyCount] HTTP %s: %s', resp.status_code, resp.text[:200])
                 return 0
             data = resp.json()
             total = data.get('count', 0)
         site.woo_product_count = total
         await site.save()
-        _log.info(f'[ShopifyCount] site={site.id} domain={site.domain} count={total}')
+        _log.info('[ShopifyCount] site=%s domain=%s count=%s', site.id, site.domain, total)
         return total
 
 

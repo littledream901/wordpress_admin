@@ -64,9 +64,9 @@ class DataPermissionFilter:
 
     @classmethod
     async def _build_condition(cls, scope_objs, current_user, owner_field, dept_field) -> Q:
-        """基于 RoleDataScope 对象列表构建 Q"""
+        """基于 RoleDataScope 对象列表构建 Q，取最宽松权限（数值越大越宽松）"""
         scopes = sorted([s.data_scope for s in scope_objs])
-        best_scope = scopes[0]
+        best_scope = scopes[-1]  # ALL(5) > CUSTOM(4) > DEPT_AND_CHILD(3) > DEPT_ONLY(2) > SELF_ONLY(1)
 
         if best_scope == DataScope.ALL:
             return Q()
@@ -103,9 +103,9 @@ class DataPermissionFilter:
 
     @classmethod
     async def _build_role_condition(cls, roles, current_user, owner_field, dept_field) -> Q:
-        """基于 Role 的全局 data_scope 构建 Q（兼容旧版）"""
+        """基于 Role 的全局 data_scope 构建 Q（兼容旧版），取最宽松权限（数值越大越宽松）"""
         scopes = sorted([r.data_scope for r in roles])
-        scope = scopes[0]
+        scope = scopes[-1]  # ALL(5) > CUSTOM(4) > DEPT_AND_CHILD(3) > DEPT_ONLY(2) > SELF_ONLY(1)
 
         if scope == DataScope.ALL:
             return Q()

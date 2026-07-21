@@ -1,8 +1,11 @@
+import logging
 from typing import List
 
 from app.core.crud import CRUDBase
 from app.models.admin import Api, Dept, Menu, Role, RoleDataScope
 from app.schemas.roles import RoleCreate, RoleUpdate
+
+_log = logging.getLogger(__name__)
 
 
 class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
@@ -16,12 +19,17 @@ class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
         await role.menus.clear()
         for menu_id in menu_ids:
             menu_obj = await Menu.filter(id=menu_id).first()
-            await role.menus.add(menu_obj)
+            if menu_obj is not None:
+                await role.menus.add(menu_obj)
 
         await role.apis.clear()
         for item in api_infos:
             api_obj = await Api.filter(path=item.get("path"), method=item.get("method")).first()
-            await role.apis.add(api_obj)
+            if api_obj is not None:
+                await role.apis.add(api_obj)
+
+        _log.info("角色权限已更新: role_id=%s name=%s menus=%s apis=%s",
+                  role.id, role.name, len(menu_ids), len(api_infos))
 
     async def update_roles_full(
         self,
@@ -62,6 +70,9 @@ class RoleController(CRUDBase[Role, RoleCreate, RoleUpdate]):
                     dept_obj = await Dept.filter(id=dept_id).first()
                     if dept_obj:
                         await scope_obj.custom_depts.add(dept_obj)
+
+        _log.info("角色完整权限已更新: role_id=%s name=%s data_scope=%s biz_scopes=%s",
+                  role.id, role.name, data_scope, len(data_scopes) if data_scopes else 0)
 
     async def get_authorized_data(self, role_id: int) -> dict:
         """获取角色完整授权数据（菜单/API/数据权限配置）"""

@@ -63,6 +63,13 @@ if _HAS_FASTAPI:
 
         await Tortoise.init(config=settings.TORTOISE_ORM)
 
+        # ── ORM 隔离初始化（记录主事件循环，用于跨线程污染检测）──
+        try:
+            from app.utils.orm_guard import _capture_main_loop
+            _capture_main_loop()
+        except Exception:
+            pass  # 非关键路径，静默跳过
+
         # 预热连接池：必须在 init_essential() 之前执行
         # 把 minsize 个连接全部并行建好，避免首波请求排队等连接
         # 单次 MySQL 连接耗时 ~4.5s，不预热则首波请求全部阻塞

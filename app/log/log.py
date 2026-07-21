@@ -14,6 +14,7 @@
 import logging as std_logging
 import os
 import sys
+import threading
 import uuid
 from contextvars import ContextVar
 
@@ -47,17 +48,29 @@ _console_fmt = (
     "<level>{message}</level>"
 )
 
+# 文件日志带线程上下文，用于跨线程 ORM 污染事后排查
 _file_fmt = (
     "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
     "{name}:{function}:{line} | "
-    "{extra[trace_id]} | {message}"
+    "{extra[trace_id]} | {extra[thread_ctx]} | {message}"
 )
 
 
 def _trace_filter(record: dict) -> bool:
-    """注入 trace_id 到 extra 字段"""
+    """注入 trace_id；文件格式额外注入线程上下文（跨线程 ORM 污染排查用）"""
+    import asyncio
+
     tid = _trace_id.get()
     record["extra"]["trace_id"] = tid or "-"
+
+    t = threading.current_thread()
+    try:
+        loop = asyncio.get_running_loop()
+        loop_info = f"loop={id(loop)}"
+    except RuntimeError:
+        loop_info = "no_loop"
+    record["extra"]["thread_ctx"] = f"{t.name}(main={t is threading.main_thread()}) {loop_info}"
+
     return True
 
 

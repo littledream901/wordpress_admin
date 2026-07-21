@@ -48,7 +48,7 @@ class ShopifyProductImporter(BaseProductImporter):
         try:
             raw = json.loads(prod_info_json or "{}")
         except Exception:
-            _log.warning(f"[ShopifyImporter] JSON 解析失败，跳过")
+            _log.warning('[ShopifyImporter] JSON 解析失败，跳过')
             return None
 
         prod = raw.get("product", raw)

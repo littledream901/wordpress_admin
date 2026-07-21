@@ -141,12 +141,12 @@ def _count_and_replace_domain(file_path: str, source_domain: str, target_domain:
             content,
             flags=re.DOTALL,
         )
-        _log.info(f"[feed] 平台={platform}, 替换域名 {source_domain} -> {target_domain}, {count} 处")
+        _log.info('[feed] 平台=%s, 替换域名 %s -> %s, %s 处', platform, source_domain, target_domain, count)
     else:
         # CSV: 全局替换
         new_content, count = re.subn(escaped, target_domain, content)
         content = new_content
-        _log.info(f"[feed] CSV 全局替换域名 {source_domain} -> {target_domain}, {count} 处")
+        _log.info('[feed] CSV 全局替换域名 %s -> %s, %s 处', source_domain, target_domain, count)
 
     if count > 0:
         with open(file_path, "w", encoding="utf-8") as f:
@@ -267,7 +267,7 @@ async def upload_feed(file: UploadFile = File(...)):
         feed.source_domain = detected
 
     await feed.save()
-    _log.info(f"[feed] 上传: id={feed.id}, name={file.filename}, domain={detected}")
+    _log.info('[feed] 上传: id=%s, name=%s, domain=%s', feed.id, file.filename, detected)
 
     return Success(data=await _feed_row(feed), msg="上传成功")
 
@@ -319,7 +319,8 @@ async def create_feed(
     new_feed.replace_count = count
     await new_feed.save()
 
-    _log.info(f"[feed] 新Feed创建: source={feed_id}, new={new_feed.id}, {source_domain}→{target_domain}, {count}处, file={processed_name}")
+    _log.info('[feed] 新Feed创建: source=%s, new=%s, %s→%s, %s处, file=%s',
+             feed_id, new_feed.id, source_domain, target_domain, count, processed_name)
 
     return Success(data={
         **(await _feed_row(new_feed)),
@@ -383,10 +384,10 @@ async def delete_feed(feed_id: int):
     for fpath in (feed.source_file, feed.processed_file):
         if fpath and os.path.exists(fpath):
             os.remove(fpath)
-            _log.info(f"[feed] 删除文件: {fpath}")
+            _log.info('[feed] 删除文件: %s', fpath)
 
     await feed.delete()
-    _log.info(f"[feed] 已删除记录: id={feed_id}")
+    _log.info('[feed] 已删除记录: id=%s', feed_id)
     return Success(msg="已删除")
 
 
@@ -412,7 +413,7 @@ async def cleanup_expired():
         await feed.delete()
         deleted_count += 1
 
-    _log.info(f"[feed] 清理过期文件: {deleted_count} 个")
+    _log.info('[feed] 清理过期文件: %s 个', deleted_count)
     return Success(data={"deleted": deleted_count}, msg=f"已清理 {deleted_count} 个过期文件")
 
 
@@ -453,7 +454,7 @@ async def chunk_init(
     with open(_meta_path(upload_id), "w") as f:
         _json.dump(meta, f)
 
-    _log.info(f"[feed] 分片上传初始化: id={upload_id}, file={filename}, chunks={total_chunks}")
+    _log.info('[feed] 分片上传初始化: id=%s, file=%s, chunks=%s', upload_id, filename, total_chunks)
     return Success(data={"upload_id": upload_id})
 
 
@@ -538,5 +539,6 @@ async def chunk_complete(upload_id: str = Body(..., embed=True)):
     # 清理分片临时目录
     shutil.rmtree(session_dir, ignore_errors=True)
 
-    _log.info(f"[feed] 分片上传完成: id={feed.id}, file={filename}, size={total_bytes}, domain={detected}")
+    _log.info('[feed] 分片上传完成: id=%s, file=%s, size=%s, domain=%s',
+             feed.id, filename, total_bytes, detected)
     return Success(data=await _feed_row(feed), msg="上传成功")
