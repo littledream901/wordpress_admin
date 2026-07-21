@@ -487,10 +487,13 @@ async function updateRoleAuthorized() {
   const { code, msg } = await api.updateRoleAuthorized(payload)
   if (code === 200) {
     $message?.success('设置成功')
-    // 刷新已授权数据
+    // 刷新已授权数据（跳过 menu_ids watch，防止覆盖 api_ids）
+    _skipMenuWatch = true
     const result = await api.getRoleAuthorized({ id: role_id.value })
-    menu_ids.value = (result.data.menus || []).map((v) => v.id)
     api_ids.value = (result.data.apis || []).map((v) => v.method.toLowerCase() + v.path)
+    menu_ids.value = (result.data.menus || []).map((v) => v.id)
+    await nextTick()
+    _skipMenuWatch = false
     // 刷新数据权限配置
     const scopes = result.data.data_scopes || []
     if (scopes.length > 0) {
@@ -619,7 +622,6 @@ async function updateRoleAuthorized() {
               :default-expand-all="true"
               :block-line="true"
               :selectable="false"
-              cascade
               @update:checked-keys="(v) => (api_ids = v)"
             />
           </NTabPane>

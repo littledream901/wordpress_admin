@@ -20,10 +20,6 @@ ADD_ACCOUNT_PORT = 6873
 ADD_ACCOUNT_PATH = "/api/v1/container/add-account"
 ADD_ACCOUNT_TIMEOUT = 30
 
-# 账号查删接口
-ACCOUNT_LIST_PATH = "/api/v1/account/list"
-ACCOUNT_DEL_PATH = "/api/v1/account/del"
-
 
 def is_retryable_error(error: Exception) -> bool:
     """判断错误是否可重试（网络/限流/5xx 可重试，参数错误不重试）"""
@@ -116,85 +112,6 @@ def call_add_account_direct(executor, create_data: dict, max_retries: int = 5) -
     raise HubStudioError("add account", detail=f"多次重试失败，最后错误：{last_err}")
 
 
-def _call_hub_api_direct(path: str, payload: dict, executor, timeout: int = ADD_ACCOUNT_TIMEOUT) -> dict:
-    """http.client 直连 HubStudio Connector 通用调用"""
-    conn = None
-    try:
-        conn = http.client.HTTPConnection(ADD_ACCOUNT_HOST, ADD_ACCOUNT_PORT, timeout=timeout)
-        headers = {
-            "Accept-Language": "zh-CN",
-            "Authorization": "NULL",
-            "Content-Type": "application/json; charset=utf-8",
-        }
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        conn.request("POST", path, body=body, headers=headers)
-        res = conn.getresponse()
-        raw_data = res.read().decode("utf-8")
-        try:
-            resp_json = json.loads(raw_data)
-        except json.JSONDecodeError:
-            raise HubStudioError("api call", detail=f"非JSON响应: status={res.status}")
-        if res.status < 200 or res.status >= 300:
-            raise HubStudioError("api call", detail=f"HTTP失败: status={res.status}")
-        if resp_json.get("code") != 0:
-            raise HubStudioError("api call",
-                detail=f"业务失败: code={resp_json.get('code')}, msg={resp_json.get('msg', '')}")
-        return resp_json
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-
-def clear_accounts_by_name_direct(executor, account_names: list, container_code: int = 0) -> int:
-    """按账号名查询并删除已有账号，返回删除数量。
-
-    HubStudio /api/v1/account/list 文档未列出 containerCode 过滤参数，
-    但实际可能支持（作为额外过滤条件传入）。不支持时会被服务端忽略，
-    不会报错，仅失去容器级隔离。
-    """
-    account_ids = []
-    for name in account_names:
-        if not name:
-            continue
-        try:
-            params = {"accountName": name, "current": 1, "size": 50}
-            if container_code:
-                params["containerCode"] = container_code
-            resp = _call_hub_api_direct(ACCOUNT_LIST_PATH, params, executor)
-            data = resp.get("data", {})
-            items = data.get("list") or []
-            for item in items:
-                aid = item.get("accountId")
-                if aid:
-                    account_ids.append(int(aid))
-        except Exception as e:
-            executor.logger.warning(
-                f"[create_account] 查询账号 {name} 失败: {e}"
-            )
-
-    if not account_ids:
-        executor.logger.info("[create_account] 未查到已有账号，跳过清空")
-        return 0
-
-    executor.logger.info(
-        f"[create_account] 查到 {len(account_ids)} 个已有账号，即将删除: {account_ids}"
-    )
-    try:
-        _call_hub_api_direct(ACCOUNT_DEL_PATH, {"accountIds": account_ids}, executor)
-        executor.logger.info(f"[create_account] 已删除 {len(account_ids)} 个旧账号")
-        return len(account_ids)
-    except HubStudioError:
-        raise
-    except Exception as e:
-        executor.logger.warning(
-            f"[create_account] 删除账号失败（非致命，继续创建）: {e}"
-        )
-        return 0
-
-
 def execute_create_account(executor, job: dict, payload: dict) -> dict:
     domain = payload.get("domain", job.get("domain", ""))
     hub_env_id = payload.get("hub_env_id", "")
@@ -215,22 +132,8 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         executor.logger.warning("[create_account] Connector 端口不可达，尝试启动...")
         executor.rt.start_connector()
 
-    env_id_int = int(hub_env_id)
-
-    # ── 0. 清空已有同名账号（先查后删）──
-    # 尝试传入 containerCode 防止误删其他环境的同名账号
-    try:
-        names_to_clear = []
-        if gmail_username:
-            names_to_clear.append(gmail_username)
-        names_to_clear.append(executor.admin_account_name)
-        deleted = clear_accounts_by_name_direct(executor, names_to_clear, container_code=env_id_int)
-        if deleted > 0:
-            time.sleep(1.0)
-    except Exception as e:
-        executor.logger.warning(f"[create_account] 清空旧账号失败（非致命，继续创建）: {e}")
-
     results = {}
+    env_id_int = int(hub_env_id)
 
     # ── 1. 创建 Gmail 主账号 ──
     if gmail_username and gmail_password:
