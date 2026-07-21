@@ -10,7 +10,7 @@ from tortoise.expressions import Q
 from app.controllers.dept import dept_controller
 from app.controllers.user import user_controller
 from app.core.ctx import CTX_USER_ID
-from app.core.depends import DependAuth
+from app.core.dependency import DependAuth
 from app.models.admin import User
 from app.schemas.base import Fail, Success, SuccessExtra
 from app.schemas.users import UserCreate, UserUpdate
