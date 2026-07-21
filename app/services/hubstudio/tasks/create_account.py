@@ -267,6 +267,18 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
 
     summary = f"{ok_count}/{len(task_results)} 成功" + (f", {fail_count} 失败" if fail_count else "")
 
+    # 从成功响应的 data 中提取 account_id（HubStudio API: {code:0, data:{id:...}}）
+    account_id = ""
+    for _key, val in task_results.items():
+        if val.get("ok"):
+            resp = val.get("resp", {})
+            data = resp.get("data", {}) if isinstance(resp, dict) else {}
+            aid = data.get("id") or data.get("accountId") or data.get("account_id")
+            if aid:
+                account_id = str(aid)
+                executor.logger.info(f"[create_account] 提取到 account_id={account_id} (来自 {_key})")
+                break
+
     executor.logger.info(
         f"[create_account] 完成: status={status}, {summary}"
         + (f", errors={errors}" if errors else "")
@@ -274,7 +286,7 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
     return {
         "status": status,
         "summary": summary,
-        "account_id": "",
+        "account_id": account_id,
         "domain": domain,
         "errors": errors,
         "results": results,

@@ -56,6 +56,10 @@
       <n-space vertical :size="12">
         <n-text>站点: <b>{{ dispatchTarget?.domain }}</b> (ID: {{ dispatchTarget?.id }})</n-text>
         <n-text v-if="dispatchTarget?.hub_env_id" depth="3">已有环境ID: {{ dispatchTarget.hub_env_id }}</n-text>
+        <n-text v-if="dispatchTarget?.hub_account_id" depth="3">已有账号ID: {{ dispatchTarget.hub_account_id }}</n-text>
+        <n-alert v-if="dispatchJobType === 'create_account' && dispatchTarget?.hub_account_id" type="warning" style="margin-top: 4px">
+          创建新账号将自动清除旧账号
+        </n-alert>
         <n-select
           v-model:value="dispatchJobType"
           :options="batchJobTypeOptions"
@@ -78,7 +82,7 @@
 
 <script setup>
 import { h, ref, reactive, onMounted, resolveDirective, withDirectives } from 'vue'
-import { NButton, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
+import { NAlert, NButton, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
 import api from '@/api/site-pipeline'

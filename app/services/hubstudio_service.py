@@ -121,8 +121,12 @@ class HubStudioOrchestrationService:
         if job_type == "update_env":
             payload = await self._enrich_update_env_payload(payload, provider_id)
 
-        # create_account: 自动分配 Gmail 并将凭证写入 payload
+        # create_account: 先清除之前的账号，再自动分配 Gmail 并将凭证写入 payload
         if job_type == "create_account":
+            if site.hub_account_id:
+                logger.info(f"[create_account] 清除站点 {site.domain} 的旧账号: {site.hub_account_id}")
+                site.hub_account_id = ""
+                await site.save()
             payload = await self._enrich_create_account_payload(payload, site)
 
         # wp_login: 注入 Gmail + WordPress 凭证，供 executor 自动登录
