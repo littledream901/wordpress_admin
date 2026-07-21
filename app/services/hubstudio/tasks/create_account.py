@@ -89,7 +89,7 @@ def call_add_account_direct(executor, create_data: dict, max_retries: int = 5) -
                 time.sleep(1.2)
                 return resp_json
 
-            raise HubStudioError("add account", detail=f"业务失败: code={resp_json.get('code')}")
+            raise HubStudioError("add account", detail=f"业务失败: code={resp_json.get('code')}, msg={resp_json.get('msg', '')}")
 
         except Exception as e:
             last_err = e
@@ -155,7 +155,10 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
             time.sleep(1.0)
         except Exception as e:
             err_msg = str(e)
-            if "无效的API接口" in err_msg or "add-account" in err_msg:
+            if "账号已存在" in err_msg:
+                results["gmail_account"] = {"ok": True, "resp": {}, "existed": True}
+                executor.logger.info(f"[create_account] Gmail 账号已存在（HubStudio 中已创建）: {gmail_username}")
+            elif "无效的API接口" in err_msg or "add-account" in err_msg:
                 executor.logger.warning("[create_account] add-account 直连不可用，回退到 httpx 客户端")
                 try:
                     client = executor.rt.ensure_client()
@@ -193,7 +196,10 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
             executor.logger.info(f"[create_account] 后台账号创建成功")
         except Exception as e:
             err_msg = str(e)
-            if "无效的API接口" in err_msg or "add-account" in err_msg:
+            if "账号已存在" in err_msg:
+                results["admin_account"] = {"ok": True, "resp": {}, "existed": True}
+                executor.logger.info(f"[create_account] 后台账号已存在（HubStudio 中已创建）: admin -> {login_url}")
+            elif "无效的API接口" in err_msg or "add-account" in err_msg:
                 executor.logger.warning("[create_account] add-account 不可用，回退到旧接口")
                 try:
                     client = executor.rt.ensure_client()
@@ -220,8 +226,13 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
             results["account"] = {"ok": True, "resp": resp}
             executor.logger.info(f"[create_account] 基础账号创建成功")
         except Exception as e:
-            results["account"] = {"ok": False, "error": str(e)[:200]}
-            executor.logger.error(f"[create_account] 基础账号创建失败: {e}")
+            err_msg = str(e)
+            if "账号已存在" in err_msg:
+                results["account"] = {"ok": True, "resp": {}, "existed": True}
+                executor.logger.info(f"[create_account] 基础账号已存在（HubStudio 中已创建）")
+            else:
+                results["account"] = {"ok": False, "error": str(e)[:200]}
+                executor.logger.error(f"[create_account] 基础账号创建失败: {e}")
 
     # ── 3. 写备注 ──
     remark_fields = payload.get("remark_fields", {})
