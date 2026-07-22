@@ -162,17 +162,16 @@ class WooRequestLimiter:
                     resp.status_code, resp.text[:500],
                 )
 
-                # 统一处理 Retry-After：写入全局冷却，后续所有请求自动遵守
+                # 非幂等请求遇到 5xx/429 不重试，立即抛出，不污染全局冷却
+                if method in ("POST", "PUT", "DELETE"):
+                    resp.raise_for_status()
+                    return resp  # unreachable, raise_for_status raises
+
+                # 仅幂等请求（GET）才设置全局冷却和 Retry-After
                 retry_after = resp.headers.get("Retry-After")
                 if retry_after:
                     server_wait = self._apply_retry_after(retry_after)
                     logger.warning("服务器要求 Retry-After=%s 秒，已纳入全局冷却", server_wait)
-
-                # 非幂等请求遇到 5xx 不自动重试，抛出由业务层兜底
-                if method in ("POST", "PUT", "DELETE"):
-                    self._mark_error()
-                    resp.raise_for_status()
-                    return resp
 
                 self._mark_error()
             except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
