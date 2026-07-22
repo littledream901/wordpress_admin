@@ -2,7 +2,8 @@
 
 读取 HubStudio Provider 配置：
 - gmc_check_cron：cron 表达式，空=禁用（例: */30 * * * *）
-- gmc_check_cron_statuses：需要巡检的 GMC 状态列表（JSON），__empty__ 表示从未检测
+- gmc_check_cron_statuses：需要巡检的 GMC 状态标签（JSON 数组）
+  可选值: 未检测 / 正常 / 审核中 / 有违规 / 已暂停 / 未创建 / 未知
 """
 
 import asyncio
@@ -15,19 +16,48 @@ from croniter import croniter
 
 _log = logging.getLogger(__name__)
 
-# 默认巡检状态列表（不含 active）
-_DEFAULT_STATUSES = ["__empty__", "warning", "suspended", "pending", "unknown",
-                     "reviewing", "failed", "query_failed", "Uncreated"]
+# 中文标签 → DB 实际值的映射
+_GMC_STATUS_MAP = {
+    "未检测": [""],                          # gmc_status 为空
+    "正常":   ["active"],
+    "审核中": ["reviewing"],
+    "有违规": ["warning"],
+    "已暂停": ["suspended"],
+    "未创建": ["Uncreated"],
+    "未知":   ["unknown", "pending", "failed", "query_failed"],
+}
+
+# 默认巡检标签（不含"正常"）
+_DEFAULT_LABELS = ["未检测", "有违规", "已暂停", "审核中", "未创建", "未知"]
 
 
 def _parse_status_filter(raw: str) -> list:
-    """解析 gmc_check_cron_statuses 配置，处理 __empty__ 特殊值"""
+    """将中文标签列表展开为 DB 查询用的 GMC 状态值列表
+
+    支持新旧两种格式：
+    - 新格式: ["未检测","未知"] → ['', 'unknown', 'pending', 'failed', 'query_failed']
+    - 旧格式: ["__empty__","warning"] → 直接使用（向后兼容）
+    """
     try:
-        statuses = json.loads(raw) if raw else _DEFAULT_STATUSES
+        labels = json.loads(raw) if raw else _DEFAULT_LABELS
     except (json.JSONDecodeError, TypeError):
-        statuses = _DEFAULT_STATUSES
-    # 将 __empty__ 替换为空字符串（DB 中从未检测的站点 gmc_status=''）
-    return ['' if s == '__empty__' else s for s in statuses if s]
+        labels = _DEFAULT_LABELS
+
+    # 检测格式：新格式含中文标签，旧格式为 ASCII 原始值
+    first = labels[0] if labels else ''
+    if first and any(ord(c) > 127 for c in first):
+        # 新格式：展开中文标签
+        result = []
+        for label in labels:
+            db_values = _GMC_STATUS_MAP.get(label)
+            if db_values:
+                result.extend(db_values)
+            else:
+                _log.warning(f"[GMC-Cron] 不识别的状态标签: {label}")
+        return result or [s for v in _GMC_STATUS_MAP.values() for s in v]
+    else:
+        # 旧格式：直接作为 DB 值使用，__empty__ → ''
+        return ['' if s == '__empty__' else s for s in labels if s]
 
 
 def _calc_sleep_seconds(cron_expr: str) -> float:
@@ -36,7 +66,7 @@ def _calc_sleep_seconds(cron_expr: str) -> float:
     it = croniter(cron_expr, now)
     next_time = it.get_next(datetime)
     delta = (next_time - now).total_seconds()
-    return max(delta, 60)  # 最少等 60 秒，避免高频空转
+    return max(delta, 60)
 
 
 async def _read_cron_config() -> dict:
@@ -45,13 +75,13 @@ async def _read_cron_config() -> dict:
         from app.models.config_provider import ConfigProvider, ProviderConfigItem
         provider = await ConfigProvider.get_default('hubstudio')
         if not provider:
-            return {"cron": "", "statuses": _DEFAULT_STATUSES}
+            return {"cron": "", "statuses": _DEFAULT_LABELS}
         items = await ProviderConfigItem.get_map(provider.id)
         cron_expr = (items.get('gmc_check_cron', '') or '').strip()
         statuses = _parse_status_filter(items.get('gmc_check_cron_statuses', ''))
         return {"cron": cron_expr, "statuses": statuses}
     except Exception:
-        return {"cron": "", "statuses": _DEFAULT_STATUSES}
+        return {"cron": "", "statuses": _DEFAULT_LABELS}
 
 
 async def _get_sites_need_gmc_check(statuses: list) -> list:
@@ -96,10 +126,9 @@ async def run_gmc_cron_loop():
             statuses = cfg["statuses"]
         except Exception:
             cron_expr = ""
-            statuses = _DEFAULT_STATUSES
+            statuses = _DEFAULT_LABELS
 
         if not cron_expr:
-            # 未配置 cron，每小时检查一次配置是否启用
             await asyncio.sleep(3600)
             continue
 
@@ -114,7 +143,6 @@ async def run_gmc_cron_loop():
                   f"cron={cron_expr}, 状态={statuses}")
         await asyncio.sleep(sleep_sec)
 
-        # ── 执行巡检 ──
         _log.info(f"[GMC-Cron] 开始巡检，cron={cron_expr}，状态={statuses}")
         try:
             sites = await _get_sites_need_gmc_check(statuses)
