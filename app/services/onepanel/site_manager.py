@@ -179,7 +179,9 @@ class OnePanelSiteManager:
                     if status == 'Running':
                         return {'app_id': int(item['id']), 'name': item.get('name', alias), 'service_name': item.get('serviceName') or item.get('name') or alias, 'params': item.get('params') or {}}
                     if 'fail' in status.lower() or 'error' in status.lower() or 'err' in status.lower():
-                        raise OnePanelError("install app", detail=f"status={status}")
+                        import json as _json
+                        raw_item = _json.dumps(item, ensure_ascii=False, default=str)
+                        raise OnePanelError("install app", detail=f"status={status} | raw={raw_item}")
             time.sleep(8)
         raise TimeoutError(f'应用启动超时：{domain}')
 
