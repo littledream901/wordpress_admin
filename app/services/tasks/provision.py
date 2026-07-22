@@ -138,7 +138,7 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 5: rebuild_after_files
             await self._update_step(job, "rebuild_after_files")
-            await self._exec(lambda: site_manager.rebuild_app(app_id), timeout=120)
+            await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
 
             # Step 6: replace_domain
             await self._update_step(job, "replace_domain")
@@ -184,7 +184,7 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）
             await self._update_step(job, "rebuild_after_patch")
-            await self._exec(lambda: site_manager.rebuild_app(app_id), timeout=120)
+            await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
 
             # Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
             await self._update_step(job, "fetch_woo_keys")

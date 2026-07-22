@@ -185,13 +185,44 @@ class OnePanelSiteManager:
             time.sleep(8)
         raise TimeoutError(f'应用启动超时：{domain}')
 
-    def rebuild_app(self, app_id: int, wait: int = 60) -> bool:
-        """重建应用容器（文件变更后需要重建才能生效），返回是否成功"""
+    def rebuild_app(self, app_id: int, wait: int = 60, service_name: str = '', domain: str = '') -> bool:
+        """重建应用容器（文件变更后需要重建才能生效），返回是否成功。
+
+        若提供 service_name + domain，则通过 API 轮询容器状态直到 Running（最多 wait 秒）；
+        否则仅触发重建后固定等待 wait 秒。
+        """
         ok, msg = self.api.post('/apps/installed/op', {'installId': app_id, 'operate': 'rebuild', 'taskID': str(uuid.uuid4())})
         if not ok:
             _log.warning("rebuild_app API 调用失败：%s", msg)
+
+        if service_name and domain:
+            return self._wait_app_running(service_name, domain, timeout=wait) is not None
+
         time.sleep(wait)
         return bool(ok)
+
+    def _wait_app_running(self, service_name: str, domain: str, timeout: int = 120, interval: int = 5) -> Dict | None:
+        """轮询 /apps/installed/search 等待应用状态变为 Running"""
+        start = time.time()
+        while time.time() - start < timeout:
+            ok, data = self.api.post('/apps/installed/search', {'page': 1, 'pageSize': 200, 'sync': True})
+            if ok and isinstance(data, dict):
+                for item in (data.get('items') or []):
+                    svc = str(item.get('serviceName', ''))
+                    name = str(item.get('name', ''))
+                    if service_name not in (svc, name) and domain.replace('.', '-') not in name:
+                        continue
+                    status = str(item.get('status', ''))
+                    if status == 'Running':
+                        _log.info("rebuild 完成，容器已 Running: service=%s", service_name)
+                        return item
+                    if 'fail' in status.lower() or 'error' in status.lower() or 'err' in status.lower():
+                        import json as _json
+                        raw_item = _json.dumps(item, ensure_ascii=False, default=str)
+                        raise OnePanelError("rebuild app", detail=f"status={status} | raw={raw_item}")
+            time.sleep(interval)
+        _log.warning("rebuild 等待容器 Running 超时（%ss）: service=%s", timeout, service_name)
+        return None
 
     def create_wordpress_website(self, domain: str) -> Dict[str, Any]:
         existed = self.get_site_id(domain)
