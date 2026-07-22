@@ -59,6 +59,10 @@ if _HAS_FASTAPI:
         logger.info(f"── {settings.APP_TITLE} v{settings.VERSION} ──")
         logger.info(f"   {env_tag}  |  {db_info}")
 
+        # 屏蔽 httpx INFO 日志（避免明文打印含 API Key 的完整 URL）
+        import logging as _logging
+        _logging.getLogger("httpx").setLevel(_logging.WARNING)
+
         t0 = time.perf_counter()
 
         await Tortoise.init(config=settings.TORTOISE_ORM)

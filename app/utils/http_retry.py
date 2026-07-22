@@ -65,12 +65,20 @@ def retry_request(
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
+                    # 429 限流：优先取 Retry-After 响应头，否则至少等 5 秒
+                    delay = base_delay * (2 ** (attempt - 1))
+                    if status == 429:
+                        retry_after = result.headers.get("Retry-After", "")
+                        if retry_after and retry_after.isdigit():
+                            delay = max(int(retry_after), 5)
+                        else:
+                            delay = max(delay, 5)
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试",
-                        context, attempt, status,
+                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
+                        context, attempt, status, delay,
                     )
                     if attempt < max_retries:
-                        time.sleep(base_delay * (2 ** (attempt - 1)))
+                        time.sleep(delay)
                     continue
                 # 其他 4xx 不重试
                 raise RuntimeError(f"HTTP {status}")
@@ -113,12 +121,20 @@ async def retry_request_async(
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
+                    # 429 限流：优先取 Retry-After 响应头，否则至少等 5 秒
+                    delay = base_delay * (2 ** (attempt - 1))
+                    if status == 429:
+                        retry_after = result.headers.get("Retry-After", "")
+                        if retry_after and retry_after.isdigit():
+                            delay = max(int(retry_after), 5)
+                        else:
+                            delay = max(delay, 5)
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试",
-                        context, attempt, status,
+                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
+                        context, attempt, status, delay,
                     )
                     if attempt < max_retries:
-                        await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
+                        await asyncio.sleep(delay)
                     continue
                 raise RuntimeError(f"HTTP {status}")
             return result

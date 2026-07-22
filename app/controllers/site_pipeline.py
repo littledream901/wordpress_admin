@@ -176,8 +176,7 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
     注意：此函数运行在 run_in_executor 线程中，不可创建新 event loop 访问 Tortoise DB。
     参数使用纯数据类型，严禁传入 Tortoise ORM 模型实例（跨线程共享 ORM 对象会污染状态）。
 
-    Cloudflare zone 创建是最关键的前置步骤；完成后 Cloudflare 记录设置
-    与 Dynadot NS 更新相互独立，并行执行以缩短总耗时。
+    Cloudflare zone 创建 → CF 记录设置（含 0.3s 间隔）→ Dynadot NS 更新，串行执行防 API 限流。
     """
     # 运行时守卫：必须在 run_in_executor 线程池中执行，严禁在事件循环内直接调用
     try:
@@ -191,7 +190,6 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
             pass  # 正确：不在事件循环内，处于线程池线程
         else:
             raise
-    from concurrent.futures import ThreadPoolExecutor
     from app.services.providers.dynadot_service import DynadotService
 
     cf = cloudflare_service
@@ -203,31 +201,17 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
         if not zone_id:
             return {'ok': False, 'error': f'Shopify zone 创建失败: domain={domain}'}
 
-        # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
-        dynadot_result, cf_results = None, {}
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {}
-            if status in ('pending', 'invalid_nameservers'):
-                futures['dynadot'] = executor.submit(
-                    lambda: DynadotService().set_nameserver(domain, ns)
-                )
-            futures['cf'] = executor.submit(
-                _setup_cf_records, cf, zone_id, domain,
-                root_type='A', root_value=SHOPIFY_IP,
-                www_type='CNAME', www_value=SHOPIFY_CNAME,
-                www_name='www',
-            )
-            for name, future in futures.items():
-                try:
-                    if name == 'dynadot':
-                        dynadot_result = future.result()
-                    elif name == 'cf':
-                        cf_results = future.result()
-                except Exception as e:
-                    if name == 'dynadot':
-                        dynadot_result = {"success": False, "error": str(e)}
-                    else:
-                        cf_results = {"root_ok": False, "www_ok": False, "error": str(e)}
+        # Cloudflare 记录先执行，然后更新 Dynadot NS（串行，避免 API 限流）
+        cf_results = _setup_cf_records(cf, zone_id, domain,
+            root_type='A', root_value=SHOPIFY_IP,
+            www_type='CNAME', www_value=SHOPIFY_CNAME,
+            www_name='www')
+        dynadot_result = None
+        if status in ('pending', 'invalid_nameservers'):
+            try:
+                dynadot_result = DynadotService().set_nameserver(domain, ns)
+            except Exception as e:
+                dynadot_result = {"success": False, "error": str(e)}
 
         return {
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
@@ -240,31 +224,17 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
         if not zone_id:
             return {'ok': False, 'error': f'Zone 创建失败: domain={domain}'}
 
-        # Dynadot NS 更新与 Cloudflare 记录设置无依赖，并行执行
-        dynadot_result, cf_results = None, {}
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {}
-            if status in ('pending', 'invalid_nameservers'):
-                futures['dynadot'] = executor.submit(
-                    lambda: DynadotService().set_nameserver(domain, ns)
-                )
-            futures['cf'] = executor.submit(
-                _setup_cf_records, cf, zone_id, domain,
-                root_type='A', root_value=server_ip,
-                www_type='A', www_value=server_ip,
-                www_name=f'www.{domain}',
-            )
-            for name, future in futures.items():
-                try:
-                    if name == 'dynadot':
-                        dynadot_result = future.result()
-                    elif name == 'cf':
-                        cf_results = future.result()
-                except Exception as e:
-                    if name == 'dynadot':
-                        dynadot_result = {"success": False, "error": str(e)}
-                    else:
-                        cf_results = {"root_ok": False, "www_ok": False, "error": str(e)}
+        # Cloudflare 记录先执行，然后更新 Dynadot NS（串行，避免 API 限流）
+        cf_results = _setup_cf_records(cf, zone_id, domain,
+            root_type='A', root_value=server_ip,
+            www_type='A', www_value=server_ip,
+            www_name=f'www.{domain}')
+        dynadot_result = None
+        if status in ('pending', 'invalid_nameservers'):
+            try:
+                dynadot_result = DynadotService().set_nameserver(domain, ns)
+            except Exception as e:
+                dynadot_result = {"success": False, "error": str(e)}
 
         return {
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
@@ -279,11 +249,14 @@ def _setup_cf_records(cf, zone_id, domain, root_type, root_value, www_type, www_
     if www_name is None:
         www_name = f'www.{domain}'
     cf.delete_records_by_type(zone_id, root_type)
+    time.sleep(0.3)
     cf.delete_records_by_type(zone_id, 'AAAA')
+    time.sleep(0.3)
     if root_type == 'CNAME':
         root_ok = cf.add_or_update_cname_record(zone_id, domain, root_value)
     else:
         root_ok = cf.add_or_update_a_record(zone_id, domain, root_value)
+    time.sleep(0.3)
     if www_type == 'CNAME':
         www_ok = cf.add_or_update_cname_record(zone_id, 'www', www_value)
     else:
