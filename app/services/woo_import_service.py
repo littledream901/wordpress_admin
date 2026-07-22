@@ -854,31 +854,17 @@ class WooImportService:
         sync_id_list = []
         consecutive_502 = 0  # 连续 502 计数器（用于指数退避）
 
-        # 批量大小：通过 DB 配置可调，默认 10
-        batch_size = int(await ProviderResolver.get_config("woo", "batch_size", default="10"))
-        if batch_size < 1:
-            batch_size = 10
-
-        # 按 batch_size 分组处理
-        for batch_start in range(0, len(rows), batch_size):
-            batch_rows = rows[batch_start:batch_start + batch_size]
-
-            # 映射 Shopify JSON → WC payload
-            batch_payloads = []
-            row_payload_map = []  # (row_idx, payload)
-            for row in batch_rows:
-                payload = syncer.map_shopify_to_wc(syncer.parse_shopify_json(row.prod_info_json))
-                if payload:
-                    batch_payloads.append(payload)
-                    row_payload_map.append(row)
-                else:
-                    skip += 1
-                    row.imported_status = "failed"
-                    skip_details.append({"id": row.id, "title": row.title or "", "sku": "", "reason": "JSON解析或映射失败"})
-                    await row.save()
-
-            if not batch_payloads:
-                continue
+        for row in rows:
+            # 提取 SKU
+            product_title = row.title or ""
+            sku = ""
+            try:
+                prod_data = json.loads(row.prod_info_json or "{}")
+                prod = prod_data.get("product", prod_data)
+                variants = prod.get("variants", [])
+                sku = (variants[0].get("sku") or "") if variants else prod.get("handle", "")
+            except Exception:
+                pass
 
             # 连续 502 → 指数退避等待
             if consecutive_502 >= 2:
@@ -886,77 +872,46 @@ class WooImportService:
                 logger.warning("[502退避] 连续%d次502，等待%ds", consecutive_502, backoff)
                 time.sleep(backoff)
 
-            # 批量上传
-            successes_batch, failures_batch = syncer.batch_upsert_products(batch_payloads)
+            # 单条同步（在线程池中执行，避免阻塞事件循环）
+            ok, reason = await loop.run_in_executor(
+                None, syncer.sync_single_shopify_item, row.prod_info_json,
+            )
 
-            if failures_batch:
-                # 检查是否全是 502 导致的失败
-                all_502 = all("502" in reason for _, reason in failures_batch if reason)
-                if all_502:
+            if ok:
+                success += 1
+                sync_id_list.append(row.id)
+                row.imported_status = "success"
+                sites_history = self._get_imported_sites(row)
+                if site.id not in sites_history:
+                    sites_history.append(site.id)
+                row.imported_result = json.dumps(
+                    {"imported": True, "site_id": site.id, "site_domain": site.domain, "imported_sites": sites_history},
+                    ensure_ascii=False,
+                )
+                consecutive_502 = 0
+            else:
+                skip += 1
+                row.imported_status = "failed"
+                row.imported_result = json.dumps(
+                    {"imported": False, "site_id": site.id, "site_domain": site.domain, "reason": reason, "imported_sites": self._get_imported_sites(row)},
+                    ensure_ascii=False,
+                )
+                skip_details.append({"id": row.id, "title": product_title, "sku": sku, "reason": reason})
+
+                # 连续 502 计数
+                if "502" in (reason or ""):
                     consecutive_502 += 1
                 else:
                     consecutive_502 = 0
 
-            # 逐条记录成功和失败
-            success_skus = set(s.get("sku", "") for s in successes_batch)
-            for row in row_payload_map:
-                sku = ""
-                try:
-                    prod_data = json.loads(row.prod_info_json or "{}")
-                    prod = prod_data.get("product", prod_data)
-                    variants = prod.get("variants", [])
-                    sku = (variants[0].get("sku") or "") if variants else prod.get("handle", "")
-                except Exception:
-                    pass
-
-                if sku in success_skus:
-                    success += 1
-                    sync_id_list.append(row.id)
-                    row.imported_status = "success"
-                    sites_history = self._get_imported_sites(row)
-                    if site.id not in sites_history:
-                        sites_history.append(site.id)
-                    row.imported_result = json.dumps(
-                        {"imported": True, "site_id": site.id, "site_domain": site.domain, "imported_sites": sites_history},
-                        ensure_ascii=False,
-                    )
+                # 认证失败 → 中止整个站点的导入
+                if "401" in reason or "认证失败" in reason:
                     await row.save()
-                else:
-                    # 批量失败 → 回退单条 upsert
-                    reason = "批量请求未返回"
-                    prod_info = syncer.parse_shopify_json(row.prod_info_json)
-                    payload = syncer.map_shopify_to_wc(prod_info) if prod_info else None
-                    if payload:
-                        result, reason = syncer.upsert_product(payload)
-                        if result is not None:
-                            success += 1
-                            sync_id_list.append(row.id)
-                            row.imported_status = "success"
-                            sites_history = self._get_imported_sites(row)
-                            if site.id not in sites_history:
-                                sites_history.append(site.id)
-                            row.imported_result = json.dumps(
-                                {"imported": True, "site_id": site.id, "site_domain": site.domain, "imported_sites": sites_history},
-                                ensure_ascii=False,
-                            )
-                            await row.save()
-                            consecutive_502 = 0
-                            continue
+                    break
+            await row.save()
 
-                    skip += 1
-                    row.imported_status = "failed"
-                    row.imported_result = json.dumps(
-                        {"imported": False, "site_id": site.id, "site_domain": site.domain, "reason": reason, "imported_sites": self._get_imported_sites(row)},
-                        ensure_ascii=False,
-                    )
-                    skip_details.append({"id": row.id, "title": row.title or "", "sku": sku, "reason": reason})
-                    if "401" in (reason or "") or "认证失败" in (reason or ""):
-                        await row.save()
-                        break
-                    await row.save()
-
-            # 每批之间短暂间隔，降低 PHP-FPM 压力
-            time.sleep(1.5)
+            # 产品间短暂间隔，降低 PHP-FPM 压力
+            time.sleep(1.0)
 
         result = {
             "ok": True,
