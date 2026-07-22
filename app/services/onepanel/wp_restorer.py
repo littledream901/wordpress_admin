@@ -422,7 +422,6 @@ echo json_encode([
             data = self.php_client.fetch_with_fallback(
                 domain=domain, path=path, step="domain_replace",
                 success_check=lambda d: d.get("code") == 200,
-                max_retries=1,
             )
             _log.info(
                 "domain replace 响应: domain=%s, rows=%s, cells=%s, tables=%s/%s, failed_tables=%s, failed_rows=%s",
