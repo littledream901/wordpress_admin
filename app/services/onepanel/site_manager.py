@@ -185,7 +185,7 @@ class OnePanelSiteManager:
             time.sleep(8)
         raise TimeoutError(f'应用启动超时：{domain}')
 
-    def rebuild_app(self, app_id: int, wait: int = 30) -> bool:
+    def rebuild_app(self, app_id: int, wait: int = 60) -> bool:
         """重建应用容器（文件变更后需要重建才能生效），返回是否成功"""
         ok, msg = self.api.post('/apps/installed/op', {'installId': app_id, 'operate': 'rebuild', 'taskID': str(uuid.uuid4())})
         if not ok:
