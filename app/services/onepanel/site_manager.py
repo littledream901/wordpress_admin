@@ -42,6 +42,41 @@ class OnePanelSiteManager:
                 return int(item['id'])
         return None
 
+    def get_site_root(self, domain: str, site_id: int = 0) -> Optional[str]:
+        """查询网站在 1Panel 中的实际 document root（siteDir）"""
+        if not site_id:
+            site_id = self.get_site_id(domain) or 0
+        if not site_id:
+            _log.warning("站点 %s 未找到 site_id", domain)
+            return None
+        ok, detail = self.api.get(f'/websites/{site_id}')
+        if ok and isinstance(detail, dict):
+            site_dir = self._extract_site_dir(detail)
+            if site_dir:
+                _log.info("站点 %s (id=%s) Nginx root: %s", domain, site_id, site_dir)
+                return site_dir
+            _log.warning(
+                "站点 %s (id=%s) 已找到但无 siteDir，可用字段: %s",
+                domain, site_id, sorted(detail.keys()),
+            )
+        else:
+            _log.warning("站点 %s (id=%s) GET /websites 失败: ok=%s", domain, site_id, ok)
+        return None
+
+    @staticmethod
+    def _extract_site_dir(item: dict) -> Optional[str]:
+        """从 1Panel 返回的网站 item 中提取 document root"""
+        site_dir = (
+            item.get('siteDir')
+            or item.get('site_dir')
+            or item.get('SiteDir')
+            or item.get('path')
+            or item.get('rootDir')
+            or item.get('websiteDir')
+            or ''
+        )
+        return str(site_dir) if site_dir else None
+
     def wait_site_id(self, domain: str, timeout: int = 60, interval: int = 3) -> Optional[int]:
         """轮询获取 site_id，避免站点创建后列表未刷新"""
         start = time.time()

@@ -9,11 +9,5 @@ export default {
       component: '/operation-jobs/job-list',
       meta: { title: '任务列表', icon: 'carbon:task-view' },
     },
-    {
-      name: 'HubJobs',
-      path: 'hub-jobs',
-      component: '/operation-jobs/hub-jobs',
-      meta: { title: 'Hub任务', icon: 'carbon:cloud-service-management' },
-    },
   ],
 }

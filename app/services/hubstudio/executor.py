@@ -22,7 +22,8 @@ from .tasks import (
 # ══════════════════════════════════════════════════════════════════════════
 
 # 从 update_env 导出的常量，供外部 create_executor_from_config 使用
-from .tasks.update_env import DEFAULT_FIXED_PROXY_CONFIG, REMARK_FIELD_MAP
+from .tasks.update_env import DEFAULT_FIXED_PROXY_CONFIG
+from .tasks._common import REMARK_FIELD_MAP
 # 从 create_env 导出的工具函数
 from .tasks.create_env import (
     build_container_name,

@@ -32,22 +32,30 @@
         />
       </template>
       <template #queryBarActions>
-        <template v-if="checkedRowKeys.length">
-          <n-divider vertical />
-          <span style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
-          <n-button v-permission="'post/api/v1/site-pipeline/hub-job/{job_id}/retry'" size="small" type="warning" ghost @click="batchRetry">
-            批量重试
-          </n-button>
-          <n-button v-permission="'post/api/v1/site-pipeline/hub-job/batch-cancel'"
-            size="small"
-            type="error"
-            ghost
-            :disabled="canBatchCancel.length === 0"
-            @click="batchCancel"
-          >
-            批量取消 ({{ canBatchCancel.length }})
-          </n-button>
-        </template>
+        <n-divider v-if="checkedRowKeys.length" vertical />
+        <span v-if="checkedRowKeys.length" style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
+        <n-button
+          v-if="checkedRowKeys.length"
+          v-permission="'post/api/v1/site-pipeline/hub-job/{job_id}/retry'"
+          size="small"
+          type="warning"
+          ghost
+          :disabled="canBatchRetry.length === 0"
+          @click="batchRetry"
+        >
+          批量重试 ({{ canBatchRetry.length }})
+        </n-button>
+        <n-button
+          v-if="checkedRowKeys.length"
+          v-permission="'post/api/v1/site-pipeline/hub-job/batch-cancel'"
+          size="small"
+          type="error"
+          ghost
+          :disabled="canBatchCancel.length === 0"
+          @click="batchCancel"
+        >
+          批量取消 ({{ canBatchCancel.length }})
+        </n-button>
       </template>
     </CrudTable>
 
@@ -111,6 +119,16 @@ const checkedRowKeys = ref([])
 function onCheckedChange(keys) {
   checkedRowKeys.value = keys
 }
+
+const canBatchCancel = computed(() => {
+  const data = crudRef.value?.tableData || []
+  return data.filter(r => (r.status === 'pending' || r.status === 'running') && checkedRowKeys.value.includes(r.id))
+})
+
+const canBatchRetry = computed(() => {
+  const data = crudRef.value?.tableData || []
+  return data.filter(r => r.status === 'failed' && checkedRowKeys.value.includes(r.id))
+})
 
 // ─── 数据加载 ───
 async function getData({ page, page_size, job_type, status, domain }) {
@@ -187,28 +205,25 @@ async function cancelJob(row) {
 
 // ─── 批量操作 ───
 async function batchRetry() {
-  const selected = (crudRef.value?.tableData || []).filter(
-    r => r.status === 'failed' && checkedRowKeys.value.includes(r.id)
-  )
-  if (!selected.length) {
+  if (canBatchRetry.value.length === 0) {
     message.warning('请选择 failed 状态的任务')
     return
   }
-  for (const r of selected) {
+  for (const r of canBatchRetry.value) {
     try { await api.retryHubJob(r.id) } catch (e) { /* continue */ }
   }
-  message.success(`已重置 ${selected.length} 个任务为 pending`)
+  message.success(`已重置 ${canBatchRetry.value.length} 个任务为 pending`)
   checkedRowKeys.value = []
   crudRef.value.handleSearch()
 }
 
 async function batchCancel() {
-  const ids = checkedRowKeys.value
-  if (!ids.length) {
-    message.warning('请选择任务')
+  if (canBatchCancel.value.length === 0) {
+    message.warning('请选择 pending 或 running 状态的任务')
     return
   }
   try {
+    const ids = canBatchCancel.value.map(r => r.id)
     const r = await api.batchCancelHubJobs(ids)
     message.success(`批量取消完成: 成功 ${r?.data?.success ?? ids.length}`)
     checkedRowKeys.value = []

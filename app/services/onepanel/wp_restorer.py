@@ -234,13 +234,19 @@ class OnePanelWordPressRestorer:
 
     # --- 域名替换 ---
 
-    def inject_domain_replace_script(self, service_name: str, old_domain: str, new_domain: str, target_protocol: str) -> str:
-        """注入域名替换 PHP 脚本（处理 PHP serialize），返回 security token"""
+    def inject_domain_replace_script(
+        self, service_name: str, old_domain: str, new_domain: str,
+        target_protocol: str, target_dir: str = "",
+    ) -> str:
+        """注入域名替换 PHP 脚本（处理 PHP serialize），返回 security token
+
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        """
         if not old_domain:
             old_domain = self.old_source_domain
         token = secrets.token_urlsafe(32)
-        path = f'{self._data_root(service_name)}/domain-replace.php'
-        target_url = f'{target_protocol}://{new_domain}'
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        path = f'{dir_path}/domain-replace.php'
         try:
             old_domain = normalize_domain(old_domain)
         except ValueError:
@@ -249,6 +255,7 @@ class OnePanelWordPressRestorer:
             new_domain = normalize_domain(new_domain)
         except ValueError:
             pass
+        target_url = f'{target_protocol}://{new_domain}'
         php = rf'''<?php
 header('Content-Type: application/json; charset=utf-8');
 
@@ -418,8 +425,9 @@ echo json_encode([
         _log.info("domain-replace.php 已写入 %s", path)
         return token
 
-    def remove_domain_replace_script(self, service_name: str) -> None:
-        self.file_manager.delete(f'{self._data_root(service_name)}/domain-replace.php', is_dir=False)
+    def remove_domain_replace_script(self, service_name: str, target_dir: str = "") -> None:
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        self.file_manager.delete(f'{dir_path}/domain-replace.php', is_dir=False)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
         """通过 HTTP 调用域名替换 PHP 脚本（统一重试/错误处理）。
@@ -501,10 +509,14 @@ echo json_encode([
 
     # --- WooCommerce Key ---
 
-    def inject_woo_script(self, service_name: str) -> str:
-        """注入 WooCommerce API Key 生成 PHP 脚本，返回 security token"""
+    def inject_woo_script(self, service_name: str, target_dir: str = "") -> str:
+        """注入 WooCommerce API Key 生成 PHP 脚本，返回 security token
+
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        """
         token = secrets.token_urlsafe(32)
-        path = f'{self._data_root(service_name)}/{self.woo_script}'
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        path = f'{dir_path}/{self.woo_script}'
         php = rf'''<?php
 header('Content-Type: application/json; charset=utf-8');
 
@@ -612,8 +624,9 @@ echo json_encode([
             )
         return token
 
-    def remove_woo_script(self, service_name: str) -> None:
-        self.file_manager.delete(f'{self._data_root(service_name)}/{self.woo_script}', is_dir=False)
+    def remove_woo_script(self, service_name: str, target_dir: str = "") -> None:
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        self.file_manager.delete(f'{dir_path}/{self.woo_script}', is_dir=False)
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
         """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key（统一重试/错误处理）"""
@@ -638,10 +651,14 @@ echo json_encode([
 
     # --- CTX / Feed 刷新 ---
 
-    def inject_ctx_script(self, service_name: str, domain: str, protocol: str) -> str:
-        """注入 CTX 刷新 PHP 脚本，返回 CTX Refresh URL"""
+    def inject_ctx_script(self, service_name: str, domain: str, protocol: str, target_dir: str = "") -> str:
+        """注入 CTX 刷新 PHP 脚本，返回 CTX Refresh URL
+
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        """
         token = secrets.token_urlsafe(32)
-        path = f'{self._data_root(service_name)}/{self.ctx_script}'
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        path = f'{dir_path}/{self.ctx_script}'
         php = rf'''<?php
 /**
  * CTX Feed 自动化刷新与链接获取桥接脚本 - JSON 输出版
@@ -762,8 +779,9 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
             )
         return f'{protocol}://{domain}/{self.ctx_script}?token={token}'
 
-    def remove_ctx_script(self, service_name: str) -> None:
-        self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
+    def remove_ctx_script(self, service_name: str, target_dir: str = "") -> None:
+        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        self.file_manager.delete(f'{dir_path}/{self.ctx_script}', is_dir=False)
 
     def inject_mu_plugins(self, service_name: str) -> None:
         """注入 mu-plugins/wc-async-images.php —— 异步图片下载（Action Scheduler）"""

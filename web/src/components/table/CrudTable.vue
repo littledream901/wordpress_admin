@@ -2,11 +2,13 @@
   <div v-bind="$attrs">
     <!-- 搜索卡片 -->
     <n-card v-if="$slots.queryBar" size="small" rounded-10 mb-30>
-      <div style="display:flex; align-items:center; width:100%">
+      <div style="display:flex; align-items:center; flex-wrap:wrap; width:100%; gap: 8px">
         <n-space align="center" :wrap="false">
           <slot name="queryBar" />
           <n-button type="primary" @click="handleSearch">搜索</n-button>
           <n-button secondary @click="handleReset">重置</n-button>
+        </n-space>
+        <n-space v-if="$slots.queryBarActions" align="center" :wrap="false">
           <slot name="queryBarActions" />
         </n-space>
         <n-button text title="刷新" @click="handleRefresh" style="margin-left:auto; flex-shrink:0">

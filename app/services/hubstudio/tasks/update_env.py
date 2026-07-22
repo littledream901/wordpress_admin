@@ -1,6 +1,6 @@
 """更新环境：备注 + 代理 (update_env)"""
 
-from .create_env import build_container_name, build_remark, REMARK_FIELD_MAP
+from ._common import build_container_name, build_remark
 
 # ── 默认固定代理配置 ──
 DEFAULT_FIXED_PROXY_CONFIG = {
@@ -93,9 +93,20 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
 
     result = {"status": "success", "env_id": hub_env_id, "domain": domain, "actions": {}}
 
-    # ── 步骤 1：更新容器名称 + 备注 ──
-    container_name = build_container_name(domain)
+    # ── 步骤 1：获取当前容器名称 + 更新备注 ──
     remark = build_remark(payload)
+
+    # 查询当前环境，获取 containerName（API 必填参数，原样传回不修改）
+    container_name = ""
+    try:
+        env_resp = client.get_env_list(current=1, size=1, containerCode=str(hub_env_id))
+        env_list = (env_resp.get("data", {}) or {}).get("list", []) or []
+        if env_list:
+            container_name = env_list[0].get("containerName", "")
+        executor.logger.info(f"[update_env] 当前容器名称: {container_name}")
+    except Exception as e:
+        executor.logger.warning(f"[update_env] 获取容器名称失败，将使用域名构造: {e}")
+        container_name = build_container_name(domain)
 
     try:
         update_params = {
@@ -106,10 +117,10 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
 
         resp = client.update_env(**update_params)
         result["actions"]["remark"] = "ok"
-        executor.logger.info(f"[update_env] 容器名称+备注更新成功: remark={remark}")
+        executor.logger.info(f"[update_env] 备注更新成功: remark={remark}")
     except Exception as e:
         result["actions"]["remark"] = f"failed: {str(e)[:100]}"
-        executor.logger.warning(f"[update_env] 容器名称更新失败: {e}")
+        executor.logger.warning(f"[update_env] 备注更新失败: {e}")
 
     # ── 步骤 2：更新代理 ──
     proxy_config = build_proxy_config(executor, payload)

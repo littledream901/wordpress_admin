@@ -133,6 +133,8 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 6: replace_domain
             await self._update_step(job, "replace_domain")
+            # rebuild 后 Nginx config 可能异步 reload，稍等几秒
+            await asyncio.sleep(5)
             old_domain = (
                 wp_restorer.old_source_domain
                 or (await ProviderResolver.get_config('onepanel', 'old_source_domain', default='')).strip()
@@ -148,10 +150,31 @@ class ProvisionTaskRunner(TaskRunner):
                     ),
                     timeout=60,
                 )
-                await self._exec(
+                replace_result = await self._exec(
                     lambda: wp_restorer.fetch_domain_replace(site.domain, replace_token),
                     timeout=120,
                 )
+                # 校验替换结果：静默成功（0 行变更）意味着旧域名与数据库不匹配
+                if isinstance(replace_result, dict):
+                    changed_rows = replace_result.get('changed_rows', 0)
+                    changed_cells = replace_result.get('changed_cells', 0)
+                    failed_rows = replace_result.get('failed_rows', 0)
+                    failed_tables = replace_result.get('failed_tables', 0)
+                    error_tables = replace_result.get('error_tables', [])
+                    if changed_rows == 0 and changed_cells == 0:
+                        _log.warning(
+                            "站点 %s 域名替换未检测到任何变更（旧域名 %s → 新域名 %s），请确认 old_source_domain 配置正确",
+                            site.domain, old_domain, site.domain,
+                        )
+                    else:
+                        _log.info("站点 %s 域名替换完成: %s 行 %s 单元格", site.domain, changed_rows, changed_cells)
+                    if failed_rows > 0 or failed_tables > 0:
+                        _log.warning(
+                            "站点 %s 域名替换部分失败: failed_rows=%s, failed_tables=%s, error_tables=%s",
+                            site.domain, failed_rows, failed_tables, error_tables,
+                        )
+                else:
+                    _log.warning("站点 %s 域名替换返回异常格式: %s", site.domain, replace_result)
             finally:
                 if replace_token:
                     await self._exec(
