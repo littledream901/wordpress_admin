@@ -11,7 +11,7 @@
   5. rebuild_after_files - 重建容器
   6. replace_domain      - 域名替换
   7. patch_wp_config     - wp-config.php 配置
-  8. inject_woo_ctx      - 注入 WooCommerce + CTX PHP 脚本
+  8. inject_woo_ctx      - 注入 WooCommerce + CTX + mu-plugins 脚本
   9. rebuild_after_patch - 重建容器（脚本注入后 rebuild）
   10. fetch_woo_keys     - 获取 WooCommerce API Key
   11. health_check       - 健康检查
@@ -159,9 +159,9 @@ class ProvisionTaskRunner(TaskRunner):
                         timeout=30,
                     )
 
-            # Step 7+8: patch_wp_config + inject_woo_ctx（无依赖，可并行）
+            # Step 7+8: patch_wp_config + inject_woo_ctx + inject_mu_plugins（无依赖，可并行）
             await self._update_step(job, "patch_and_inject")
-            _, woo_token, ctx_refresh_url = await asyncio.gather(
+            _, woo_token, ctx_refresh_url, _ = await asyncio.gather(
                 self._exec(
                     lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol),
                     timeout=60,
@@ -171,6 +171,7 @@ class ProvisionTaskRunner(TaskRunner):
                     lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol),
                     timeout=60,
                 ),
+                self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=60),
             )
 
             # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）

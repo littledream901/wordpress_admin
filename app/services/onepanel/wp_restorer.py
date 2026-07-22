@@ -765,6 +765,78 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     def remove_ctx_script(self, service_name: str) -> None:
         self.file_manager.delete(f'{self._data_root(service_name)}/{self.ctx_script}', is_dir=False)
 
+    def inject_mu_plugins(self, service_name: str) -> None:
+        """注入 mu-plugins/wc-async-images.php —— 异步图片下载（Action Scheduler）"""
+        path = f'{self._data_root(service_name)}/wp-content/mu-plugins/wc-async-images.php'
+        php = r'''<?php
+/*
+Plugin Name: WooCommerce 异步图片下载
+Description: 拦截 REST API 创建商品请求，将 remote_images 交给 Action Scheduler 后台下载，规避 502
+Version: 1.0
+*/
+
+add_action('async_download_product_images', 'handle_async_product_image_download', 10, 2);
+
+function handle_async_product_image_download($product_id, $image_urls) {
+    if (empty($image_urls)) return;
+    if (!function_exists('media_sideload_image')) {
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+    }
+
+    $attachment_ids = [];
+    foreach ($image_urls as $url) {
+        $id = media_sideload_image($url, $product_id, null, 'id');
+        if (!is_wp_error($id)) {
+            $attachment_ids[] = $id;
+        }
+    }
+
+    if (!empty($attachment_ids)) {
+        $product = wc_get_product($product_id);
+        if ($product) {
+            $product->set_image_id($attachment_ids[0]);
+            if (count($attachment_ids) > 1) {
+                $product->set_gallery_image_ids(array_slice($attachment_ids, 1));
+            }
+            $product->save();
+        }
+    }
+}
+
+add_filter('woocommerce_rest_pre_insert_product_object', 'intercept_wc_rest_product_images', 10, 3);
+
+function intercept_wc_rest_product_images($product, $request, $creating) {
+    if (!$creating) {
+        return $product;
+    }
+
+    $body = $request->get_json_params();
+
+    if (!empty($body['remote_images']) && is_array($body['remote_images'])) {
+        $image_urls = $body['remote_images'];
+
+        add_action('woocommerce_rest_insert_product_object', function($saved_product) use ($image_urls) {
+            if (function_exists('as_schedule_single_action')) {
+                as_schedule_single_action(time(), 'async_download_product_images', array(
+                    'product_id' => $saved_product->get_id(),
+                    'image_urls' => $image_urls,
+                ));
+            }
+        }, 10, 1);
+    }
+
+    return $product;
+}
+'''
+        self.file_manager.save(path, php)
+        if not self.file_manager.exists(path):
+            raise WordPressOperationError(
+                "mu-plugins inject",
+                detail=f"wc-async-images.php 写入后磁盘验证失败：{path}",
+            )
+
     def fetch_feed_links(self, ctx_refresh_url: str) -> list:
         """通过 HTTP 调用 CTX 脚本获取所有 feed 链接列表。
 
