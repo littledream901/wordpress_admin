@@ -231,7 +231,7 @@ const statusTypeMap = { active: 'success', disabled: 'default', expired: 'warnin
 
 // ─── Provider CRUD (useCRUD) ───
 const $table = ref(null)
-const queryItems = reactive({ provider_type: '' })
+const queryItems = reactive({ provider_type: null })
 const typeOptions = ref([])
 
 const initForm = {

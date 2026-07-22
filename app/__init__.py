@@ -111,6 +111,13 @@ if _HAS_FASTAPI:
 
         asyncio.create_task(_cleanup_loop())
 
+        # 后台任务：GMC 定时巡检
+        async def _gmc_cron_loop():
+            from app.cron.gmc_check import run_gmc_cron_loop
+            await run_gmc_cron_loop()
+
+        asyncio.create_task(_gmc_cron_loop())
+
         total = time.perf_counter() - t0
         logger.info(f"[Startup] 启动完成 ({total:.1f}s)")
 

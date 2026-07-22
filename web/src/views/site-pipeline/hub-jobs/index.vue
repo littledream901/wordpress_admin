@@ -97,8 +97,8 @@ const crudRef = ref(null)
 
 // ─── 查询参数 ───
 const queryItems = reactive({
-  job_type: '',
-  status: '',
+  job_type: null,
+  status: null,
   domain: '',
 })
 
@@ -139,7 +139,6 @@ const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]
 function jobTypeLabel(v) { return jobTypeMap[v] || v }
 
 const statusOptions = [
-  { value: '', label: '全部状态' },
   { value: 'pending', label: '等待中' },
   { value: 'running', label: '执行中' },
   { value: 'success', label: '成功' },

@@ -97,6 +97,9 @@ _PROVIDER_DEFAULTS: List[_ProviderDef] = [
         ("proxy_province",            "CA", "代理省份", "string", False, False),
         ("ip_get_rule_type",          "1", "IP 获取规则类型", "int", False, False),
         ("business_group_name",       "Gmc申请", "HubStudio 业务分组名称（创建环境时匹配 tag）", "string", False, False),
+        ("gmc_check_cron",           "",   "GMC 定时巡检 cron 表达式，空=禁用（例: */30 * * * *）", "string", False, False),
+        ("gmc_check_cron_statuses",  '["__empty__","warning","suspended","pending","unknown","reviewing","failed","query_failed","Uncreated"]',
+         "GMC 巡检需查询的状态列表（JSON），__empty__=从未检测", "json", False, False),
     ]),
     # ── Shopify ──
     ("shopify", "Shopify采集默认配置", "默认 Shopify 采集配置", 100, [

@@ -113,7 +113,7 @@ const siteOptions = ref([])
 const allProviders = ref([])
 const ipOptions = ref([])
 const checkedSiteIds = ref([])
-const queryItems = reactive({ server_ip: '', keyword: '' })
+const queryItems = reactive({ server_ip: null, keyword: null })
 
 // ── CrudTable getData ──
 async function getBindingSites({ page, page_size, server_ip, keyword } = {}) {

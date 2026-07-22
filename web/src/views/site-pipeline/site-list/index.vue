@@ -15,14 +15,28 @@
       >
         <template #queryBar>
           <n-input v-model:value="queryItems.domain" placeholder="域名搜索" clearable style="width: 200px" @keyup.enter="$table?.handleSearch()" />
+          <n-select
+            v-model:value="queryItems.status"
+            :options="siteStatusOptions"
+            placeholder="站点状态"
+            clearable
+            style="width: 110px"
+          />
+          <n-select
+            v-model:value="queryItems.gmc_status"
+            :options="gmcStatusOptions"
+            placeholder="GMC 状态"
+            clearable
+            style="width: 130px"
+          />
           <n-tree-select
             v-model:value="queryItems.dept_id"
             :options="deptOption"
             key-field="id"
             label-field="name"
-            placeholder="部门筛选"
+            placeholder="部门"
             clearable
-            style="width: 160px"
+            style="width: 120px"
             default-expand-all
           />
           <n-select
@@ -30,10 +44,10 @@
             :options="userOption"
             label-field="label"
             value-field="value"
-            placeholder="归属人筛选"
+            placeholder="归属人"
             clearable
             filterable
-            style="width: 160px"
+            style="width: 120px"
           />
         </template>
         <template #queryBarActions>
@@ -361,7 +375,7 @@ const notification = useNotification()
 
 // ─── CrudTable ───
 const $table = ref(null)
-const queryItems = reactive({ domain: '', dept_id: null, assign_to: null })
+const queryItems = reactive({ domain: '', dept_id: null, assign_to: null, gmc_status: null, status: null })
 const reload = () => $table.value?.handleSearch()
 
 // ─── 详情弹窗 ───
@@ -484,6 +498,21 @@ const formData = reactive({ domain: '', server_ip: '', platform: 'wordpress', de
 const platformOptions = [
   { label: 'WordPress (1Panel 建站)', value: 'wordpress' },
   { label: 'Shopify (手动配置)', value: 'shopify' },
+]
+const gmcStatusOptions = [
+  { label: '正常', value: 'active' },
+  { label: '审核中', value: 'reviewing' },
+  { label: '有违规', value: 'warning' },
+  { label: '已暂停', value: 'suspended' },
+  { label: '未创建', value: 'Uncreated' },
+  { label: '未知', value: 'unknown' },
+  { label: '未检测', value: '__empty__' },
+]
+const siteStatusOptions = [
+  { label: '待处理', value: '待处理' },
+  { label: '已创建', value: '已创建' },
+  { label: '已存在', value: '已存在' },
+  { label: '建站失败', value: '建站失败' },
 ]
 const formRules = {
   domain: { required: true, message: '域名必填', trigger: 'blur' },

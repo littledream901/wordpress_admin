@@ -105,7 +105,7 @@ const reload = () => crudRef.value?.handleSearch()
 
 const queryItems = reactive({
   domain: '',
-  hub_status: '',
+  hub_status: null,
 })
 
 function onUpdateQueryItems(val) {
@@ -113,7 +113,6 @@ function onUpdateQueryItems(val) {
 }
 
 const hubStatusOptions = [
-  { label: '全部', value: '' },
   { label: '未创建', value: '未创建' },
   { label: '已创建', value: '已创建' },
   { label: '创建失败', value: '创建失败' },

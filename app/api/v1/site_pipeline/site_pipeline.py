@@ -39,11 +39,14 @@ async def list_sites(
     domain: str = Query('', description='域名搜索'),
     dept_id: int = Query(None, description='按部门筛选'),
     assign_to: int = Query(None, description='按归属用户筛选'),
+    gmc_status: str = Query('', description='GMC状态筛选'),
+    status: str = Query('', description='站点状态筛选'),
     current_user: User = Depends(AuthControl.is_authed),
 ):
     result = await site_pipeline_controller.list_sites_with_enrichment(
         page=page, page_size=page_size,
         domain=domain, dept_id=dept_id, assign_to=assign_to,
+        gmc_status=gmc_status, status=status,
         current_user=current_user,
     )
     return SuccessExtra(

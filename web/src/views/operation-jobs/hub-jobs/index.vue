@@ -116,8 +116,8 @@ const crudRef = ref(null)
 
 // ─── 查询参数 ───
 const queryItems = reactive({
-  job_type: '',
-  status: '',
+  job_type: null,
+  status: null,
   domain: '',
 })
 
@@ -170,7 +170,6 @@ async function loadAgentStatus() {
 
 // ─── 选项 ───
 const jobTypeOptions = [
-  { value: '', label: '全部' },
   { value: 'create_env', label: '创建环境' },
   { value: 'create_account', label: '创建账号' },
   { value: 'update_env', label: '更新环境' },
@@ -181,7 +180,6 @@ const jobTypeMap = Object.fromEntries(jobTypeOptions.map(o => [o.value, o.label]
 function jobTypeLabel(v) { return jobTypeMap[v] || v }
 
 const statusOptions = [
-  { value: '', label: '全部' },
   { value: 'pending', label: '待执行' },
   { value: 'running', label: '执行中' },
   { value: 'success', label: '成功' },

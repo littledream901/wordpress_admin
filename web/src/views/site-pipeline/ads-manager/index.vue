@@ -93,7 +93,7 @@ import api from '@/api/site-pipeline'
 defineOptions({ name: 'ADS管理' })
 
 const $table = ref(null)
-const queryItems = reactive({ ads_env_id: '', domain: '', status: '' })
+const queryItems = reactive({ ads_env_id: '', domain: '', status: null })
 const siteOptions = ref([])
 
 const statusOptions = [

@@ -1038,14 +1038,9 @@ async def init_essential():
     await recover_stale_jobs()
     steps.append(("僵尸任务清理", time.perf_counter() - t))
 
-    # 版本号持久化标记：同版本已完成初始化则跳过同步，避免 worker 重启导致权限丢失
+    # 版本号持久化标记：同版本已完成初始化则跳过种子同步，避免 worker 重启导致权限丢失
     if await _is_init_completed():
         logger.info("[Init] 当前版本 {} 已完成初始化，跳过种子同步", settings.VERSION)
-
-        # Provider 缓存仍需加载（每次启动都需要）
-        from app.utils.provider_resolver import _load_configs_to_cache
-        await _load_configs_to_cache()
-        steps.append(("Provider 缓存加载", 0))
     else:
         t = time.perf_counter()
         if await _try_acquire_init_lock("init_menus_roles", timeout_seconds=300):
@@ -1057,17 +1052,14 @@ async def init_essential():
                 await _release_init_lock("init_menus_roles")
         steps.append(("菜单/角色同步", time.perf_counter() - t))
 
-        t = time.perf_counter()
-        if await _try_acquire_init_lock("init_providers", timeout_seconds=300):
-            try:
-                await init_providers()
-            finally:
-                await _release_init_lock("init_providers")
-        from app.utils.provider_resolver import _load_configs_to_cache
-        await _load_configs_to_cache()
-        steps.append(("Provider 同步", time.perf_counter() - t))
-
         await _mark_init_completed()
+
+    # Provider 同步每次启动都执行（幂等，只补缺失不覆盖已有）
+    t = time.perf_counter()
+    await init_providers()
+    from app.utils.provider_resolver import _load_configs_to_cache
+    await _load_configs_to_cache()
+    steps.append(("Provider 同步", time.perf_counter() - t))
 
     total = time.perf_counter() - t0
     detail = " | ".join(f"{name}: {elapsed:.1f}s" for name, elapsed in steps)
