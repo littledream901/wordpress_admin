@@ -147,10 +147,13 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
                 elif isinstance(body, list):
                     args["_body"] = body
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                logger.warning(
-                    "审计日志解析请求体 JSON 失败: %s %s | err=%s",
-                    request.method, request.url.path, e,
-                )
+                # 只有非空请求体解析失败才告警（空 body 说明参数在 query string）
+                body_bytes = await request.body()
+                if body_bytes and body_bytes.strip():
+                    logger.warning(
+                        "审计日志解析请求体 JSON 失败: %s %s | err=%s",
+                        request.method, request.url.path, e,
+                    )
                 # 不 fallback 到 form：JSON 解析失败说明 body 不是 JSON，不应猜测为 form
             except Exception:
                 pass

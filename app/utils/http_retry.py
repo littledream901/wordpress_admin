@@ -65,14 +65,14 @@ def retry_request(
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
-                    # 429 限流：优先取 Retry-After 响应头，否则至少等 5 秒
                     delay = base_delay * (2 ** (attempt - 1))
                     if status == 429:
                         retry_after = result.headers.get("Retry-After", "")
                         if retry_after and retry_after.isdigit():
-                            delay = max(int(retry_after), 5)
+                            delay = int(retry_after)
                         else:
-                            delay = max(delay, 5)
+                            # 无 Retry-After 头时，指数退避 5s/10s/20s
+                            delay = 5 * (2 ** (attempt - 1))
                     logger.warning(
                         "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
                         context, attempt, status, delay,
@@ -121,14 +121,13 @@ async def retry_request_async(
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
-                    # 429 限流：优先取 Retry-After 响应头，否则至少等 5 秒
                     delay = base_delay * (2 ** (attempt - 1))
                     if status == 429:
                         retry_after = result.headers.get("Retry-After", "")
                         if retry_after and retry_after.isdigit():
-                            delay = max(int(retry_after), 5)
+                            delay = int(retry_after)
                         else:
-                            delay = max(delay, 5)
+                            delay = 5 * (2 ** (attempt - 1))
                     logger.warning(
                         "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
                         context, attempt, status, delay,
