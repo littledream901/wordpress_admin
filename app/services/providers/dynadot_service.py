@@ -95,9 +95,46 @@ class DynadotService:
             params[f"ns{i}"] = ns
         return self._call("set_ns", **params)
 
-    def set_ns_and_wait(self, domain: str, ns_list: List[str], wait_sec: int = 10) -> Dict[str, Any]:
-        """修改 NS 并等待（简单延迟）"""
+    def set_ns_and_wait(self, domain: str, ns_list: List[str], wait_sec: int = 60, interval: int = 5) -> Dict[str, Any]:
+        """修改 NS 并通过 API 轮询验证生效。
+
+        Args:
+            domain: 域名
+            ns_list: 目标 NS 服务器列表
+            wait_sec: 最长等待秒数（默认 60s）
+            interval: 轮询间隔（默认 5s）
+
+        Returns:
+            同 set_nameserver；若轮询超时，result 中附带 'ns_verified': False
+        """
         result = self.set_nameserver(domain, ns_list)
-        if result.get("success"):
-            time.sleep(wait_sec)
+        if not result.get("success"):
+            return result
+
+        # API 验证 NS 已生效（轮询，间隔 interval 秒，最多 wait_sec 秒）
+        start = time.time()
+        target_set = set(n.strip().rstrip('.') for n in ns_list)
+        while time.time() - start < wait_sec:
+            search_result = self._call("search", domain=domain)
+            if search_result.get("success") and isinstance(search_result.get("raw"), str):
+                # 尝试从 raw JSON 中提取当前 NS
+                try:
+                    raw_data = json.loads(search_result["raw"])
+                    for _key, body in raw_data.items():
+                        if isinstance(body, dict):
+                            current_ns = body.get("NameServers") or body.get("NameServer") or ""
+                            if current_ns:
+                                current_set = set(str(n).strip().rstrip('.') for n in (
+                                    current_ns if isinstance(current_ns, list) else current_ns.split(",")
+                                ))
+                                if current_set == target_set:
+                                    result["ns_verified"] = True
+                                    logger.info("Dynadot NS 已确认生效: domain=%s", domain)
+                                    return result
+                except Exception:
+                    pass
+            time.sleep(interval)
+
+        logger.warning("Dynadot NS 验证超时（%ss），继续执行: domain=%s", wait_sec, domain)
+        result["ns_verified"] = False
         return result
