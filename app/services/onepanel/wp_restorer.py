@@ -135,6 +135,16 @@ class OnePanelWordPressRestorer:
         data_dir = f'{target}/data'
         wp_config_path = f'{data_dir}/wp-config.php'
 
+        # 容器刚 Running 时文件系统可能还没就绪，轮询等待 wp-config.php 可读
+        start = time.time()
+        while not self.file_manager.exists(wp_config_path):
+            if time.time() - start > 30:
+                raise WordPressOperationError(
+                    "restore files", detail=f"wp-config.php 未就绪（已等30s）: {wp_config_path}"
+                )
+            _log.info("等待 wp-config.php 就绪: %s", wp_config_path)
+            time.sleep(3)
+
         original_wp_config = self.file_manager.read(wp_config_path)
 
         full_backup = self._backup_full_path()
