@@ -113,6 +113,7 @@ _PROVIDER_DEFAULTS: List[_ProviderDef] = [
         ("error_cooldown_seconds",     "30", "错误冷却秒数", "int", False, False),
         ("max_error_cooldown_seconds", "120", "最大错误冷却秒数", "int", False, False),
         ("import_product_count",       "10", "每次导入产品数量", "int", False, False),
+        ("batch_size",                 "10", "批量上传每批产品数", "int", False, False),
         ("enable_images",              "true", "是否上传产品图片到 Woo", "bool", False, False),
         ("max_images_per_product",     "5", "每个产品最大图片数", "int", False, False),
         ("upload_variants",            "false", "是否上传变体产品", "bool", False, False),
