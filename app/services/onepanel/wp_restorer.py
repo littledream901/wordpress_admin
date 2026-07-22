@@ -767,7 +767,12 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
     def inject_mu_plugins(self, service_name: str) -> None:
         """注入 mu-plugins/wc-async-images.php —— 异步图片下载（Action Scheduler）"""
-        path = f'{self._data_root(service_name)}/wp-content/mu-plugins/wc-async-images.php'
+        mu_dir = f'{self._data_root(service_name)}/wp-content/mu-plugins'
+        # 先确保 mu-plugins 目录存在（1Panel /files 不会自动创建中间目录）
+        ok, msg = self.file_manager.api.post('/files', {'path': mu_dir, 'content': '', 'isDir': True, 'mode': 493})
+        if not ok:
+            _log.warning("创建 mu-plugins 目录失败（可能已存在）：%s | %s", mu_dir, msg)
+        path = f'{mu_dir}/wc-async-images.php'
         php = r'''<?php
 /*
 Plugin Name: WooCommerce 异步图片下载
