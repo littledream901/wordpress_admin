@@ -892,21 +892,20 @@ class SitePipelineController:
         await job.save()
 
         async def _bg_dns():
-            sem = asyncio.Semaphore(3)
+            import asyncio
             results = []
-            async def _run_one(site):
-                async with sem:
-                    try:
-                        loop = asyncio.get_event_loop()
-                        r = await loop.run_in_executor(None, _run_dns_sync, site.domain, site.platform, site.server_ip)
-                        # 判断 DNS 实际结果（r 中有 ok 字段的才是失败摘要响应）
-                        dns_ok = r.get("ok") is not False
-                        _apply_dns_result_to_site(site, r)
-                        await site.save()
-                        results.append({"site_id": site.id, "domain": site.domain, "ok": dns_ok, "result": r})
-                    except Exception as e:
-                        results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": str(e)})
-            await asyncio.gather(*[_run_one(s) for s in valid_sites])
+            for site in valid_sites:
+                try:
+                    loop = asyncio.get_event_loop()
+                    r = await loop.run_in_executor(None, _run_dns_sync, site.domain, site.platform, site.server_ip)
+                    dns_ok = r.get("ok") is not False
+                    _apply_dns_result_to_site(site, r)
+                    await site.save()
+                    results.append({"site_id": site.id, "domain": site.domain, "ok": dns_ok, "result": r})
+                except Exception as e:
+                    results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": str(e)})
+                # 间隔 2 秒，避免 API 限流 / 并发冲突
+                await asyncio.sleep(2)
             ok_count = sum(1 for r in results if r["ok"])
             fail_count = sum(1 for r in results if not r["ok"])
             job.status = "success" if fail_count == 0 else "failed"
