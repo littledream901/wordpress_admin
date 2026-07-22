@@ -115,19 +115,10 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 2: apply_ssl（Cloudflare 代理必须先申请 SSL，否则域名替换时 Cloudflare 无法连接源站）
             await self._update_step(job, "apply_ssl")
-            protocol = 'http'
-            if not onepanel_site_id:
-                _log.warning("跳过 SSL 申请：site_id 为空")
-            else:
-                try:
-                    protocol = await self._exec(
-                        lambda: ssl_manager.apply_and_bind(onepanel_site_id, site.domain),
-                        timeout=120,
-                    )
-                except Exception as exc:
-                    _log.warning("SSL 申请异常：%s", exc)
-            if protocol not in ('http', 'https'):
-                protocol = 'http'
+            protocol = await self._exec(
+                lambda: ssl_manager.apply_and_bind(onepanel_site_id, site.domain),
+                timeout=120,
+            )
 
             # Step 3+4: restore_db + restore_files（无依赖，可并行）
             await self._update_step(job, "restore_db_files")
@@ -188,19 +179,11 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
             await self._update_step(job, "fetch_woo_keys")
-            woo_ck, woo_cs = '', ''
-            try:
-                woo_ck, woo_cs = await self._exec(
-                    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol),
-                    timeout=45,
-                )
-            except Exception as exc:
-                _log.warning("WooCommerce Key 获取失败（非阻断）：%s", exc)
-            finally:
-                try:
-                    await self._exec(lambda: wp_restorer.remove_woo_script(service_name), timeout=15)
-                except Exception:
-                    pass
+            woo_ck, woo_cs = await self._exec(
+                lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol),
+                timeout=45,
+            )
+            await self._exec(lambda: wp_restorer.remove_woo_script(service_name), timeout=15)
 
             # Step 11: health_check
             await self._update_step(job, "health_check")
