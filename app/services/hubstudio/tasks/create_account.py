@@ -282,7 +282,7 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         if val.get("ok"):
             resp = val.get("resp", {})
             data = resp.get("data", {}) if isinstance(resp, dict) else {}
-            aid = data.get("id") or data.get("accountId") or data.get("account_id")
+            aid = data.get("id") or data.get("accountId") or data.get("account_id") if isinstance(data, dict) else None
             if aid:
                 account_id = str(aid)
                 executor.logger.info(f"[create_account] 提取到 account_id={account_id} (来自 {_key})")
