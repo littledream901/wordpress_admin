@@ -220,6 +220,14 @@ async def import_products(site_id: int):
     return Fail(code=result.get('code', 400), msg=result.get('error'))
 
 
+@router.post('/site/{site_id}/inject-mu-plugins', summary='注入 mu-plugins（异步图片下载钩子）')
+async def inject_mu_plugins(site_id: int):
+    result = await site_pipeline_controller.inject_mu_plugins(site_id)
+    if result['ok']:
+        return Success(msg=result['msg'])
+    return Fail(code=result.get('code', 500), msg=result.get('error'))
+
+
 @router.post('/site/{site_id}/refresh-woo-count', summary='同步站点远端产品数量')
 async def refresh_product_count(site_id: int):
     result = await site_pipeline_controller.refresh_product_count(site_id)

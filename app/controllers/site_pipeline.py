@@ -333,6 +333,13 @@ hubstudio_job_controller = HubStudioJobController()
 #  SitePipeline 业务逻辑控制器
 # ══════════════════════════════════════════════════════════════════════════
 
+def _inject_mu_plugins_sync(service_name: str) -> None:
+    """同步注入 mu-plugins（在线程池中执行，避免阻塞事件循环）"""
+    api = OnePanelAPI()
+    files = OnePanelFileManager(api)
+    wp_restorer = OnePanelWordPressRestorer(api, files)
+    wp_restorer.inject_mu_plugins(service_name)
+
 class SitePipelineController:
     """站点流水线业务逻辑控制器：站点 CRUD 增强 / 批量操作 / 建站 / DNS 等"""
 
@@ -789,6 +796,21 @@ class SitePipelineController:
         job = await self._create_job(site_id, site.domain, "provision", total_steps=12)
         asyncio.create_task(self._run_provision_bg(job, site))
         return {"ok": True, "data": {"job_id": job.id, "step": "create_site", "total_steps": 12}}
+
+    async def inject_mu_plugins(self, site_id: int) -> dict:
+        """仅注入 mu-plugins/wc-async-images.php 到已有站点（不重新建站）"""
+        site = await site_controller.get(id=site_id)
+        if not site or not site.onepanel_service_name:
+            return {"ok": False, "error": "站点未建站或无 service_name", "code": 400}
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: _inject_mu_plugins_sync(site.onepanel_service_name),
+            )
+            return {"ok": True, "msg": f"mu-plugins 已注入 {site.domain}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "code": 500}
 
     async def _run_provision_bg(self, job: OperationJob, site):
         async with _get_provision_semaphore():
