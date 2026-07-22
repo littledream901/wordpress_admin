@@ -97,12 +97,16 @@ class TaskRunner:
         跨线程共享 ORM 模型实例会污染事件循环连接状态，导致数据丢失。
         """
         loop = asyncio.get_event_loop()
+        fn_name = getattr(fn, '__name__', str(fn))
         try:
             return asyncio.wait_for(
                 loop.run_in_executor(None, fn), timeout=timeout
             )
+        except asyncio.TimeoutError:
+            raise asyncio.TimeoutError(
+                f"[runner] 步骤超时（{timeout}s）: {fn_name}"
+            )
         except Exception:
-            fn_name = getattr(fn, '__name__', str(fn))
             loguru_logger.error(
                 "[runner] _exec 线程池异常: fn=%s", fn_name, exc_info=True,
             )
