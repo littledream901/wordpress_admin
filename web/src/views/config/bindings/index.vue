@@ -6,7 +6,6 @@
       :columns="tableColumns"
       :get-data="getBindingSites"
       :query-items="queryItems"
-      :show-size-picker="false"
       row-key="id"
       @on-checked="checkedSiteIds = $event"
     >
