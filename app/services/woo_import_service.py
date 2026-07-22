@@ -764,10 +764,12 @@ class WooImportService:
             rows = assigned_rows
 
         if not rows:
-            # 分配池为空 → 从 ready 产品中分配（排除已导入过本站点的，用其他产品补足数量）
+            # 分配池为空 → 从 ready 产品中分配
+            # 排除 imported_status="assigned"（已分配给其他站点），但保留 "success"/"failed"/"" 
+            # 因为同一产品可导入到多个不同站点
             ready = await ShopifyProduct.filter(
                 status="ready",
-                imported_status="",
+                imported_status__not="assigned",
             ).all()
             # 过滤已成功导入过本站点的产品
             available = [r for r in ready if site.id not in self._get_imported_sites(r)]
