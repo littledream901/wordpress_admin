@@ -24,6 +24,10 @@ class OnePanelFileManager:
             return
         msg_text = str(msg)
         if '不存在' in msg_text or 'not exist' in msg_text.lower() or 'no such' in msg_text.lower():
+            # 确保父目录存在（1Panel /files 创建文件时不会自动创建中间目录）
+            parent = os.path.dirname(path.rstrip('/'))
+            if parent and parent != '/' and not self.exists(parent):
+                self.api.post('/files', {'path': parent, 'isDir': True, 'mode': 493})
             ok_create, create_msg = self.api.post('/files', {'path': path, 'content': '', 'isDir': False, 'mode': 493})
             if ok_create:
                 ok_save_again, save_again_msg = self.api.post('/files/save', {'path': path, 'content': content})

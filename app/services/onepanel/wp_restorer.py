@@ -768,11 +768,27 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     def inject_mu_plugins(self, service_name: str) -> None:
         """注入 mu-plugins/wc-async-images.php —— 异步图片下载（Action Scheduler）"""
         mu_dir = f'{self._data_root(service_name)}/wp-content/mu-plugins'
-        # 先确保 mu-plugins 目录存在（1Panel /files 不会自动创建中间目录）
-        ok, msg = self.file_manager.api.post('/files', {'path': mu_dir, 'content': '', 'isDir': True, 'mode': 493})
-        if not ok:
-            _log.warning("创建 mu-plugins 目录失败（可能已存在）：%s | %s", mu_dir, msg)
         path = f'{mu_dir}/wc-async-images.php'
+
+        # 确保 mu-plugins 目录存在
+        if not self.file_manager.exists(mu_dir):
+            ok, msg = self.file_manager.api.post('/files', {'path': mu_dir, 'isDir': True, 'mode': 493})
+            if not ok:
+                msg_text = str(msg).lower()
+                # "already exists" 类错误可以容忍（并发建站等场景）
+                if 'exist' in msg_text or '已存在' in msg_text:
+                    _log.info("mu-plugins 目录可能已存在：%s | %s", mu_dir, msg)
+                else:
+                    raise WordPressOperationError(
+                        "mu-plugins inject",
+                        detail=f"无法创建 mu-plugins 目录：{mu_dir} → {msg}",
+                    )
+            # 二次确认目录确实存在
+            if not self.file_manager.exists(mu_dir):
+                raise WordPressOperationError(
+                    "mu-plugins inject",
+                    detail=f"mu-plugins 目录创建后仍不存在：{mu_dir}",
+                )
         php = r'''<?php
 /*
 Plugin Name: WooCommerce 异步图片下载
