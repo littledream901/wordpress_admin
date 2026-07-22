@@ -125,7 +125,7 @@ const columns = [
   { title: '域名', key: 'domain', width: 160, ellipsis: { tooltip: true } },
   { title: '操作', key: 'action_type', width: 120, render: row => actionTypeLabel[row.action_type] || row.action_type },
   { title: '状态', key: 'status', width: 70, render(row) { return h(NTag, { type: statusTag(row.status), size: 'small' }, () => row.status) } },
-  { title: '步骤', key: 'step', width: 60, render(row) { return (row.step || '0') + '/' + (row.total_steps || '1') } },
+  { title: '步骤', key: 'step', width: 140, ellipsis: { tooltip: true }, render(row) { return (row.step || '0') + '/' + (row.total_steps || '1') } },
   { title: '批次', key: 'batch_id', width: 100, ellipsis: { tooltip: true } },
   { title: '节点', key: 'worker_name', width: 80 },
   { title: '时间', key: 'created_at', width: 140 },
