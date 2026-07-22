@@ -962,29 +962,42 @@ class SitePipelineController:
         return {"ok": True, "data": {"job_id": job.id, "domain": site.domain, "status": "running", "total": len(rows)}}
 
     async def batch_import_products(self, site_ids: List[int]) -> dict:
+        """批量触发产品导入。
+
+        为避免大量站点在主线程串行处理导致 HTTP 超时，
+        实际建 Job 逻辑放入后台任务，接口秒返回 batch_id。
+        """
         batch_id = f"import-{int(time.time())}"
+        asyncio.create_task(self._batch_import_bg(site_ids, batch_id))
+        return {"ok": True, "data": {
+            "batch_id": batch_id, "total": len(site_ids),
+            "msg": f"批量导入已触发（{len(site_ids)} 个站点），请在任务中心查看进度",
+        }}
+
+    async def _batch_import_bg(self, site_ids: List[int], batch_id: str):
+        """后台逐站创建导入 Job"""
         sites = []
-        results = []
         for site_id in site_ids:
             site = await site_controller.get(id=site_id)
             if site:
                 sites.append(site)
             else:
-                results.append({"site_id": site_id, "ok": False, "error": "site not found"})
+                _log.warning("[batch_import] 站点不存在: id=%s", site_id)
         if not sites:
-            return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": 0, "success": 0, "fail": len(site_ids)}}
+            return
+
         configured_count = int(await ProviderResolver.get_config("woo", "import_product_count", default="10"))
         for site in sites:
-            importer = get_importer(site.platform)
-            rows = await woo_import_service.select_products_for_site(site, import_count=configured_count)
-            if not rows:
-                results.append({"site_id": site.id, "domain": site.domain, "ok": False, "error": "没有可用的 ready 产品"})
-                continue
-            job = await self._create_job(site.id, site.domain, "woo_import", batch_id=batch_id, total_steps=len(rows))
-            asyncio.create_task(self._run_import_bg(job, site, importer, pre_selected_rows=rows))
-            results.append({"site_id": site.id, "domain": site.domain, "ok": True, "job_id": job.id, "status": "running", "product_count": len(rows)})
-        return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": len(results),
-                "success": sum(1 for r in results if r["ok"]), "fail": sum(1 for r in results if not r["ok"])}}
+            try:
+                importer = get_importer(site.platform)
+                rows = await woo_import_service.select_products_for_site(site, import_count=configured_count)
+                if not rows:
+                    _log.info("[batch_import] 无可用产品: domain=%s", site.domain)
+                    continue
+                job = await self._create_job(site.id, site.domain, "woo_import", batch_id=batch_id, total_steps=len(rows))
+                asyncio.create_task(self._run_import_bg(job, site, importer, pre_selected_rows=rows))
+            except Exception:
+                _log.exception("[batch_import] 创建导入任务失败: domain=%s", site.domain)
 
     async def _run_import_bg(self, job: OperationJob, site, importer, pre_selected_rows=None):
         async with _get_import_semaphore():
