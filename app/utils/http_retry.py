@@ -50,6 +50,7 @@ def retry_request(
     context: 日志标识。
     """
     last_err: Exception | None = None
+    last_status: int = 0
     for attempt in range(1, max_retries + 1):
         try:
             result = fn()
@@ -60,11 +61,12 @@ def retry_request(
                     return result
                 if status in _DEGRADE_STATUSES:
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d（不可重试），直接降级",
+                        "[http_retry] {} 第 {} 次请求返回 {}（不可重试），直接降级",
                         context, attempt, status,
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
+                    last_status = status
                     delay = base_delay * (2 ** (attempt - 1))
                     if status == 429:
                         retry_after = result.headers.get("Retry-After", "")
@@ -74,7 +76,7 @@ def retry_request(
                             # 无 Retry-After 头时，指数退避 5s/10s/20s
                             delay = 5 * (2 ** (attempt - 1))
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
+                        "[http_retry] {} 第 {} 次请求返回 {}，准备重试（等待 {:.0f} 秒）",
                         context, attempt, status, delay,
                     )
                     if attempt < max_retries:
@@ -90,12 +92,13 @@ def retry_request(
                 raise
             last_err = exc
             logger.warning(
-                "[http_retry] %s 第 %d/%d 次请求异常：%s",
+                "[http_retry] {} 第 {}/{} 次请求异常：{}",
                 context, attempt, max_retries, exc,
             )
             if attempt < max_retries:
                 time.sleep(base_delay * (2 ** (attempt - 1)))
-    raise last_err or RuntimeError(f"[http_retry] {context} 重试耗尽")
+    detail = f"状态码={last_status}" if last_status else f"异常={last_err}"
+    raise RuntimeError(f"[http_retry] {context} 重试耗尽（{detail}）")
 
 
 async def retry_request_async(
@@ -106,6 +109,7 @@ async def retry_request_async(
 ) -> Any:
     """异步版 retry_request。"""
     last_err: Exception | None = None
+    last_status: int = 0
     for attempt in range(1, max_retries + 1):
         try:
             coro = fn()
@@ -116,11 +120,12 @@ async def retry_request_async(
                     return result
                 if status in _DEGRADE_STATUSES:
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d（不可重试），直接降级",
+                        "[http_retry] {} 第 {} 次请求返回 {}（不可重试），直接降级",
                         context, attempt, status,
                     )
                     raise RuntimeError(f"HTTP {status}: non-retryable")
                 if status in _RETRYABLE_STATUSES:
+                    last_status = status
                     delay = base_delay * (2 ** (attempt - 1))
                     if status == 429:
                         retry_after = result.headers.get("Retry-After", "")
@@ -129,7 +134,7 @@ async def retry_request_async(
                         else:
                             delay = 5 * (2 ** (attempt - 1))
                     logger.warning(
-                        "[http_retry] %s 第 %d 次请求返回 %d，准备重试（等待 %.0f 秒）",
+                        "[http_retry] {} 第 {} 次请求返回 {}，准备重试（等待 {:.0f} 秒）",
                         context, attempt, status, delay,
                     )
                     if attempt < max_retries:
@@ -144,9 +149,10 @@ async def retry_request_async(
                 raise
             last_err = exc
             logger.warning(
-                "[http_retry] %s 第 %d/%d 次请求异常：%s",
+                "[http_retry] {} 第 {}/{} 次请求异常：{}",
                 context, attempt, max_retries, exc,
             )
             if attempt < max_retries:
                 await asyncio.sleep(base_delay * (2 ** (attempt - 1)))
-    raise last_err or RuntimeError(f"[http_retry] {context} 重试耗尽")
+    detail = f"状态码={last_status}" if last_status else f"异常={last_err}"
+    raise RuntimeError(f"[http_retry] {context} 重试耗尽（{detail}）")
