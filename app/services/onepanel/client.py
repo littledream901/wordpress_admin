@@ -124,11 +124,13 @@ class OnePanelAPI:
                 if data.get('code') == 200:
                     _log.debug("1Panel %s %s success", method, endpoint)
                     return True, data.get('data')
-                # 特定端点的「不存在」属于预期分支
-                msg_text = str(data.get('message') or '').lower()
+                # 特定端点的预期分支（不可视为错误）
+                msg_text_raw = str(data.get('message') or '')
+                msg_text = msg_text_raw.lower()
                 expected_branch = (
                     (endpoint == '/files/save' and ('目标路径不存在' in msg_text or 'not exist' in msg_text or 'no such' in msg_text))
                     or (endpoint == '/files/del' and ('no such file' in msg_text or 'not exist' in msg_text or '不存在' in msg_text))
+                    or (endpoint == '/websites/ssl/obtain' and ('任务执行中' in msg_text_raw or '重复执行' in msg_text_raw))
                 )
                 if expected_branch:
                     _log.debug("1Panel %s %s expected branch response=%s", method, endpoint, safe_log_data(data, 800))
