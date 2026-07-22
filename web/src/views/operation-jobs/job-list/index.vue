@@ -122,8 +122,8 @@ function statusTag(s) { return statusTagMap[s] || 'default' }
 const columns = [
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
   { title: '资源', key: 'resource_type', width: 80, render(row) { return row.resource_type + ' #' + row.resource_id } },
-  { title: '域名', key: 'domain', width: 160, ellipsis: { tooltip: true } },
-  { title: '操作', key: 'action_type', width: 120, render: row => actionTypeLabel[row.action_type] || row.action_type },
+  { title: '域名', key: 'domain', width: 140, ellipsis: { tooltip: true } },
+  { title: '操作', key: 'action_type', width: 100, render: row => actionTypeLabel[row.action_type] || row.action_type },
   { title: '状态', key: 'status', width: 70, render(row) { return h(NTag, { type: statusTag(row.status), size: 'small' }, () => row.status) } },
   { title: '步骤', key: 'step', width: 140, ellipsis: { tooltip: true }, render(row) { return (row.step || '0') + '/' + (row.total_steps || '1') } },
   { title: '批次', key: 'batch_id', width: 100, ellipsis: { tooltip: true } },
