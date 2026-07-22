@@ -278,7 +278,8 @@ class WooCommerceSyncer:
                  upload_variants: bool = False, limiter: Optional[WooRequestLimiter] = None,
                  enable_images: bool = True, max_images_per_product: int = 5,
                  check_existing_before_create: bool = True,
-                 use_isolated_limiter: bool = True):
+                 use_isolated_limiter: bool = True,
+                 wp_async_images: bool = False):
         self.wc_base_url = wc_url.rstrip("/")
         self.wc_api_url = f"{self.wc_base_url}/wp-json/wc/v3/products"
         self.wc_auth = BasicAuth(consumer_key, consumer_secret)
@@ -286,6 +287,7 @@ class WooCommerceSyncer:
         self.enable_images = enable_images
         self.max_images_per_product = max_images_per_product
         self.check_existing_before_create = check_existing_before_create
+        self.wp_async_images = wp_async_images
         self.brand = extract_brand_from_domain(self.wc_base_url)
         self.brand_id: Optional[int] = None
         # 每个站点优先使用独立限流器，避免单站点故障拖累全局导入
@@ -345,6 +347,7 @@ class WooCommerceSyncer:
         self.get_or_create_brand_id()
 
         wc_images = []
+        remote_images = []  # WP 端异步下载的原始 URL 列表
         if self.enable_images:
             for img in images_raw:
                 src = img.get("src")
@@ -359,6 +362,13 @@ class WooCommerceSyncer:
                     len(wc_images), self.max_images_per_product, title,
                 )
                 wc_images = wc_images[:self.max_images_per_product]
+            if self.wp_async_images:
+                remote_images = [img["src"] for img in wc_images]
+                logger.info(
+                    "WP 异步图片模式：%d 张图片将推迟到服务端下载，商品:%s",
+                    len(remote_images), title,
+                )
+                wc_images = []
 
         if self.upload_variants:
             wc_attributes = []
@@ -398,6 +408,8 @@ class WooCommerceSyncer:
                 "status": "publish",
                 "manage_stock": False,
             }
+            if remote_images:
+                payload["remote_images"] = remote_images
             payload = apply_brand_to_payload(payload, self.brand, self.brand_id)
             return payload
 
@@ -419,6 +431,8 @@ class WooCommerceSyncer:
             # "tags": [{"name": tag} for tag in tags if tag],
             "status": "publish",
         }
+        if remote_images:
+            payload["remote_images"] = remote_images
         payload = apply_brand_to_payload(payload, self.brand, self.brand_id)
         return payload
 
@@ -815,6 +829,7 @@ class WooImportService:
         max_images = int(await ProviderResolver.get_config("woo", "max_images_per_product", default="5"))
         upload_variants = (await ProviderResolver.get_config("woo", "upload_variants", default="false")).lower() == "true"
         check_existing = (await ProviderResolver.get_config("woo", "check_existing_before_create", default="true")).lower() == "true"
+        wp_async_images = (await ProviderResolver.get_config("woo", "wp_async_images", default="false")).lower() == "true"
 
         syncer = WooCommerceSyncer(
             wc_url=site_cfg["wc_url"],
@@ -824,6 +839,7 @@ class WooImportService:
             enable_images=enable_images,
             max_images_per_product=max_images,
             check_existing_before_create=check_existing,
+            wp_async_images=wp_async_images,
         )
 
         loop = asyncio.get_event_loop()

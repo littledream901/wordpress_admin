@@ -118,5 +118,6 @@ _PROVIDER_DEFAULTS: List[_ProviderDef] = [
         ("max_images_per_product",     "5", "每个产品最大图片数", "int", False, False),
         ("upload_variants",            "false", "是否上传变体产品", "bool", False, False),
         ("check_existing_before_create","true", "创建前按 SKU 查重", "bool", False, False),
+        ("wp_async_images",           "false", "异步图片下载（需配合WP端PHP钩子）", "bool", False, False),
     ]),
 ]
