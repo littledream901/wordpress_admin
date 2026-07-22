@@ -295,6 +295,7 @@ class PHPClient:
             https_first: 是否优先 HTTPS（默认 True）
         """
         protocols = ["https", "http"] if https_first else ["http", "https"]
+        fallback_errors: list[str] = []
 
         for proto in protocols:
             url = f"{proto}://{domain}/{path.lstrip('/')}"
@@ -316,10 +317,11 @@ class PHPClient:
                 self.verify_ssl = saved_verify
                 raise
 
-            except PHPClientError:
+            except PHPClientError as e:
                 self.verify_ssl = saved_verify
+                fallback_errors.append(f"{proto}: {e}")
                 _log.debug("[php_client] %s 失败，尝试下一个协议", proto)
 
         raise PHPClientNetworkError(
-            f"所有协议均失败: {_mask_token(path)}", step=step,
+            f"所有协议均失败: {_mask_token(path)} | {'; '.join(fallback_errors)}", step=step,
         )
