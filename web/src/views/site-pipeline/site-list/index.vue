@@ -12,6 +12,7 @@
         v-model:query-items="queryItems"
         :columns="columns"
         :get-data="api.getSiteList"
+        :page-size="100"
       >
         <template #queryBar>
           <n-input v-model:value="queryItems.domain" placeholder="域名搜索" clearable style="width: 200px" @keyup.enter="$table?.handleSearch()" />
