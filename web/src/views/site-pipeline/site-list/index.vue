@@ -23,6 +23,13 @@
             style="width: 110px"
           />
           <n-select
+            v-model:value="queryItems.hub_status"
+            :options="hubStatusOptions"
+            placeholder="Hub 状态"
+            clearable
+            style="width: 110px"
+          />
+          <n-select
             v-model:value="queryItems.gmc_status"
             :options="gmcStatusOptions"
             placeholder="GMC 状态"
@@ -375,7 +382,7 @@ const notification = useNotification()
 
 // ─── CrudTable ───
 const $table = ref(null)
-const queryItems = reactive({ domain: '', dept_id: null, assign_to: null, gmc_status: null, status: null })
+const queryItems = reactive({ domain: '', dept_id: null, assign_to: null, gmc_status: null, status: null, hub_status: null })
 const reload = () => $table.value?.handleSearch()
 
 // ─── 详情弹窗 ───
@@ -513,6 +520,10 @@ const siteStatusOptions = [
   { label: '已创建', value: '已创建' },
   { label: '已存在', value: '已存在' },
   { label: '建站失败', value: '建站失败' },
+]
+const hubStatusOptions = [
+  { label: '有状态', value: 'has_status' },
+  { label: '无状态', value: 'no_status' },
 ]
 const formRules = {
   domain: { required: true, message: '域名必填', trigger: 'blur' },
@@ -797,6 +808,23 @@ async function executeBatchAction() {
       }
     } else if (action === 'woo-import') {
       res = await api.batchImportProducts(ids)
+      const importData = res?.data ?? {}
+      notification.create({
+        type: 'info',
+        title: '批量导入产品已触发',
+        content: () => h('div', { style: 'line-height: 1.8' }, [
+          `${importData.total || ids.length} 个站点已提交导入任务`,
+          h('br'),
+          h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
+        ]),
+        duration: 15000,
+        closable: true,
+      })
+      showBatchConfirm.value = false
+      checkedRowKeys.value = []
+      currentBatchAction.value = ''
+      reload()
+      return  // 异步后台任务，不展示结果表
     } else if (action === 'redirect') {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
     } else if (action === 'assign-gmail') {

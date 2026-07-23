@@ -41,12 +41,13 @@ async def list_sites(
     assign_to: int = Query(None, description='按归属用户筛选'),
     gmc_status: str = Query('', description='GMC状态筛选'),
     status: str = Query('', description='站点状态筛选'),
+    hub_status: str = Query('', description='Hub状态筛选 (has_status / no_status)'),
     current_user: User = Depends(AuthControl.is_authed),
 ):
     result = await site_pipeline_controller.list_sites_with_enrichment(
         page=page, page_size=page_size,
         domain=domain, dept_id=dept_id, assign_to=assign_to,
-        gmc_status=gmc_status, status=status,
+        gmc_status=gmc_status, status=status, hub_status=hub_status,
         current_user=current_user,
     )
     return SuccessExtra(

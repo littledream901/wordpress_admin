@@ -362,7 +362,7 @@ class SitePipelineController:
     async def list_sites_with_enrichment(
         self, page: int, page_size: int,
         domain: str = '', dept_id: int = None, assign_to: int = None,
-        gmc_status: str = '', status: str = '',
+        gmc_status: str = '', status: str = '', hub_status: str = '',
         current_user=None,
     ) -> dict:
         """查询站点列表并附加部门/用户/Gmail 信息"""
@@ -389,6 +389,10 @@ class SitePipelineController:
                 q &= Q(gmc_status=gmc_status)
         if status:
             q &= Q(status=status)
+        if hub_status == 'has_status':
+            q &= ~Q(hub_status='')
+        elif hub_status == 'no_status':
+            q &= Q(hub_status='')
         t1 = time.perf_counter()
         total, objs = await site_controller.list(page=page, page_size=page_size, search=q, order=['-id'])
         t2 = time.perf_counter()
