@@ -21,9 +21,13 @@ import logging
 import threading
 from typing import Dict, Union
 
-from app.models.config_provider import ConfigProvider, ProviderConfigItem
-
 _log = logging.getLogger(__name__)
+
+
+def _get_models():
+    """延迟导入 ORM 模型，避免 PyInstaller 打包时触发 tortoise 依赖链"""
+    from app.models.config_provider import ConfigProvider, ProviderConfigItem
+    return ConfigProvider, ProviderConfigItem
 
 # 线程安全的配置缓存：{(provider_type, config_key): config_value}
 _config_cache: Dict[str, str] = {}
@@ -69,6 +73,7 @@ async def _load_configs_to_cache():
     """将所有 provider config 加载到线程安全缓存（必须在主事件循环调用）"""
     import time
     t0 = time.perf_counter()
+    ConfigProvider, ProviderConfigItem = _get_models()
     providers = await ConfigProvider.filter(status='active').all()
     # 先收集所有数据，再加锁写入
     entries = {}
@@ -166,8 +171,10 @@ class ProviderResolver:
         """
         provider = None
         if resource_type and resource_id:
+            ConfigProvider, ProviderConfigItem = _get_models()
             provider = await ConfigProvider.get_for_resource(resource_type, resource_id, provider_type)
         if not provider:
+            ConfigProvider, ProviderConfigItem = _get_models()
             provider = await ConfigProvider.get_default(provider_type)
         if not provider:
             return default
@@ -188,6 +195,7 @@ class ProviderResolver:
         Returns:
             配置键值字典
         """
+        ConfigProvider, ProviderConfigItem = _get_models()
         provider = None
         if resource_type and resource_id:
             provider = await ConfigProvider.get_for_resource(resource_type, resource_id, provider_type)

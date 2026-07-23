@@ -26,13 +26,17 @@
           @keyup.enter="crudRef?.handleSearch()"
         />
         <n-select
-          v-model:value="queryItems.hub_status"
-          :options="hubStatusOptions"
-          placeholder="Hub状态"
-          clearable
-          style="width: 140px"
-        />
-      </template>
+            v-model:value="queryItems.hub_status"
+            :options="hubStatusOptions"
+            placeholder="Hub状态"
+            clearable
+            style="width: 140px"
+          />
+          <DateRangeFilter
+            v-model="created_at_range"
+            @change="onDateRangeChange"
+          />
+        </template>
       <template #queryBarActions>
         <template v-if="checkedRowKeys.length">
           <span style="white-space: nowrap; font-size: 13px">已选 {{ checkedRowKeys.length }} 项</span>
@@ -85,6 +89,7 @@ import { h, ref, reactive, onMounted, resolveDirective, withDirectives } from 'v
 import { NAlert, NButton, NModal, NSelect, NSpace, NSwitch, NTag, NText, useMessage } from 'naive-ui'
 import CommonPage from '@/components/page/CommonPage.vue'
 import CrudTable from '@/components/table/CrudTable.vue'
+import DateRangeFilter from '@/components/common/DateRangeFilter.vue'
 import api from '@/api/site-pipeline'
 
 const vPermission = resolveDirective('permission')
@@ -106,10 +111,18 @@ const reload = () => crudRef.value?.handleSearch()
 const queryItems = reactive({
   domain: '',
   hub_status: null,
+  created_at_after: '',
+  created_at_before: '',
 })
+const created_at_range = ref(null)
 
 function onUpdateQueryItems(val) {
   Object.assign(queryItems, val)
+}
+function onDateRangeChange(after, before) {
+  queryItems.created_at_after = after
+  queryItems.created_at_before = before
+  crudRef.value?.handleSearch()
 }
 
 const hubStatusOptions = [
@@ -196,12 +209,14 @@ const columns = [
 
 // ─── 数据加载 ───
 
-async function getData({ page, page_size, domain, hub_status }) {
+async function getData({ page, page_size, domain, hub_status, created_at_after, created_at_before }) {
   const params = { page, page_size }
   if (domain) params.domain = domain
   if (hub_status) {
     params.hub_status = hub_status === '未创建' ? '' : hub_status
   }
+  if (created_at_after) params.created_at_after = created_at_after
+  if (created_at_before) params.created_at_before = created_at_before
   const res = await api.getSiteList(params)
   return { data: res?.data ?? [], total: res?.total ?? 0 }
 }

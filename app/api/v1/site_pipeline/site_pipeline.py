@@ -42,12 +42,15 @@ async def list_sites(
     gmc_status: str = Query('', description='GMC状态筛选'),
     status: str = Query('', description='站点状态筛选'),
     hub_status: str = Query('', description='Hub状态筛选 (has_status / no_status)'),
+    created_at_after: str = Query('', description='创建时间起始 (YYYY-MM-DD)'),
+    created_at_before: str = Query('', description='创建时间截止 (YYYY-MM-DD)'),
     current_user: User = Depends(AuthControl.is_authed),
 ):
     result = await site_pipeline_controller.list_sites_with_enrichment(
         page=page, page_size=page_size,
         domain=domain, dept_id=dept_id, assign_to=assign_to,
         gmc_status=gmc_status, status=status, hub_status=hub_status,
+        created_at_after=created_at_after, created_at_before=created_at_before,
         current_user=current_user,
     )
     return SuccessExtra(

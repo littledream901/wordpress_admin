@@ -177,24 +177,21 @@ class ProvisionTaskRunner(TaskRunner):
                     _log.warning("站点 %s 域名替换返回异常格式: %s", site.domain, replace_result)
             finally:
                 if replace_token:
-                    await self._exec(
-                        lambda: wp_restorer.remove_domain_replace_script(service_name),
-                        timeout=30,
-                    )
+                    self._schedule_cleanup(lambda: wp_restorer.remove_domain_replace_script(service_name))
 
             # Step 7+8: patch_wp_config + inject_woo_ctx + inject_mu_plugins（无依赖，可并行）
             await self._update_step(job, "patch_and_inject")
             _, woo_token, ctx_refresh_url, _ = await asyncio.gather(
                 self._exec(
                     lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol),
-                    timeout=60,
+                    timeout=120,
                 ),
-                self._exec(lambda: wp_restorer.inject_woo_script(service_name), timeout=60),
+                self._exec(lambda: wp_restorer.inject_woo_script(service_name), timeout=120),
                 self._exec(
                     lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol),
-                    timeout=60,
+                    timeout=120,
                 ),
-                self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=60),
+                self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=120),
             )
 
             # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）
@@ -207,7 +204,7 @@ class ProvisionTaskRunner(TaskRunner):
                 lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol),
                 timeout=45,
             )
-            await self._exec(lambda: wp_restorer.remove_woo_script(service_name), timeout=15)
+            self._schedule_cleanup(lambda: wp_restorer.remove_woo_script(service_name))
 
             # Step 11: health_check
             await self._update_step(job, "health_check")

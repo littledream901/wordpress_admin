@@ -3,7 +3,6 @@
 所有同步服务类通过此模块读取配置，内部全部委托 ProviderResolver。
 """
 
-from app.models.config_provider import ConfigProvider, ProviderConfigItem
 from app.utils.provider_resolver import ProviderResolver, _run_sync
 
 # 旧 key 前缀 → provider_type
@@ -169,6 +168,7 @@ async def get_config_async(name: str, default: str = "") -> str:
 async def _get_config_async_impl(name: str, provider_type, new_key: str, default: str) -> str:
     """get_config 的异步实现核心"""
     if provider_type:
+        from app.models.config_provider import ConfigProvider, ProviderConfigItem
         p = await ConfigProvider.get_default(provider_type)
         if p:
             item = await ProviderConfigItem.filter(

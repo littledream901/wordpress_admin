@@ -209,46 +209,6 @@ def _get_global_woo_limiter():
     return _global_woo_limiter
 
 
-async def _fetch_and_update_feed_link(site: Site) -> None:
-    """请求 CTX Refresh URL 获取最新 Feed Link 并更新到站点。
-
-    产品导入成功后，WooCommerce CTX Feed 插件可能已重新生成 feed 文件，
-    需要再次触发 CTX 脚本刷新并拉取最新链接。
-    """
-    if not site.ctx_refresh_url:
-        return
-
-    _wp_ssl_val = await ProviderResolver.get_config('onepanel', 'wp_verify_ssl', default='true')
-    wp_verify_ssl = _wp_ssl_val.lower() != 'false'
-
-    async with httpx.AsyncClient(timeout=60, verify=wp_verify_ssl, follow_redirects=True) as client:
-        for i in range(1, 7):
-            try:
-                resp = await client.get(site.ctx_refresh_url)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    links = data.get('feed_links') or []
-                    if isinstance(links, list) and links:
-                        links = [str(l) for l in links]
-                        links = [l for l in links if '/logs/' not in l]
-                        if links:
-                            site.feed_link = links[0]
-                            await site.save()
-                            logger.info(
-                                "站点 %s 导入产品后 Feed Link 已更新: %s",
-                                site.domain, links[0],
-                            )
-                        return
-            except Exception as exc:
-                logger.warning(
-                    "站点 %s CTX Feed 刷新失败，第 %s/6 次: %s",
-                    site.domain, i, exc,
-                )
-            await asyncio.sleep(5)
-
-    logger.warning("站点 %s CTX Feed 刷新最终失败", site.domain)
-
-logger = logging.getLogger(__name__)
 
 
 def extract_brand_from_domain(wc_url: str) -> str:
@@ -279,7 +239,8 @@ class WooCommerceSyncer:
                  enable_images: bool = True, max_images_per_product: int = 5,
                  check_existing_before_create: bool = True,
                  use_isolated_limiter: bool = True,
-                 wp_async_images: bool = False):
+                 wp_async_images: bool = False,
+                 import_interval_ms: int = 200):
         self.wc_base_url = wc_url.rstrip("/")
         self.wc_api_url = f"{self.wc_base_url}/wp-json/wc/v3/products"
         self.wc_auth = BasicAuth(consumer_key, consumer_secret)
@@ -288,6 +249,7 @@ class WooCommerceSyncer:
         self.max_images_per_product = max_images_per_product
         self.check_existing_before_create = check_existing_before_create
         self.wp_async_images = wp_async_images
+        self.import_interval_ms = import_interval_ms
         self.brand = extract_brand_from_domain(self.wc_base_url)
         self.brand_id: Optional[int] = None
         # 每个站点优先使用独立限流器，避免单站点故障拖累全局导入
@@ -352,7 +314,7 @@ class WooCommerceSyncer:
             for img in images_raw:
                 src = img.get("src")
                 if src and src.startswith(("http://", "https://")):
-                    wc_images.append({"src": src, "alt": img.get("alt", title)})
+                    wc_images.append({"src": src.rstrip(",;"), "alt": img.get("alt", title)})
             if not wc_images:
                 logger.info("已关闭图片上传或本商品无有效图片，商品:%s", title)
                 wc_images = []
@@ -363,7 +325,7 @@ class WooCommerceSyncer:
                 )
                 wc_images = wc_images[:self.max_images_per_product]
             if self.wp_async_images:
-                remote_images = [img["src"] for img in wc_images]
+                remote_images = [img["src"].rstrip(",;") for img in wc_images]
                 logger.info(
                     "WP 异步图片模式：%d 张图片将推迟到服务端下载，商品:%s",
                     len(remote_images), title,
@@ -832,6 +794,12 @@ class WooImportService:
         upload_variants = (await ProviderResolver.get_config("woo", "upload_variants", default="false")).lower() == "true"
         check_existing = (await ProviderResolver.get_config("woo", "check_existing_before_create", default="true")).lower() == "true"
         wp_async_images = (await ProviderResolver.get_config("woo", "wp_async_images", default="false")).lower() == "true"
+        import_interval_ms = int(await ProviderResolver.get_config("woo", "import_interval_ms", default="200"))
+
+        logger.info(
+            "导入配置: enable_images=%s, max_images=%s, upload_variants=%s, wp_async_images=%s, interval=%sms, site=%s",
+            enable_images, max_images, upload_variants, wp_async_images, import_interval_ms, site.domain,
+        )
 
         syncer = WooCommerceSyncer(
             wc_url=site_cfg["wc_url"],
@@ -842,6 +810,7 @@ class WooImportService:
             max_images_per_product=max_images,
             check_existing_before_create=check_existing,
             wp_async_images=wp_async_images,
+            import_interval_ms=import_interval_ms,
         )
 
         loop = asyncio.get_event_loop()
@@ -928,8 +897,9 @@ class WooImportService:
                     break
             await row.save()
 
-            # 产品间短暂间隔，降低 PHP-FPM 压力
-            time.sleep(1.0)
+            # 产品间间隔，缓解 PHP-FPM 压力（可通过 woo.import_interval_ms 配置）
+            if syncer.import_interval_ms > 0:
+                time.sleep(syncer.import_interval_ms / 1000.0)
 
         result = {
             "ok": True,
@@ -947,12 +917,5 @@ class WooImportService:
         log_data = {"source": "woo_import", "result": result, "provider": provider_info}
         site.pipeline_log = (site.pipeline_log or "") + "\n" + json.dumps(log_data, ensure_ascii=False)
         await site.save()
-
-        # 产品导入成功后，再次请求 CTX Refresh URL 获取最新 Feed Link
-        if success > 0 and site.ctx_refresh_url:
-            try:
-                await _fetch_and_update_feed_link(site)
-            except Exception:
-                pass  # 获取失败不影响导入结果
 
         return result

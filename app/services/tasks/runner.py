@@ -112,6 +112,16 @@ class TaskRunner:
             )
             raise
 
+    @staticmethod
+    def _schedule_cleanup(fn: Callable, timeout: int = 30) -> None:
+        """后台异步清理，不阻塞主流程，失败静默忽略。"""
+        async def _wrapper():
+            try:
+                await TaskRunner._exec(fn, timeout=timeout)
+            except Exception:
+                loguru_logger.warning("[runner] 后台清理失败（非关键）", exc_info=True)
+        asyncio.create_task(_wrapper())
+
     # ── 任务生命周期 ──
 
     @staticmethod

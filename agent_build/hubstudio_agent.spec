@@ -30,11 +30,13 @@ a = Analysis(
         ("../app/services/hubstudio/runtime.py", "app/services/hubstudio"),
         ("../app/services/hubstudio/executor.py", "app/services/hubstudio"),
         ("../app/services/hubstudio/tasks/__init__.py", "app/services/hubstudio/tasks"),
+        ("../app/services/hubstudio/tasks/_common.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/create_env.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/create_account.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/update_env.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/wp_login.py", "app/services/hubstudio/tasks"),
         ("../app/services/hubstudio/tasks/gmc_check.py", "app/services/hubstudio/tasks"),
+        ("../app/services/hubstudio/tasks/open_env.py", "app/services/hubstudio/tasks"),
     ],
     hiddenimports=[
         # Agent 核心依赖

@@ -56,6 +56,10 @@
             filterable
             style="width: 120px"
           />
+          <DateRangeFilter
+            v-model="created_at_range"
+            @change="onDateRangeChange"
+          />
         </template>
         <template #queryBarActions>
           <template v-if="checkedRowKeys.length">
@@ -366,6 +370,7 @@
 import { ref, reactive, h, onMounted, computed, watch, resolveDirective, withDirectives } from 'vue'
 import { useRouter } from 'vue-router'
 import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, useMessage, useNotification } from 'naive-ui'
+import DateRangeFilter from '@/components/common/DateRangeFilter.vue'
 import api from '@/api/site-pipeline'
 import baseApi from '@/api'
 import gmailApi from '@/api/gmail'
@@ -382,7 +387,13 @@ const notification = useNotification()
 
 // ─── CrudTable ───
 const $table = ref(null)
-const queryItems = reactive({ domain: '', dept_id: null, assign_to: null, gmc_status: null, status: null, hub_status: null })
+const queryItems = reactive({ domain: '', dept_id: null, assign_to: null, gmc_status: null, status: null, hub_status: null, created_at_after: '', created_at_before: '' })
+const created_at_range = ref(null)
+function onDateRangeChange(after, before) {
+  queryItems.created_at_after = after
+  queryItems.created_at_before = before
+  $table.value?.handleSearch()
+}
 const reload = () => $table.value?.handleSearch()
 
 // ─── 详情弹窗 ───

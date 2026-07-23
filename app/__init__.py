@@ -91,29 +91,15 @@ if _HAS_FASTAPI:
         await init_configs()
 
         # 后台任务：每小时清理过期的 Feed 文件
-        async def _cleanup_loop():
-            while True:
-                await asyncio.sleep(3600)
-                try:
-                    from app.models.feed_file import FeedFile
-                    import os
-                    from datetime import datetime
-                    expired = await FeedFile.filter(
-                        status="replaced",
-                        expires_at__isnull=False,
-                        expires_at__lt=datetime.now(),
-                    ).all()
-                    for feed in expired:
-                        for fpath in (feed.processed_file,):
-                            if fpath and os.path.exists(fpath):
-                                os.remove(fpath)
-                        await feed.delete()
-                    if expired:
-                        logger.info(f"[Feed] 定时清理: 已删除 {len(expired)} 个过期文件")
-                except Exception:
-                    pass  # 静默忽略，避免阻塞主流程
+        from app.cron.feed_cleanup import run_feed_cleanup_loop
+        asyncio.create_task(run_feed_cleanup_loop())
 
-        asyncio.create_task(_cleanup_loop())
+        # 后台任务：定时刷新站点 Feed Link
+        async def _feed_refresh_loop():
+            from app.cron.feed_refresh import run_feed_refresh_loop
+            await run_feed_refresh_loop()
+
+        asyncio.create_task(_feed_refresh_loop())
 
         # 后台任务：GMC 定时巡检
         async def _gmc_cron_loop():
