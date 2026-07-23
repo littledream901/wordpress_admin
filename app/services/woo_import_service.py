@@ -18,6 +18,8 @@ from app.models.site_pipeline import Site
 from app.core.exceptions import ExternalAPIError, ProviderConfigError
 from app.utils.provider_resolver import ProviderResolver
 
+logger = logging.getLogger(__name__)
+
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
