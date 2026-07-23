@@ -485,11 +485,10 @@ echo json_encode([
             "WP_HOME": f"define('WP_HOME', '{target_home}');",
             "WP_SITEURL": f"define('WP_SITEURL', '{target_home}');",
             "FS_METHOD": "define('FS_METHOD', 'direct');",
-            "WP_MEMORY_LIMIT": "define('WP_MEMORY_LIMIT', '64M');",
-            "WP_MAX_MEMORY_LIMIT": "define('WP_MAX_MEMORY_LIMIT', '128M');",
             "WP_POST_REVISIONS": "define('WP_POST_REVISIONS', 3);",
             "AUTOSAVE_INTERVAL": "define('AUTOSAVE_INTERVAL', 300);",
-            "DISABLE_WP_CRON": "define('DISABLE_WP_CRON', true);",
+            "WP_CRON_LOCK_TIMEOUT": "define('WP_CRON_LOCK_TIMEOUT', 120);",
+            "DISABLE_WP_CRON": "define('DISABLE_WP_CRON', false);",
         }
 
         for key, new_line in replacements.items():
@@ -809,28 +808,136 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
                 )
         php = r'''<?php
 /*
-Plugin Name: WooCommerce 异步图片下载
-Description: 拦截 REST API 创建商品请求，将 remote_images 交给 Action Scheduler 后台下载，规避 502
-Version: 1.0
+Plugin Name: WooCommerce 异步图片下载 (Action Scheduler 版)
+Description: 拦截 REST API 创建/更新商品请求，通过 Action Scheduler 异步下载 remote_images，跳过缩略图 + 暂停缓存防止 OOM
+Version: 3.3
 */
 
-add_action('async_download_product_images', 'handle_async_product_image_download', 10, 2);
+if (!defined("ABSPATH")) { exit; }
 
-function handle_async_product_image_download($product_id, $image_urls) {
-    if (empty($image_urls)) return;
-    if (!function_exists('media_sideload_image')) {
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
+/**
+ * 核心下载与绑定逻辑
+ * - 跳过 intermediate_image_sizes 缩略图生成，避免容器 OOM Kill
+ * - 仅保留原图入库
+ */
+function _wc_async_download_images_handler($product_id, $image_urls) {
+    error_log(sprintf("[WC-ASYNC] === 任务开始: 商品 #%d，共 %d 张图片 ===", $product_id, count($image_urls)));
+
+    if (empty($product_id) || empty($image_urls) || !is_array($image_urls)) {
+        return;
     }
 
-    $attachment_ids = [];
-    foreach ($image_urls as $url) {
-        $id = media_sideload_image($url, $product_id, null, 'id');
-        if (!is_wp_error($id)) {
-            $attachment_ids[] = $id;
+    @set_time_limit(600);
+    @ini_set("memory_limit", "512M");
+
+    require_once ABSPATH . "wp-admin/includes/media.php";
+    require_once ABSPATH . "wp-admin/includes/file.php";
+    require_once ABSPATH . "wp-admin/includes/image.php";
+
+    // 禁用缩略图生成，只保留原图，防止 OOM
+    add_filter("intermediate_image_sizes_advanced", "__return_empty_array");
+
+    $admins = get_users(array("role" => "administrator", "number" => 1, "fields" => "ID"));
+    $admin_id = !empty($admins) ? $admins[0] : 1;
+    wp_set_current_user($admin_id);
+
+    // v3.3: 用 cURL 硬超时替代 download_url()，防止 download_url 底层 HTTP transport 忽略超时导致进程 hang
+    $attachment_ids = array();
+    $total = count($image_urls);
+
+    foreach ($image_urls as $idx => $url) {
+        $clean_url = trim($url);
+        if (empty($clean_url)) { continue; }
+
+        error_log(sprintf("[WC-ASYNC] 下载中 [%d/%d]: %s", $idx + 1, $total, $clean_url));
+
+        $downloaded = false;
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            // cURL 硬超时：连接 10s，整体下载 25s，杜绝无限 hang
+            $ch = curl_init($clean_url);
+            curl_setopt_array($ch, array(
+                CURLOPT_TIMEOUT        => 25,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_USERAGENT      => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0,
+            ));
+            $image_data = curl_exec($ch);
+            $curl_errno  = curl_errno($ch);
+            $curl_error  = curl_error($ch);
+            $http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($curl_errno !== 0) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次 cURL 下载失败 [errno={$curl_errno}]: {$curl_error}");
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            if ($http_code < 200 || $http_code >= 400) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次 HTTP 状态异常: {$http_code}");
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            if (empty($image_data)) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次下载内容为空");
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            // 写入临时文件
+            $tmp_file = wp_tempnam($clean_url);
+            if (!$tmp_file) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次创建临时文件失败");
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+            $written = file_put_contents($tmp_file, $image_data);
+            unset($image_data); // 尽早释放内存
+            if ($written === false) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次写入临时文件失败");
+                @unlink($tmp_file);
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            $url_path = parse_url($clean_url, PHP_URL_PATH);
+            $filename = basename($url_path);
+            if (empty($filename) || !preg_match("/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i", $filename)) {
+                $filename = uniqid("img_") . ".jpg";
+            }
+
+            $file_array = array(
+                "name"     => $filename,
+                "tmp_name" => $tmp_file,
+            );
+
+            $id = media_handle_sideload($file_array, $product_id);
+            if (is_wp_error($id)) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次 sideload 导入失败: " . $id->get_error_message());
+                @unlink($tmp_file);
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            $attachment_ids[] = (int) $id;
+            $downloaded = true;
+            break;
         }
+
+        if (!$downloaded) {
+            error_log(sprintf("[WC-ASYNC] [%d/%d] %d 次尝试全部失败", $idx + 1, $total, 3));
+        }
+        // 每张图处理后手动清缓存，避免内存堆积
+        if (function_exists("gc_collect_cycles")) { gc_collect_cycles(); }
+        wp_cache_flush();
     }
+
+    remove_filter("intermediate_image_sizes_advanced", "__return_empty_array");
 
     if (!empty($attachment_ids)) {
         $product = wc_get_product($product_id);
@@ -840,34 +947,63 @@ function handle_async_product_image_download($product_id, $image_urls) {
                 $product->set_gallery_image_ids(array_slice($attachment_ids, 1));
             }
             $product->save();
+            error_log(sprintf("[WC-ASYNC] === 商品 #%d 绑定完成: 成功 %d/%d 张 ===", $product_id, count($attachment_ids), $total));
         }
     }
+    // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
+    // 避免因内存残留 + 图片下载导致静默 OOM/超时
+    exit(0);
 }
+add_action("wc_async_download_images_action", "_wc_async_download_images_handler", 10, 2);
 
-add_filter('woocommerce_rest_pre_insert_product_object', 'intercept_wc_rest_product_images', 10, 3);
-
-function intercept_wc_rest_product_images($product, $request, $creating) {
-    if (!$creating) {
-        return $product;
-    }
-
+/**
+ * 拦截 REST API 请求，提取 remote_images（同时支持新建和更新）
+ */
+add_filter("woocommerce_rest_pre_insert_product_object", function($product, $request, $creating) {
     $body = $request->get_json_params();
+    if (!empty($body["remote_images"]) && is_array($body["remote_images"])) {
+        $urls = array_map("trim", $body["remote_images"]);
+        $urls = array_filter($urls, function($v) { return $v !== ""; });
+        $product->remote_images_pending = array_values(array_unique($urls));
+    }
+    return $product;
+}, 10, 3);
 
-    if (!empty($body['remote_images']) && is_array($body['remote_images'])) {
-        $image_urls = $body['remote_images'];
+/**
+ * 入队函数：推入 Action Scheduler + 触发 runner
+ */
+function _wc_as_enqueue_and_spawn($product_id, $product) {
+    if (empty($product->remote_images_pending)) { return; }
+    $image_urls = array_values($product->remote_images_pending);
 
-        add_action('woocommerce_rest_insert_product_object', function($saved_product) use ($image_urls) {
-            if (function_exists('as_schedule_single_action')) {
-                as_schedule_single_action(time(), 'async_download_product_images', array(
-                    'product_id' => $saved_product->get_id(),
-                    'image_urls' => $image_urls,
-                ));
-            }
-        }, 10, 1);
+    if (function_exists("as_enqueue_async_action")) {
+        as_enqueue_async_action(
+            "wc_async_download_images_action",
+            array("product_id" => $product_id, "image_urls" => $image_urls),
+            "woocommerce-async-images"
+        );
+        error_log("[WC-ASYNC] 已将商品 #{$product_id} 加入 Action Scheduler 队列");
     }
 
-    return $product;
+    if (!has_action("shutdown", "_wc_as_spawn_runner")) {
+        add_action("shutdown", "_wc_as_spawn_runner", 9999);
+    }
 }
+
+/** 非阻塞触发 Action Scheduler runner：先回应用户释放连接，再通过 spawn_cron 异步触发 */
+function _wc_as_spawn_runner() {
+    if (function_exists("fastcgi_finish_request")) {
+        if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
+        fastcgi_finish_request();
+    }
+    // spawn_cron() 内部已处理 doing_cron 锁 + 非阻塞 wp_remote_post，无需重复调用
+    if (function_exists("spawn_cron")) {
+        spawn_cron();
+    }
+}
+
+add_action("woocommerce_new_product",    "_wc_as_enqueue_and_spawn", 10, 2);
+add_action("woocommerce_update_product", "_wc_as_enqueue_and_spawn", 10, 2);
 '''
         self.file_manager.save(path, php)
         if not self.file_manager.exists(path):
