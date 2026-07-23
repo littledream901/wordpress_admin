@@ -13,7 +13,7 @@
       :columns="columns"
       :query-items="queryItems"
       :get-data="getData"
-      :page-size="20"
+      :page-size="100"
       @on-checked="(keys) => checkedRowKeys = keys"
       @update:query-items="onUpdateQueryItems"
     >
