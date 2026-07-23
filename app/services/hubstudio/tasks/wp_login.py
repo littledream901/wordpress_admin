@@ -145,9 +145,8 @@ def execute_wp_login(executor, job: dict, payload: dict) -> dict:
 
             result["url"] = wp_url
             executor.logger.info(f"[wp_login] 完成: {result['actions']}")
-            return result
-        finally:
             browser.quit()
+            return result
 
     except Exception as e:
         executor.logger.error(f"[wp_login] 失败: {e}")
