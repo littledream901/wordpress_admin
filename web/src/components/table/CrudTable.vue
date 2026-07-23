@@ -116,7 +116,7 @@ const tableData = ref([])
 const pagination = reactive({
   page: 1,
   page_size: props.pageSize,
-  pageSizes: [10, 20, 50, 100],
+  pageSizes: [50, 100, 200,500],
   showSizePicker: props.showSizePicker,
   prefix({ itemCount }) {
     return `共 ${itemCount} 条`
