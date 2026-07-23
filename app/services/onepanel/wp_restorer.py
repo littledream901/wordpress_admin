@@ -810,7 +810,7 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 /*
 Plugin Name: WooCommerce 异步图片下载 (Action Scheduler 版)
 Description: 拦截 REST API 创建/更新商品请求，通过 Action Scheduler 异步下载 remote_images，跳过缩略图 + 暂停缓存防止 OOM
-Version: 3.3
+Version: 3.4
 */
 
 if (!defined("ABSPATH")) { exit; }
@@ -952,6 +952,19 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     }
     // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
     // 避免因内存残留 + 图片下载导致静默 OOM/超时
+    //
+    // 退出前释放 doing_cron 瞬态锁并重新触发 wp-cron，确保 Action Scheduler
+    // 队列中后续任务被处理（否则锁持续 60s，批量导入时大量任务丢失）
+    if (function_exists('wp_remote_post')) {
+        delete_transient('doing_cron');
+        $next_cron_url = site_url('wp-cron.php?doing_wp_cron=' . microtime(true));
+        wp_remote_post($next_cron_url, array(
+            'timeout'   => 0.01,
+            'blocking'  => false,
+            'sslverify' => apply_filters('https_local_ssl_verify', false),
+        ));
+        usleep(100000); // 给非阻塞请求 0.1s 发出时间
+    }
     exit(0);
 }
 add_action("wc_async_download_images_action", "_wc_async_download_images_handler", 10, 2);
