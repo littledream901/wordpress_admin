@@ -815,11 +815,6 @@ Version: 3.7
 
 if (!defined("ABSPATH")) { exit; }
 
-// v3.7: 全局 nonce 缓存 — handler 内 wp_set_current_user($admin_id) 后无有效 session，
-// wp_create_nonce() 生成的 nonce 无法通过 Action Scheduler 的 check_ajax_referer 验证（403）。
-// 因此在切换用户身份前（当前用户为 0）预先缓存 nonce，供 _wc_as_trigger_runner() 复用。
-$_WC_AS_CACHED_NONCE = '';
-
 /**
  * 核心下载与绑定逻辑
  * - 跳过 intermediate_image_sizes 缩略图生成，避免容器 OOM Kill
@@ -844,10 +839,6 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     // v3.6: 禁用图片编辑器（GD/Imagick），阻止 wp_generate_attachment_metadata 加载整张原图到内存
     // wp_getimagesize() 只读文件头，不耗内存，width/height 元数据仍保留
     add_filter("wp_image_editors", "__return_empty_array", 999);
-
-    // v3.7: 在切换用户身份前缓存 nonce（此时 wp_get_current_user() 为 0，nonce 仅基于 tick+action）
-    // 切换后 wp_create_nonce() 会引入 user_id + session_token，但 admin-ajax.php 上下文无有效 session → 403
-    $GLOBALS['_WC_AS_CACHED_NONCE'] = wp_create_nonce('as_async_request_queue_runner');
 
     $admins = get_users(array("role" => "administrator", "number" => 1, "fields" => "ID"));
     $admin_id = !empty($admins) ? $admins[0] : 1;
@@ -1011,6 +1002,15 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     // 标记正常完成，防止 shutdown handler 误报
     $shutdown_context['completed'] = true;
 
+    // v3.7: 重置用户上下文为 0，确保 wp_create_nonce() 生成无用户绑定的 nonce
+    // admin-ajax.php 的 Action Scheduler nonce 验证也是在 user=0 上下文中进行
+    wp_set_current_user(0);
+
+    // v3.7: 删除 Action Scheduler 的处理锁 transient
+    // exit(0) 跳过了 WP_Async_Request::handle() 末尾的 delete_transient()，
+    // 导致后续 re-spawn 请求在 is_processing() 阶段就被拦截返回 403
+    delete_transient('as_async_request_queue_runner');
+
     // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
     // 避免因内存残留 + 图片下载导致静默 OOM/超时
     //
@@ -1060,9 +1060,7 @@ function _wc_as_enqueue_and_spawn($product_id, $product) {
  */
 function _wc_as_trigger_runner() {
     $identifier = 'as_async_request_queue_runner';
-    // v3.7: 优先使用缓存的 nonce（handler 内 wp_set_current_user 前生成，无 session 绑定，可验证）
-    // 缓存为空时回退到 wp_create_nonce（如 REST API 上下文中 _wc_as_spawn_runner 调用，有有效 session）
-    $nonce = !empty($GLOBALS['_WC_AS_CACHED_NONCE']) ? $GLOBALS['_WC_AS_CACHED_NONCE'] : wp_create_nonce($identifier);
+    $nonce = wp_create_nonce($identifier);
     $url = add_query_arg(array(
         'action' => $identifier,
         'nonce'  => $nonce,
