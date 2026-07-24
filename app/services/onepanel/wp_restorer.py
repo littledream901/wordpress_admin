@@ -810,7 +810,7 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 /*
 Plugin Name: WooCommerce 异步图片下载 (Action Scheduler 版)
 Description: 拦截 REST API 创建/更新商品请求，通过 Action Scheduler 异步下载 remote_images，跳过缩略图 + 暂停缓存防止 OOM
-Version: 3.7
+Version: 4.1
 */
 
 if (!defined("ABSPATH")) { exit; }
@@ -882,60 +882,50 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
 
         $downloaded = false;
         for ($attempt = 1; $attempt <= 3; $attempt++) {
-            // cURL 硬超时：连接 10s，整体下载 25s，杜绝无限 hang
-            $ch = curl_init($clean_url);
-            curl_setopt_array($ch, array(
-                CURLOPT_TIMEOUT        => 25,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_MAXREDIRS      => 5,
-                CURLOPT_USERAGENT      => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => 0,
-            ));
-            $image_data = curl_exec($ch);
-            $curl_errno  = curl_errno($ch);
-            $curl_error  = curl_error($ch);
-            $http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $dl_size     = curl_getinfo($ch, CURLINFO_SIZE_DOWNLOAD);
-            curl_close($ch);
-
-            if ($curl_errno !== 0) {
-                error_log("[WC-ASYNC] 第 {$attempt} 次 cURL 下载失败 [errno={$curl_errno}]: {$curl_error}");
-                if ($attempt < 3) { sleep(1); }
-                continue;
-            }
-
-            if ($http_code < 200 || $http_code >= 400) {
-                error_log("[WC-ASYNC] 第 {$attempt} 次 HTTP 状态异常: {$http_code}");
-                if ($attempt < 3) { sleep(1); }
-                continue;
-            }
-
-            if (empty($image_data)) {
-                error_log("[WC-ASYNC] 第 {$attempt} 次下载内容为空");
-                if ($attempt < 3) { sleep(1); }
-                continue;
-            }
-
-            error_log(sprintf("[WC-ASYNC] 第 {$attempt} 次下载成功: %.1fKB", $dl_size / 1024));
-
-            // 写入临时文件
+            // v4.0: 流式写入临时文件，使用 CURLOPT_FILE 零内存下载
+            // 避免 curl_exec + file_put_contents 将整张图片加载到 PHP 内存
             $tmp_file = wp_tempnam($clean_url);
             if (!$tmp_file) {
                 error_log("[WC-ASYNC] 第 {$attempt} 次创建临时文件失败");
                 if ($attempt < 3) { sleep(1); }
                 continue;
             }
-            $written = file_put_contents($tmp_file, $image_data);
-            unset($image_data); // 尽早释放内存
-            if ($written === false) {
-                error_log("[WC-ASYNC] 第 {$attempt} 次写入临时文件失败");
+            $fp = @fopen($tmp_file, 'wb');
+            if (!$fp) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次打开临时文件失败: {$tmp_file}");
                 @unlink($tmp_file);
                 if ($attempt < 3) { sleep(1); }
                 continue;
             }
+
+            // cURL 硬超时：连接 10s，整体下载 25s，杜绝无限 hang
+            $ch = curl_init($clean_url);
+            curl_setopt_array($ch, array(
+                CURLOPT_TIMEOUT        => 25,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_FILE           => $fp,   // 流式写入文件，不占用 PHP 内存
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_USERAGENT      => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0,
+            ));
+            curl_exec($ch);
+            $curl_errno  = curl_errno($ch);
+            $curl_error  = curl_error($ch);
+            $http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $dl_size     = curl_getinfo($ch, CURLINFO_SIZE_DOWNLOAD);
+            curl_close($ch);
+            fclose($fp);
+
+            if ($curl_errno !== 0 || $http_code < 200 || $http_code >= 400 || $dl_size === 0) {
+                error_log("[WC-ASYNC] 第 {$attempt} 次 cURL 下载失败 [errno={$curl_errno}, http={$http_code}]: {$curl_error}");
+                @unlink($tmp_file);
+                if ($attempt < 3) { sleep(1); }
+                continue;
+            }
+
+            error_log(sprintf("[WC-ASYNC] 第 {$attempt} 次下载成功: %.1fKB", $dl_size / 1024));
 
             $url_path = parse_url($clean_url, PHP_URL_PATH);
             $filename = basename($url_path);
@@ -971,9 +961,11 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
         if (!$downloaded) {
             error_log(sprintf("[WC-ASYNC] [%d/%d] %d 次尝试全部失败", $idx + 1, $total, 3));
         }
-        // 每张图处理后手动清缓存，避免内存堆积
+        // 定向清理当前 attachment 的 post cache，避免全局 wp_cache_flush 波及 Redis/Memcached
+        if (!empty($id) && function_exists("clean_post_cache")) {
+            clean_post_cache($id);
+        }
         if (function_exists("gc_collect_cycles")) { gc_collect_cycles(); }
-        wp_cache_flush();
 
         } catch (\Throwable $e) {
             // 单张图片处理异常不中断整批，记录并继续下一张
@@ -995,6 +987,7 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
                 $product->set_gallery_image_ids(array_slice($attachment_ids, 1));
             }
             $product->save();
+            clean_post_cache($product_id);
             error_log(sprintf("[WC-ASYNC] === 商品 #%d 绑定完成: 成功 %d/%d 张 ===", $product_id, count($attachment_ids), $total));
         }
     }
@@ -1002,20 +995,30 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     // 标记正常完成，防止 shutdown handler 误报
     $shutdown_context['completed'] = true;
 
-    // v3.7: 重置用户上下文为 0，确保 wp_create_nonce() 生成无用户绑定的 nonce
-    // admin-ajax.php 的 Action Scheduler nonce 验证也是在 user=0 上下文中进行
-    wp_set_current_user(0);
+    // v4.1: 安全标记当前 Action 为完成
+    // 使用 query_actions + STATUS_RUNNING 比 find_action 更可靠，
+    // find_action 可能无法匹配到正在执行中的 in-progress 状态的 action
+    if (class_exists('ActionScheduler_Store')) {
+        $store = ActionScheduler::store();
+        $action_ids = $store->query_actions(array(
+            'hook'     => 'wc_async_download_images_action',
+            'status'   => ActionScheduler_Store::STATUS_RUNNING,
+            'args'     => array('product_id' => $product_id, 'image_urls' => $image_urls),
+            'per_page' => 1,
+        ));
 
-    // v3.7: 删除 Action Scheduler 的处理锁 transient
-    // exit(0) 跳过了 WP_Async_Request::handle() 末尾的 delete_transient()，
-    // 导致后续 re-spawn 请求在 is_processing() 阶段就被拦截返回 403
-    delete_transient('as_async_request_queue_runner');
+        if (!empty($action_ids)) {
+            $action_id = reset($action_ids);
+            $store->mark_complete($action_id);
+            error_log("[WC-ASYNC] 已将 AS Action #{$action_id} 标为 complete");
+        }
+    }
+
+    // 退出前触发下一个 AS runner，确保队列中后续任务立即被处理
+    _wc_as_trigger_runner();
 
     // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
     // 避免因内存残留 + 图片下载导致静默 OOM/超时
-    //
-    // 退出前触发 Action Scheduler 的异步队列 runner，确保后续任务立即被处理
-    _wc_as_trigger_runner();
     exit(0);
 }
 add_action("wc_async_download_images_action", "_wc_async_download_images_handler", 10, 2);
@@ -1034,19 +1037,30 @@ add_filter("woocommerce_rest_pre_insert_product_object", function($product, $req
 }, 10, 3);
 
 /**
- * 入队函数：推入 Action Scheduler + 触发 runner
+ * 入队函数：防止同一生命周期重复入队
  */
 function _wc_as_enqueue_and_spawn($product_id, $product) {
     if (empty($product->remote_images_pending)) { return; }
+
     $image_urls = array_values($product->remote_images_pending);
+    unset($product->remote_images_pending); // 清空防止二次 Hook 触发重复入队
 
     if (function_exists("as_enqueue_async_action")) {
-        as_enqueue_async_action(
-            "wc_async_download_images_action",
-            array("product_id" => $product_id, "image_urls" => $image_urls),
-            "woocommerce-async-images"
-        );
-        error_log("[WC-ASYNC] 已将商品 #{$product_id} 加入 Action Scheduler 队列");
+        // 只查 pending 状态，避免已完成的 action（留在 log 表）产生假阳性
+        $existing = as_get_scheduled_actions(array(
+            'hook'     => 'wc_async_download_images_action',
+            'args'     => array('product_id' => $product_id, 'image_urls' => $image_urls),
+            'status'   => ActionScheduler_Store::STATUS_PENDING,
+            'per_page' => 1,
+        ));
+        if (empty($existing)) {
+            as_enqueue_async_action(
+                "wc_async_download_images_action",
+                array("product_id" => $product_id, "image_urls" => $image_urls),
+                "woocommerce-async-images"
+            );
+            error_log("[WC-ASYNC] 已将商品 #{$product_id} 加入 Action Scheduler 队列");
+        }
     }
 
     if (!has_action("shutdown", "_wc_as_spawn_runner")) {
@@ -1055,22 +1069,23 @@ function _wc_as_enqueue_and_spawn($product_id, $product) {
 }
 
 /**
- * v3.6: 非阻塞触发 Action Scheduler 异步队列 runner
+ * 非阻塞触发 Action Scheduler 异步队列 runner
  * 直接 POST admin-ajax.php，绕过 spawn_cron() 和 maybe_dispatch() 的内部检查
  */
 function _wc_as_trigger_runner() {
     $identifier = 'as_async_request_queue_runner';
+    wp_set_current_user(0);
     $nonce = wp_create_nonce($identifier);
     $url = add_query_arg(array(
         'action' => $identifier,
         'nonce'  => $nonce,
     ), admin_url('admin-ajax.php'));
+
     wp_remote_post($url, array(
         'timeout'   => 0.01,
         'blocking'  => false,
         'sslverify' => apply_filters('https_local_ssl_verify', false),
     ));
-    usleep(100000);
 }
 
 /** shutdown 触发：先回应用户释放连接，再异步触发 runner */
