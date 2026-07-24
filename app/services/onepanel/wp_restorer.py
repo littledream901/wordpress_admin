@@ -810,10 +810,15 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 /*
 Plugin Name: WooCommerce 异步图片下载 (Action Scheduler 版)
 Description: 拦截 REST API 创建/更新商品请求，通过 Action Scheduler 异步下载 remote_images，跳过缩略图 + 暂停缓存防止 OOM
-Version: 3.6
+Version: 3.7
 */
 
 if (!defined("ABSPATH")) { exit; }
+
+// v3.7: 全局 nonce 缓存 — handler 内 wp_set_current_user($admin_id) 后无有效 session，
+// wp_create_nonce() 生成的 nonce 无法通过 Action Scheduler 的 check_ajax_referer 验证（403）。
+// 因此在切换用户身份前（当前用户为 0）预先缓存 nonce，供 _wc_as_trigger_runner() 复用。
+$_WC_AS_CACHED_NONCE = '';
 
 /**
  * 核心下载与绑定逻辑
@@ -839,6 +844,10 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     // v3.6: 禁用图片编辑器（GD/Imagick），阻止 wp_generate_attachment_metadata 加载整张原图到内存
     // wp_getimagesize() 只读文件头，不耗内存，width/height 元数据仍保留
     add_filter("wp_image_editors", "__return_empty_array", 999);
+
+    // v3.7: 在切换用户身份前缓存 nonce（此时 wp_get_current_user() 为 0，nonce 仅基于 tick+action）
+    // 切换后 wp_create_nonce() 会引入 user_id + session_token，但 admin-ajax.php 上下文无有效 session → 403
+    $GLOBALS['_WC_AS_CACHED_NONCE'] = wp_create_nonce('as_async_request_queue_runner');
 
     $admins = get_users(array("role" => "administrator", "number" => 1, "fields" => "ID"));
     $admin_id = !empty($admins) ? $admins[0] : 1;
@@ -1051,7 +1060,9 @@ function _wc_as_enqueue_and_spawn($product_id, $product) {
  */
 function _wc_as_trigger_runner() {
     $identifier = 'as_async_request_queue_runner';
-    $nonce = wp_create_nonce($identifier);
+    // v3.7: 优先使用缓存的 nonce（handler 内 wp_set_current_user 前生成，无 session 绑定，可验证）
+    // 缓存为空时回退到 wp_create_nonce（如 REST API 上下文中 _wc_as_spawn_runner 调用，有有效 session）
+    $nonce = !empty($GLOBALS['_WC_AS_CACHED_NONCE']) ? $GLOBALS['_WC_AS_CACHED_NONCE'] : wp_create_nonce($identifier);
     $url = add_query_arg(array(
         'action' => $identifier,
         'nonce'  => $nonce,
