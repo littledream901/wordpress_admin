@@ -810,7 +810,7 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 /*
 Plugin Name: WooCommerce 异步图片下载 (Action Scheduler 版)
 Description: 拦截 REST API 创建/更新商品请求，通过 Action Scheduler 异步下载 remote_images，跳过缩略图 + 暂停缓存防止 OOM
-Version: 3.4
+Version: 3.6
 */
 
 if (!defined("ABSPATH")) { exit; }
@@ -841,6 +841,26 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     $admin_id = !empty($admins) ? $admins[0] : 1;
     wp_set_current_user($admin_id);
 
+    // 注册 shutdown handler：如果进程非正常终止，记录最后处理的图片索引
+    $shutdown_context = array(
+        'product_id' => $product_id,
+        'total'      => count($image_urls),
+        'last_idx'   => -1,
+        'completed'  => false,
+    );
+    register_shutdown_function(function() use (&$shutdown_context) {
+        if ($shutdown_context['completed']) { return; }
+        $e = error_get_last();
+        $err = $e ? sprintf(" type=%d msg=%s file=%s:%d", $e['type'], $e['message'], $e['file'], $e['line']) : '';
+        error_log(sprintf(
+            "[WC-ASYNC] 进程异常终止！商品 #%d 已处理到 [%d/%d]%s",
+            $shutdown_context['product_id'],
+            $shutdown_context['last_idx'] + 1,
+            $shutdown_context['total'],
+            $err
+        ));
+    });
+
     // v3.3: 用 cURL 硬超时替代 download_url()，防止 download_url 底层 HTTP transport 忽略超时导致进程 hang
     $attachment_ids = array();
     $total = count($image_urls);
@@ -848,6 +868,12 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     foreach ($image_urls as $idx => $url) {
         $clean_url = trim($url);
         if (empty($clean_url)) { continue; }
+
+        $shutdown_context['last_idx'] = $idx;
+
+        // v3.5: 每张图片独立 try-catch + 独立超时预算，防止单张异常图导致整个商品静默 crash
+        try {
+            @set_time_limit(45); // 每张图 45s 上限（含 3 次重试的 25s cURL 超时 + 余量）
 
         error_log(sprintf("[WC-ASYNC] 下载中 [%d/%d]: %s", $idx + 1, $total, $clean_url));
 
@@ -869,6 +895,7 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
             $curl_errno  = curl_errno($ch);
             $curl_error  = curl_error($ch);
             $http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $dl_size     = curl_getinfo($ch, CURLINFO_SIZE_DOWNLOAD);
             curl_close($ch);
 
             if ($curl_errno !== 0) {
@@ -888,6 +915,8 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
                 if ($attempt < 3) { sleep(1); }
                 continue;
             }
+
+            error_log(sprintf("[WC-ASYNC] 第 {$attempt} 次下载成功: %.1fKB", $dl_size / 1024));
 
             // 写入临时文件
             $tmp_file = wp_tempnam($clean_url);
@@ -935,6 +964,14 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
         // 每张图处理后手动清缓存，避免内存堆积
         if (function_exists("gc_collect_cycles")) { gc_collect_cycles(); }
         wp_cache_flush();
+
+        } catch (\Throwable $e) {
+            // 单张图片处理异常不中断整批，记录并继续下一张
+            error_log(sprintf(
+                "[WC-ASYNC] [%d/%d] 捕获异常: %s (code=%d, file=%s:%d)",
+                $idx + 1, $total, $e->getMessage(), $e->getCode(), $e->getFile(), $e->getLine()
+            ));
+        }
     }
 
     remove_filter("intermediate_image_sizes_advanced", "__return_empty_array");
@@ -950,19 +987,23 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
             error_log(sprintf("[WC-ASYNC] === 商品 #%d 绑定完成: 成功 %d/%d 张 ===", $product_id, count($attachment_ids), $total));
         }
     }
+
+    // 标记正常完成，防止 shutdown handler 误报
+    $shutdown_context['completed'] = true;
+
     // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
     // 避免因内存残留 + 图片下载导致静默 OOM/超时
     //
-    // 退出前释放 doing_cron 瞬态锁并重新触发 wp-cron，确保 Action Scheduler
-    // 队列中后续任务被处理（否则锁持续 60s，批量导入时大量任务丢失）
-    if (function_exists('wp_remote_post')) {
-        delete_transient('doing_cron');
-        $next_cron_url = site_url('wp-cron.php?doing_wp_cron=' . microtime(true));
-        wp_remote_post($next_cron_url, array(
-            'timeout'   => 0.01,
-            'blocking'  => false,
-            'sslverify' => apply_filters('https_local_ssl_verify', false),
-        ));
+    // v3.4→v3.5: 退出前触发 Action Scheduler 的异步队列 runner（而非 wp-cron），
+    // 确保队列中后续任务立即被处理。wp-cron.php 无法驱动 Action Scheduler，
+    // Action Scheduler 使用 admin-ajax.php?action=as_async_request_queue_runner
+    if (class_exists('ActionScheduler_AsyncRequest_QueueRunner')) {
+        $async = ActionScheduler_AsyncRequest_QueueRunner::instance();
+        // 清除可能阻碍新调度的旧标记
+        if (function_exists('as_unschedule_all_actions')) {
+            as_unschedule_all_actions($async->identifier());
+        }
+        $async->maybe_dispatch();
         usleep(100000); // 给非阻塞请求 0.1s 发出时间
     }
     exit(0);
