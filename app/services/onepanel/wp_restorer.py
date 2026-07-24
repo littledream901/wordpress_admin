@@ -994,18 +994,8 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     // 强制退出进程，阻止 Action Scheduler 在同一进程中连续消费多个 action
     // 避免因内存残留 + 图片下载导致静默 OOM/超时
     //
-    // v3.4→v3.5: 退出前触发 Action Scheduler 的异步队列 runner（而非 wp-cron），
-    // 确保队列中后续任务立即被处理。wp-cron.php 无法驱动 Action Scheduler，
-    // Action Scheduler 使用 admin-ajax.php?action=as_async_request_queue_runner
-    if (class_exists('ActionScheduler_AsyncRequest_QueueRunner')) {
-        $async = ActionScheduler_AsyncRequest_QueueRunner::instance();
-        // 清除可能阻碍新调度的旧标记
-        if (function_exists('as_unschedule_all_actions')) {
-            as_unschedule_all_actions($async->identifier());
-        }
-        $async->maybe_dispatch();
-        usleep(100000); // 给非阻塞请求 0.1s 发出时间
-    }
+    // 退出前触发 Action Scheduler 的异步队列 runner，确保后续任务立即被处理
+    _wc_as_trigger_runner();
     exit(0);
 }
 add_action("wc_async_download_images_action", "_wc_async_download_images_handler", 10, 2);
@@ -1044,16 +1034,43 @@ function _wc_as_enqueue_and_spawn($product_id, $product) {
     }
 }
 
-/** 非阻塞触发 Action Scheduler runner：先回应用户释放连接，再通过 spawn_cron 异步触发 */
+/**
+ * v3.6: 非阻塞触发 Action Scheduler 异步队列 runner
+ * 不使用 spawn_cron()，因为 wp-cron.php 不驱动 Action Scheduler；
+ * Action Scheduler 使用 admin-ajax.php?action=as_async_request_queue_runner
+ */
+function _wc_as_trigger_runner() {
+    if (class_exists('ActionScheduler_AsyncRequest_QueueRunner')) {
+        $async = ActionScheduler_AsyncRequest_QueueRunner::instance();
+        // 清除可能存在的旧调度，防止 allow() 返回 false 阻塞新调度
+        if (method_exists($async, 'clear_scheduled_event')) {
+            $async->clear_scheduled_event();
+        }
+        if (function_exists('as_unschedule_all_actions')) {
+            as_unschedule_all_actions($async->identifier());
+        }
+        // 绕过 maybe_dispatch() 的 allow() 检查，直接发送非阻塞 POST
+        $nonce = wp_create_nonce($async->identifier());
+        $url = add_query_arg(array(
+            'action' => $async->identifier(),
+            'nonce'  => $nonce,
+        ), admin_url('admin-ajax.php'));
+        wp_remote_post($url, array(
+            'timeout'   => 0.01,
+            'blocking'  => false,
+            'sslverify' => apply_filters('https_local_ssl_verify', false),
+        ));
+        usleep(100000);
+    }
+}
+
+/** shutdown 触发：先回应用户释放连接，再异步触发 runner */
 function _wc_as_spawn_runner() {
     if (function_exists("fastcgi_finish_request")) {
         if (session_status() === PHP_SESSION_ACTIVE) { session_write_close(); }
         fastcgi_finish_request();
     }
-    // spawn_cron() 内部已处理 doing_cron 锁 + 非阻塞 wp_remote_post，无需重复调用
-    if (function_exists("spawn_cron")) {
-        spawn_cron();
-    }
+    _wc_as_trigger_runner();
 }
 
 add_action("woocommerce_new_product",    "_wc_as_enqueue_and_spawn", 10, 2);
