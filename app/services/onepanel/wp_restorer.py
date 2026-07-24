@@ -1047,32 +1047,21 @@ function _wc_as_enqueue_and_spawn($product_id, $product) {
 
 /**
  * v3.6: 非阻塞触发 Action Scheduler 异步队列 runner
- * 不使用 spawn_cron()，因为 wp-cron.php 不驱动 Action Scheduler；
- * Action Scheduler 使用 admin-ajax.php?action=as_async_request_queue_runner
+ * 直接 POST admin-ajax.php，绕过 spawn_cron() 和 maybe_dispatch() 的内部检查
  */
 function _wc_as_trigger_runner() {
-    if (class_exists('ActionScheduler_AsyncRequest_QueueRunner')) {
-        $async = ActionScheduler_AsyncRequest_QueueRunner::instance();
-        // 清除可能存在的旧调度，防止 allow() 返回 false 阻塞新调度
-        if (method_exists($async, 'clear_scheduled_event')) {
-            $async->clear_scheduled_event();
-        }
-        if (function_exists('as_unschedule_all_actions')) {
-            as_unschedule_all_actions($async->identifier());
-        }
-        // 绕过 maybe_dispatch() 的 allow() 检查，直接发送非阻塞 POST
-        $nonce = wp_create_nonce($async->identifier());
-        $url = add_query_arg(array(
-            'action' => $async->identifier(),
-            'nonce'  => $nonce,
-        ), admin_url('admin-ajax.php'));
-        wp_remote_post($url, array(
-            'timeout'   => 0.01,
-            'blocking'  => false,
-            'sslverify' => apply_filters('https_local_ssl_verify', false),
-        ));
-        usleep(100000);
-    }
+    $identifier = 'as_async_request_queue_runner';
+    $nonce = wp_create_nonce($identifier);
+    $url = add_query_arg(array(
+        'action' => $identifier,
+        'nonce'  => $nonce,
+    ), admin_url('admin-ajax.php'));
+    wp_remote_post($url, array(
+        'timeout'   => 0.01,
+        'blocking'  => false,
+        'sslverify' => apply_filters('https_local_ssl_verify', false),
+    ));
+    usleep(100000);
 }
 
 /** shutdown 触发：先回应用户释放连接，再异步触发 runner */
