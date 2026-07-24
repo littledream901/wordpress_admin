@@ -836,6 +836,9 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
 
     // 禁用缩略图生成，只保留原图，防止 OOM
     add_filter("intermediate_image_sizes_advanced", "__return_empty_array");
+    // v3.6: 禁用图片编辑器（GD/Imagick），阻止 wp_generate_attachment_metadata 加载整张原图到内存
+    // wp_getimagesize() 只读文件头，不耗内存，width/height 元数据仍保留
+    add_filter("wp_image_editors", "__return_empty_array", 999);
 
     $admins = get_users(array("role" => "administrator", "number" => 1, "fields" => "ID"));
     $admin_id = !empty($admins) ? $admins[0] : 1;
@@ -945,7 +948,14 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
                 "tmp_name" => $tmp_file,
             );
 
+            $mem_before = memory_get_usage(true);
+            error_log(sprintf("[WC-ASYNC] sideload 前内存: %.1fMB", $mem_before / 1048576));
+
             $id = media_handle_sideload($file_array, $product_id);
+
+            $mem_after = memory_get_usage(true);
+            $mem_peak = memory_get_peak_usage(true);
+            error_log(sprintf("[WC-ASYNC] sideload 后内存: %.1fMB (峰值 %.1fMB)", $mem_after / 1048576, $mem_peak / 1048576));
             if (is_wp_error($id)) {
                 error_log("[WC-ASYNC] 第 {$attempt} 次 sideload 导入失败: " . $id->get_error_message());
                 @unlink($tmp_file);
@@ -975,6 +985,7 @@ function _wc_async_download_images_handler($product_id, $image_urls) {
     }
 
     remove_filter("intermediate_image_sizes_advanced", "__return_empty_array");
+    remove_filter("wp_image_editors", "__return_empty_array", 999);
 
     if (!empty($attachment_ids)) {
         $product = wc_get_product($product_id);
