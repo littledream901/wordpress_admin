@@ -25,7 +25,7 @@ from tortoise import Tortoise, connections
 from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
 
-from app.api import api_router
+from app.api import api_router, feed_download_router
 from app.controllers.api import api_controller
 from app.log import logger
 from app.models.admin import Api, Menu, Role
@@ -86,7 +86,7 @@ def make_middlewares():
                 "/api/v1/base/access_token",
                 "/api/v1/base/refresh_token",
                 "/api/v1/import",
-                "/api/v1/site-pipeline/feed/download",
+                "/feed",
                 "/api/v1/user/avatar/upload",
                 "/static",
                 "/docs",
@@ -112,6 +112,8 @@ def register_exceptions(app: FastAPI):
 def register_routers(app: FastAPI, prefix: str = "/api"):
     """注册 API 路由"""
     app.include_router(api_router, prefix=prefix)
+    # Feed 下载路由：短链接，无需认证（供 Google Merchant 远程抓取）
+    app.include_router(feed_download_router, prefix="/feed")
 
 
 # ════════════════════════════════════════════════════════════════════════════

@@ -48,7 +48,7 @@ async def _get_feed_expire_days() -> int:
 # ═══════════════════════  工具函数  ═══════════════════════
 
 def _random_suffix(length: int = 6) -> str:
-    return ''.join(random.choices(string.digits, k=length))
+    return ''.join(random.choices(string.ascii_lowercase, k=length))
 
 
 def _safe_filename(original: str) -> str:
@@ -57,10 +57,12 @@ def _safe_filename(original: str) -> str:
 
 
 def _make_processed_name(target_domain: str, ext: str) -> str:
-    """生成处理后的文件名：替换后域名_随机数字码.扩展名（域名中的 . 改为 _）"""
-    safe_domain = re.sub(r'[^a-zA-Z0-9.\-]', '_', target_domain).strip('._')
-    safe_domain = safe_domain.replace('.', '_')
-    return f"{safe_domain}_{_random_suffix(8)}{ext}"
+    """生成处理后的文件名：域名主体-6位随机字母.扩展名（去除顶级域名，. 改为 -）"""
+    # 去除顶级域名（.com / .net 等）
+    domain_without_tld = re.sub(r'\.[a-zA-Z]{2,}$', '', target_domain)
+    safe_domain = re.sub(r'[^a-zA-Z0-9.\-]', '-', domain_without_tld).strip('.-')
+    safe_domain = safe_domain.replace('.', '-')
+    return f"{safe_domain}-{_random_suffix(6)}{ext}"
 
 
 def _detect_platform(content: str) -> str:
@@ -346,7 +348,7 @@ async def list_processed(page: int = Query(1), page_size: int = Query(20)):
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
 
 
-@feed_download_router.get("/download/{filename}", summary="下载文件")
+@feed_download_router.get("/{filename}", summary="下载文件")
 async def download_feed(filename: str):
     """按文件名下载，校验过期时间"""
     target = os.path.join(UPLOAD_DIR, filename)

@@ -32,8 +32,7 @@ v1_router.include_router(config_router, prefix="/config", dependencies=[DependPe
 v1_router.include_router(accounts_router, prefix="/account", dependencies=[DependPermission])
 v1_router.include_router(provider_router, prefix="/config-provider", dependencies=[DependPermission])
 
-# Feed 下载路由 — 无需认证（供 Google 远程抓取）
-v1_router.include_router(feed_download_router, prefix="/site-pipeline/feed")
+# feed_download_router 由 register_routers 挂载到根路径 /feed（短链接、无需认证）
 
 v1_router.include_router(site_pipeline_router, prefix="/site-pipeline", dependencies=[DependPermission])
 
