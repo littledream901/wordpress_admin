@@ -102,6 +102,9 @@
         <n-form-item v-if="currentBatchAction === 'redirect'" label="目标URL" label-placement="left">
           <n-input v-model:value="batchExtraTargetUrl" placeholder="https://target.com/$1" />
         </n-form-item>
+        <n-form-item v-if="currentBatchAction === 'gateway-defense'" label="网关地址" label-placement="left">
+          <n-input v-model:value="batchGatewayUrl" placeholder="https://gateway.foxfingerlab.com" />
+        </n-form-item>
         <template v-if="currentBatchAction === 'assign'">
           <n-form-item label="分配至部门" label-placement="left">
             <n-tree-select v-model:value="batchAssignDeptId" :options="deptOption" key-field="id" label-field="name" placeholder="留空不改变部门" clearable default-expand-all />
@@ -247,6 +250,113 @@
           <n-space justify="end">
             <n-button v-if="batchIsAsync" type="primary" size="small" @click="goToJobs">查看任务中心</n-button>
             <n-button @click="showBatchResult = false; reload()">关闭</n-button>
+          </n-space>
+        </template>
+      </n-modal>
+
+      <!-- 网关防御弹窗 -->
+      <n-modal v-model:show="showGatewayDefense" preset="card" title="部署网关防御" style="max-width: 600px">
+        <n-space vertical :size="12">
+          <n-alert v-if="currentSite" type="info" :bordered="false">
+            <template #header>站点信息</template>
+            域名：<b>{{ currentSite.domain }}</b><br>
+            平台：<b>{{ currentSite.platform === 'shopify' ? 'Shopify' : 'WordPress' }}</b><br>
+            防御类型：<b>{{ currentSite.platform === 'shopify' ? 'Cloudflare Worker' : 'Nginx + Lua' }}</b>
+          </n-alert>
+
+          <n-form :model="gatewayForm" label-placement="left" label-width="100">
+            <n-form-item label="网关地址">
+              <n-input v-model:value="gatewayForm.gateway_url" placeholder="https://gateway.foxfingerlab.com" />
+            </n-form-item>
+            
+            <n-form-item label="密钥来源">
+              <n-radio-group v-model:value="gatewayForm.key_source">
+                <n-space>
+                  <n-radio value="auto">自动生成</n-radio>
+                  <n-radio value="manual">手动输入</n-radio>
+                </n-space>
+              </n-radio-group>
+            </n-form-item>
+
+            <template v-if="gatewayForm.key_source === 'manual'">
+              <n-form-item label="站点密钥">
+                <n-input v-model:value="gatewayForm.site_key" placeholder="site_xxxxxxxx" />
+              </n-form-item>
+              <n-form-item label="签名密钥">
+                <n-input v-model:value="gatewayForm.site_secret" type="password" show-password-on="click" placeholder="48位十六进制字符串" />
+              </n-form-item>
+            </template>
+
+            <n-form-item label="失败模式">
+              <n-radio-group v-model:value="gatewayForm.fail_mode">
+                <n-space>
+                  <n-radio value="open">Open（推荐）</n-radio>
+                  <n-radio value="closed">Closed</n-radio>
+                </n-space>
+              </n-radio-group>
+              <template #feedback>
+                <n-text depth="3" style="font-size: 12px">
+                  Open: 网关不可达时放行请求 | Closed: 网关不可达时拒绝请求
+                </n-text>
+              </template>
+            </n-form-item>
+
+            <n-form-item label="注入 SDK">
+              <n-switch v-model:value="gatewayForm.sdk_inject" />
+              <template #feedback>
+                <n-text depth="3" style="font-size: 12px">
+                  是否在 HTML 响应中注入客户端 SDK
+                </n-text>
+              </template>
+            </n-form-item>
+          </n-form>
+
+          <n-alert v-if="currentSite?.gateway_defense_status === 'deployed'" type="success" :bordered="false">
+            <template #header>当前状态</template>
+            已部署于：{{ currentSite.gateway_deployed_at || '-' }}<br>
+            防御类型：{{ currentSite.gateway_defense_type === 'worker' ? 'Cloudflare Worker' : 'Nginx Lua' }}
+          </n-alert>
+        </n-space>
+        
+        <template #footer>
+          <n-space justify="end">
+            <n-button @click="showGatewayDefense = false">取消</n-button>
+            <n-button v-if="currentSite?.gateway_defense_status === 'deployed'" @click="viewGatewayCredentials" type="info">查看凭证</n-button>
+            <n-button type="primary" @click="deployGatewayDefense" :loading="gatewayDeployLoading">
+              {{ currentSite?.gateway_defense_status === 'deployed' ? '重新部署' : '部署' }}
+            </n-button>
+          </n-space>
+        </template>
+      </n-modal>
+
+      <!-- 网关凭证查看弹窗 -->
+      <n-modal v-model:show="showGatewayCredentials" preset="card" title="网关凭证" style="max-width: 600px">
+        <n-space vertical :size="12" v-if="gatewayCredentials">
+          <n-descriptions :column="1" bordered size="small">
+            <n-descriptions-item label="站点ID">{{ gatewayCredentials.site_id }}</n-descriptions-item>
+            <n-descriptions-item label="域名">{{ gatewayCredentials.domain }}</n-descriptions-item>
+            <n-descriptions-item label="站点密钥">
+              <n-text code>{{ gatewayCredentials.gateway_site_key }}</n-text>
+            </n-descriptions-item>
+            <n-descriptions-item label="签名密钥">
+              <n-text code>{{ gatewayCredentials.gateway_site_secret }}</n-text>
+            </n-descriptions-item>
+            <n-descriptions-item label="部署状态">
+              <n-tag :type="gatewayCredentials.gateway_defense_status === 'deployed' ? 'success' : 'default'" size="small">
+                {{ gatewayCredentials.gateway_defense_status || '未部署' }}
+              </n-tag>
+            </n-descriptions-item>
+            <n-descriptions-item label="防御类型">
+              {{ gatewayCredentials.gateway_defense_type === 'worker' ? 'Cloudflare Worker' : 'Nginx Lua' }}
+            </n-descriptions-item>
+            <n-descriptions-item label="部署时间">
+              {{ gatewayCredentials.gateway_deployed_at || '-' }}
+            </n-descriptions-item>
+          </n-descriptions>
+        </n-space>
+        <template #footer>
+          <n-space justify="end">
+            <n-button @click="showGatewayCredentials = false">关闭</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -508,6 +618,80 @@ async function saveShopifyConfig() {
   }
 }
 
+// ─── 网关防御 ───
+const showGatewayDefense = ref(false)
+const showGatewayCredentials = ref(false)
+const currentSite = ref(null)
+const gatewayDeployLoading = ref(false)
+const gatewayCredentials = ref(null)
+const gatewayForm = reactive({
+  gateway_url: 'https://gateway.foxfingerlab.com',
+  key_source: 'auto',
+  site_key: '',
+  site_secret: '',
+  fail_mode: 'open',
+  sdk_inject: true,
+})
+
+function openGatewayDefenseDialog(row) {
+  currentSite.value = row
+  gatewayForm.gateway_url = 'https://gateway.foxfingerlab.com'
+  gatewayForm.key_source = 'auto'
+  gatewayForm.site_key = ''
+  gatewayForm.site_secret = ''
+  gatewayForm.fail_mode = 'open'
+  gatewayForm.sdk_inject = true
+  showGatewayDefense.value = true
+}
+
+async function deployGatewayDefense() {
+  if (!currentSite.value) return
+  
+  // 验证手动输入的密钥
+  if (gatewayForm.key_source === 'manual') {
+    if (!gatewayForm.site_key || !gatewayForm.site_secret) {
+      message.error('请输入完整的站点密钥和签名密钥')
+      return
+    }
+  }
+  
+  gatewayDeployLoading.value = true
+  try {
+    const payload = {
+      gateway_url: gatewayForm.gateway_url,
+      fail_mode: gatewayForm.fail_mode,
+      sdk_inject: gatewayForm.sdk_inject,
+    }
+    
+    // 只在手动输入时传递密钥
+    if (gatewayForm.key_source === 'manual') {
+      payload.site_key = gatewayForm.site_key
+      payload.site_secret = gatewayForm.site_secret
+    }
+    
+    await api.deployGatewayDefense(currentSite.value.id, payload)
+    message.success('网关防御部署成功')
+    showGatewayDefense.value = false
+    reload()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '部署失败')
+  } finally {
+    gatewayDeployLoading.value = false
+  }
+}
+
+async function viewGatewayCredentials() {
+  if (!currentSite.value) return
+  
+  try {
+    const res = await api.getGatewayCredentials(currentSite.value.id)
+    gatewayCredentials.value = res?.data || null
+    showGatewayCredentials.value = true
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '获取凭证失败')
+  }
+}
+
 // ─── 搜索 & 表单 ───
 const showAdd = ref(false)
 const editId = ref(null)
@@ -630,12 +814,23 @@ const columns = [
   { title: 'Hub 状态', key: 'hub_status', width: 120, render: (r) => statusTag(r.hub_status), align: 'center' },
   { title: 'GMC', key: 'gmc_status', width: 80, render: (r) => statusTag(r.gmc_status), align: 'center' },
   { title: '重定向', key: 'pipeline_status', width: 80, render: (r) => statusTag(redirectLabel(r)), align: 'center' },
+  { title: '网关防御', key: 'gateway_defense_status', width: 90, 
+    render: (r) => {
+      const status = r.gateway_defense_status || ''
+      if (!status) return h(NTag, { type: 'default', size: 'small' }, { default: () => '未部署' })
+      if (status === 'deployed') return h(NTag, { type: 'success', size: 'small' }, { default: () => '已部署' })
+      if (status === 'failed') return h(NTag, { type: 'error', size: 'small' }, { default: () => '失败' })
+      return h(NTag, { type: 'warning', size: 'small' }, { default: () => status })
+    }, 
+    align: 'center' 
+  },
   { title: '操作', key: 'actions', width: 400,
     render: (row) => {
       const dnsOk = (row.cloudflare_status || '').includes('success') || (row.cloudflare_status || '').includes('已解析')
       const redirectOk = (row.pipeline_status || '').startsWith('redirect:')
       const provisionOk = (row.status || '').includes('已创建') || (row.status || '').includes('已存在')
       const importOk = (row.woo_import_status || '').includes('成功')
+      const gatewayOk = (row.gateway_defense_status || '') === 'deployed'
 
       return h(NSpace, { size: 'small' }, {
         default: () => [
@@ -647,6 +842,7 @@ const columns = [
             : withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/provision']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !importOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/woo-import']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/redirect']]),
+          withDirectives(h(NButton, { size: 'tiny', type: 'error', ghost: !gatewayOk, onClick: () => openGatewayDefenseDialog(row) }, { default: () => '网关防御' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/gateway-defense']]),
           row.gmail_username
             ? withDirectives(h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' }), [[vPermission, 'post/api/v1/gmail/unassign']])
             : withDirectives(h(NButton, { size: 'tiny', type: 'tertiary', ghost: true, onClick: () => doSingleAction('assign-gmail', row.id) }, { default: () => '分配Gmail' }), [[vPermission, 'post/api/v1/gmail/assign']]),
@@ -687,6 +883,7 @@ const batchResults = ref([])
 const batchSummary = ref('')
 const batchExtraNsList = ref('')
 const batchExtraTargetUrl = ref('')
+const batchGatewayUrl = ref('https://gateway.foxfingerlab.com')
 const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
 
@@ -748,6 +945,7 @@ const batchActionLabelMap = {
   provision: '批量建站',
   'woo-import': '批量导入产品',
   redirect: '批量重定向',
+  'gateway-defense': '批量网关防御',
   'assign-gmail': '批量分配Gmail',
   assign: '批量分配用户',
   delete: '批量删除',
@@ -758,6 +956,7 @@ const batchActions = [
   { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch', permission: 'post/api/v1/site-pipeline/site/batch-provision' },
   { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
+  { label: '批量网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
   { label: '批量分配用户', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
   { label: '批量删除', key: 'delete', icon: 'mdi:delete', permission: 'post/api/v1/site-pipeline/site/batch-delete' },
@@ -839,6 +1038,13 @@ async function executeBatchAction() {
       return  // 异步后台任务，不展示结果表
     } else if (action === 'redirect') {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
+    } else if (action === 'gateway-defense') {
+      res = await api.batchDeployGatewayDefense({
+        site_ids: ids,
+        gateway_url: batchGatewayUrl.value || 'https://gateway.foxfingerlab.com',
+        fail_mode: 'open',
+        sdk_inject: true,
+      })
     } else if (action === 'assign-gmail') {
       res = await gmailApi.batchAutoAssign(ids)
     } else if (action === 'assign') {

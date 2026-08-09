@@ -17,6 +17,7 @@ export default {
   batchHubDispatch: (ids = [], jobType = 'create_env') => request.post('/site-pipeline/site/batch-hub-dispatch', { site_ids: ids, job_type: jobType }),
   batchImportProducts: (ids = []) => request.post('/site-pipeline/site/batch-woo-import', ids),
   batchAssign: (data = {}) => request.post('/site-pipeline/site/batch-assign', data),
+  batchDeployGatewayDefense: (data = {}) => request.post('/site-pipeline/site/batch-gateway-defense', data),
 
   // 单条操作
   provisionSite: (siteId) => request.post(`/site-pipeline/site/${siteId}/provision`),
@@ -25,6 +26,12 @@ export default {
   provisionRedirect: (siteId, data = { target_url: '' }) => request.post(`/site-pipeline/site/${siteId}/redirect`, data),
   importProducts: (siteId) => request.post(`/site-pipeline/site/${siteId}/woo-import`),
   refreshProductCount: (siteId) => request.post(`/site-pipeline/site/${siteId}/refresh-woo-count`),
+
+  // 网关防御
+  deployGatewayDefense: (siteId, data = {}) => request.post(`/site-pipeline/site/${siteId}/gateway-defense`, data),
+  getGatewayCredentials: (siteId) => request.get(`/site-pipeline/site/${siteId}/gateway-credentials`),
+  getGatewayProviderInfo: (siteId) => request.get(`/site-pipeline/site/${siteId}/gateway-provider-info`),
+  updateGatewayDefense: (siteId, data = {}) => request.post(`/site-pipeline/site/${siteId}/gateway-defense/update`, data),
 
   // HubStudio
   getHubJobList: (params = {}) => request.get('/site-pipeline/hub-job/list', { params }),

@@ -31,6 +31,7 @@ from app.services.importers import get_importer
 from app.utils.config_reader import get_config_async
 from app.utils.provider_resolver import ProviderResolver
 from app.utils.orm_guard import guard_thread_pool
+from app.services.gateway_defense import CloudflareWorkerDefenseService, NginxLuaDefenseService
 
 _log = logging.getLogger(__name__)
 
@@ -958,6 +959,191 @@ class SitePipelineController:
             await self._complete_job(job, ok=True, result=result, site=site)
         except Exception as e:
             await self._complete_job(job, ok=False, error=str(e), site=site)
+
+    # ── Gateway Defense ──
+    async def deploy_gateway_defense(
+        self, 
+        site_id: int, 
+        gateway_url: str,
+        site_key: Optional[str] = None,
+        site_secret: Optional[str] = None,
+        fail_mode: str = 'open',
+        sdk_inject: bool = True
+    ) -> dict:
+        """
+        部署网关防御（根据平台自动选择 Worker 或 Nginx Lua）
+        
+        Args:
+            site_id: 站点ID
+            gateway_url: 网关地址
+            site_key: 外部提供的站点密钥（可选）
+            site_secret: 外部提供的签名密钥（可选）
+            fail_mode: 失败模式 (open/closed)
+            sdk_inject: 是否注入 SDK
+        """
+        site = await site_controller.get(id=site_id)
+        
+        # 验证密钥对的完整性
+        if (site_key and not site_secret) or (not site_key and site_secret):
+            return {'ok': False, 'error': 'site_key 和 site_secret 必须同时提供'}
+        
+        # 根据平台选择服务（服务内部会使用绑定的 Provider）
+        if site.platform == 'shopify':
+            service = CloudflareWorkerDefenseService()
+        else:
+            service = NginxLuaDefenseService()
+        
+        # 部署
+        result = await service.deploy(
+            site, 
+            gateway_url, 
+            site_key=site_key,
+            site_secret=site_secret,
+            fail_mode=fail_mode,
+            sdk_inject=sdk_inject
+        )
+        
+        # 记录日志
+        log_entry = {
+            'ts': datetime.now().isoformat(),
+            'source': 'gateway_defense',
+            'action': 'deploy',
+            'type': 'worker' if site.platform == 'shopify' else 'nginx_lua',
+            'status': 'success' if result['ok'] else 'failed',
+            'gateway_url': gateway_url,
+            'has_external_key': bool(site_key),
+            'used_provider': json.loads(site.gateway_config_json or '{}').get('provider_type'),
+            'result': result
+        }
+        site.append_log(log_entry)
+        await site.save()
+        
+        return result
+    
+    async def batch_deploy_gateway_defense(
+        self, 
+        site_ids: list, 
+        gateway_url: str,
+        site_key: Optional[str] = None,
+        site_secret: Optional[str] = None,
+        credentials_map: Optional[dict] = None,
+        fail_mode: str = 'open',
+        sdk_inject: bool = True
+    ) -> dict:
+        """
+        批量部署网关防御
+        
+        Args:
+            site_ids: 站点ID列表
+            gateway_url: 网关地址
+            site_key: 统一的站点密钥（可选）
+            site_secret: 统一的签名密钥（可选）
+            credentials_map: 每个站点独立的密钥映射（可选）
+            fail_mode: 失败模式
+            sdk_inject: 是否注入 SDK
+        """
+        results = []
+        for site_id in site_ids:
+            # 检查是否有独立密钥
+            if credentials_map and site_id in credentials_map:
+                cred = credentials_map[site_id]
+                key = cred.get('site_key')
+                secret = cred.get('site_secret')
+            else:
+                key = site_key
+                secret = site_secret
+            
+            result = await self.deploy_gateway_defense(
+                site_id, gateway_url, key, secret, fail_mode, sdk_inject
+            )
+            
+            results.append({
+                'site_id': site_id,
+                'ok': result['ok'],
+                'error': result.get('error', ''),
+                'has_custom_key': bool(key)
+            })
+        
+        success = sum(1 for r in results if r['ok'])
+        return {
+            'ok': True,
+            'data': {
+                'total': len(results),
+                'success': success,
+                'fail': len(results) - success,
+                'results': results
+            }
+        }
+    
+    async def get_gateway_credentials(self, site_id: int) -> dict:
+        """获取站点的网关凭证（用于展示或重新部署）"""
+        site = await site_controller.get(id=site_id)
+        
+        return {
+            'ok': True,
+            'data': {
+                'site_id': site.id,
+                'domain': site.domain,
+                'gateway_site_key': site.gateway_site_key,
+                'gateway_site_secret': site.gateway_site_secret,
+                'gateway_defense_status': site.gateway_defense_status,
+                'gateway_defense_type': site.gateway_defense_type,
+                'gateway_deployed_at': site.gateway_deployed_at.isoformat() if site.gateway_deployed_at else None,
+                'gateway_config': json.loads(site.gateway_config_json) if site.gateway_config_json else {}
+            }
+        }
+    
+    async def get_gateway_provider_info(self, site_id: int) -> dict:
+        """获取站点的网关防御相关 Provider 信息"""
+        site = await site_controller.get(id=site_id)
+        
+        # 根据平台确定需要的 Provider 类型
+        if site.platform == 'shopify':
+            provider_type = 'cloudflare'
+        else:
+            provider_type = 'onepanel'
+        
+        # 查找绑定的 Provider
+        binding = await ResourceProviderBinding.filter(
+            resource_type='site',
+            resource_id=site_id,
+            provider_type=provider_type,
+            bind_type='preferred'
+        ).first()
+        
+        provider_info = {}
+        if binding:
+            provider = await ConfigProvider.get_or_none(id=binding.provider_id, status='active')
+            if provider:
+                provider_info = {
+                    'provider_id': provider.id,
+                    'provider_name': provider.provider_name,
+                    'provider_type': provider.provider_type,
+                    'is_bound': True,
+                    'is_default': provider.is_default
+                }
+        
+        # 如果没有绑定，获取默认 Provider
+        if not provider_info:
+            provider = await ConfigProvider.get_default(provider_type)
+            if provider:
+                provider_info = {
+                    'provider_id': provider.id,
+                    'provider_name': provider.provider_name,
+                    'provider_type': provider.provider_type,
+                    'is_bound': False,
+                    'is_default': True
+                }
+        
+        return {
+            'ok': True,
+            'data': {
+                'site_id': site.id,
+                'platform': site.platform,
+                'required_provider_type': provider_type,
+                'provider': provider_info
+            }
+        }
 
     # ── 产品导入 ──
     async def import_products(self, site_id: int) -> dict:

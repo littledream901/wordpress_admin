@@ -1,0 +1,926 @@
+<template>
+  <CommonPage title="Gmail 企业邮箱注册">
+    <template #action>
+      <n-space>
+        <n-button v-permission="'post/api/v1/gmail/registration/create'" type="primary" @click="handleAdd">
+          新增注册
+        </n-button>
+        <n-button v-permission="'post/api/v1/gmail/registration/create'" type="warning" @click="openBatchGenerate">
+          批量随机生成
+        </n-button>
+      </n-space>
+    </template>
+
+    <CrudTable
+      ref="$table"
+      v-model:query-items="queryItems"
+      :get-data="api.regGetList"
+      :columns="columns"
+      :pagination="pagination"
+      @on-checked="onCheckedChange"
+    >
+      <template #queryBar>
+        <n-input
+          v-model:value="queryItems.alias"
+          placeholder="别名搜索"
+          clearable
+          style="width: 180px"
+          @keyup.enter="$table?.handleSearch()"
+        />
+        <n-input
+          v-model:value="queryItems.domain"
+          placeholder="站点域名搜索"
+          clearable
+          style="width: 180px"
+          @keyup.enter="$table?.handleSearch()"
+        />
+        <n-select
+          v-model:value="queryItems.registration_status"
+          placeholder="注册状态"
+          clearable
+          style="width: 160px"
+          :options="statusOptions"
+          @update:value="$table?.handleSearch()"
+        />
+      </template>
+      <template #queryBarActions>
+        <template v-if="checkedRowKeys.length">
+          <n-divider vertical />
+          <span style="white-space: nowrap; font-size: 14px">已选 {{ checkedRowKeys.length }} 项</span>
+          <n-popover :show="showBatchMenu" trigger="manual" placement="bottom" :show-arrow="false" @clickoutside="showBatchMenu = false">
+            <template #trigger>
+              <n-button @click="showBatchMenu = !showBatchMenu">
+                批量操作
+                <template #icon>
+                  <TheIcon icon="mdi:chevron-down" :size="16" />
+                </template>
+              </n-button>
+            </template>
+            <n-button-group vertical size="small" style="text-align: left">
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-create-forwarding'"
+                @click="showBatchMenu = false; handleBatchOp('createForwarding')"
+                :loading="batchLoading === 'createForwarding'"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:email-fast-outline" :size="18" />
+                </template>
+                批量创建转发
+              </n-button>
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-create-env'"
+                @click="showBatchMenu = false; handleBatchOp('createEnv')"
+                :loading="batchLoading === 'createEnv'"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:cloud-outline" :size="18" />
+                </template>
+                批量创建环境
+              </n-button>
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-get-phone'"
+                @click="showBatchMenu = false; handleBatchOp('getPhone')"
+                :loading="batchLoading === 'getPhone'"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:cellphone" :size="18" />
+                </template>
+                批量获取号码
+              </n-button>
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-wait-sms'"
+                @click="showBatchMenu = false; handleBatchOp('waitSms')"
+                :loading="batchLoading === 'waitSms'"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:message-processing-outline" :size="18" />
+                </template>
+                批量等待短信
+              </n-button>
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-confirm-sms'"
+                @click="showBatchMenu = false; handleBatchOp('confirmSms')"
+                :loading="batchLoading === 'confirmSms'"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:check-circle-outline" :size="18" />
+                </template>
+                批量确认完成
+              </n-button>
+              <n-divider style="margin: 2px 0" />
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-assign-env'"
+                @click="showBatchMenu = false; showBatchAssignEnvModal = true"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:monitor-share" :size="18" />
+                </template>
+                批量分配环境
+              </n-button>
+              <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-delete'"
+                @click="showBatchMenu = false; showBatchDeleteConfirm = true"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:delete-outline" :size="18" />
+                </template>
+                批量删除
+              </n-button>
+            </n-button-group>
+          </n-popover>
+          <n-button @click="checkedRowKeys = []">取消选择</n-button>
+        </template>
+      </template>
+    </CrudTable>
+
+    <!-- 新增/编辑弹窗 -->
+    <CrudModal
+      v-model:visible="modalVisible"
+      :title="modalTitle"
+      :loading="modalLoading"
+      @save="handleSave"
+    >
+      <n-form ref="modalFormRef" :model="modalForm" label-placement="left" :label-width="120">
+        <n-grid :cols="2" :x-gap="16">
+          <n-gi :span="2">
+            <n-button
+              dashed
+              type="info"
+              :loading="generating"
+              @click="handleAutoGenerate"
+              style="width:100%"
+            >
+              自动生成 注册信息
+            </n-button>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="别名" path="alias">
+              <n-input v-model:value="modalForm.alias" placeholder="Gmail 邮箱前缀" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="站点域名" path="domain">
+              <n-input v-model:value="modalForm.domain" placeholder="example.com" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="姓名">
+              <n-input v-model:value="modalForm.full_name" placeholder="Full Name" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="密码">
+              <n-input v-model:value="modalForm.password" placeholder="Gmail 密码" />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2"><n-divider style="margin: 4px 0">地址信息</n-divider></n-gi>
+          <n-gi>
+            <n-form-item label="名">
+              <n-input v-model:value="modalForm.first_name" placeholder="First Name" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="姓">
+              <n-input v-model:value="modalForm.last_name" placeholder="Last Name" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="国家">
+              <n-input v-model:value="modalForm.country" placeholder="US" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="省/州">
+              <n-input v-model:value="modalForm.province_state" placeholder="California" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="城市">
+              <n-input v-model:value="modalForm.city" placeholder="Los Angeles" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="邮编">
+              <n-input v-model:value="modalForm.zip_code" placeholder="90001" />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2">
+            <n-form-item label="地址1">
+              <n-input v-model:value="modalForm.shipping_address_1" placeholder="Shipping Address 1" />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2">
+            <n-form-item label="地址2">
+              <n-input v-model:value="modalForm.shipping_address_2" placeholder="Shipping Address 2 (可选)" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="电话">
+              <n-input v-model:value="modalForm.phone" placeholder="+1 555-123-4567" />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2">
+            <n-form-item label="转发目标邮箱">
+              <n-input v-model:value="modalForm.forward_to" placeholder="ImprovMX 转发接收邮箱（默认使用恢复邮箱）" />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2"><n-text depth="3" style="font-size:13px">注册结果信息</n-text></n-gi>
+          <n-gi>
+            <n-form-item label="注册 Gmail">
+              <n-input v-model:value="modalForm.registration_email" placeholder="" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="恢复邮箱">
+              <n-input v-model:value="modalForm.recovery_email" disabled />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="注册状态">
+              <n-select v-model:value="modalForm.registration_status" :options="statusOptions" />
+            </n-form-item>
+          </n-gi>
+          <n-gi>
+            <n-form-item label="环境 ID">
+              <n-input v-model:value="modalForm.env_id" disabled />
+            </n-form-item>
+          </n-gi>
+        </n-grid>
+      </n-form>
+    </CrudModal>
+
+    <!-- 操作确认弹窗 -->
+    <n-modal
+      v-model:show="showActionModal"
+      preset="dialog"
+      :title="actionModalTitle"
+      positive-text="执行"
+      :loading="actionModalLoading"
+      @positive-click="confirmAction"
+      @negative-click="showActionModal = false"
+    >
+      <n-form v-if="actionType === 'getPhone'" ref="actionFormRef" :model="actionForm" label-placement="left" :label-width="100">
+        <n-form-item label="国家 ID">
+          <n-input-number v-model:value="actionForm.country_id" :min="0" placeholder="0=随机" />
+        </n-form-item>
+        <n-form-item label="服务 ID">
+          <n-input-number v-model:value="actionForm.application_id" :min="0" placeholder="Google" />
+        </n-form-item>
+        <n-form-item label="最高价格(分)">
+          <n-input-number v-model:value="actionForm.max_price" :min="0" placeholder="不限" />
+        </n-form-item>
+      </n-form>
+      <p v-else-if="actionType === 'waitSms'">等待接收验证码，超时时间 {{ actionForm.timeout }} 秒</p>
+      <p v-else-if="actionType === 'confirmSms'">确认 SMS 使用完成，系统将标记为扣款。</p>
+      <p v-else>确定要执行此操作吗？</p>
+    </n-modal>
+
+    <!-- 批量状态更新弹窗 -->
+    <n-modal
+      v-model:show="showBatchStatusModal"
+      preset="dialog"
+      title="批量更新状态"
+      positive-text="更新"
+      @positive-click="handleBatchStatusUpdate"
+      @negative-click="showBatchStatusModal = false"
+    >
+      <n-form label-placement="left" :label-width="80">
+        <n-form-item label="目标状态">
+          <n-select v-model:value="batchTargetStatus" :options="statusOptions" />
+        </n-form-item>
+      </n-form>
+    </n-modal>
+
+    <!-- 批量删除确认 -->
+    <n-modal
+      v-model:show="showBatchDeleteConfirm"
+      preset="dialog"
+      title="确认批量删除"
+      positive-text="确认删除"
+      :loading="batchDeleteLoading"
+      @positive-click="handleBatchDelete"
+      @negative-click="showBatchDeleteConfirm = false"
+    >
+      确定要删除 <b>{{ checkedRowKeys.length }}</b> 条注册记录吗？
+    </n-modal>
+
+    <!-- 批量分配环境 -->
+    <n-modal
+      v-model:show="showBatchAssignEnvModal"
+      preset="dialog"
+      title="批量分配环境到站点"
+      positive-text="确认分配"
+      :loading="batchAssignEnvLoading"
+      @positive-click="handleBatchAssignEnv"
+      @negative-click="showBatchAssignEnvModal = false"
+    >
+      <p>
+        将已选 <b>{{ checkedRowKeys.length }}</b> 条已完成注册的记录，自动匹配分配给<br />
+        没有 Gmail 且没有环境的站点。
+      </p>
+      <n-text depth="3" style="font-size: 13px">
+        系统将自动查找未分配 Gmail 且未创建环境的站点，依次分配。
+      </n-text>
+    </n-modal>
+
+    <!-- 批量自动生成 -->
+    <n-modal
+      v-model:show="showBatchGenModal"
+      preset="dialog"
+      title="批量生成注册记录"
+      positive-text="开始生成"
+      :loading="batchGenLoading"
+      @positive-click="handleBatchGenerate"
+      @negative-click="showBatchGenModal = false"
+    >
+      <p style="color:#333;font-size:13px;line-height:1.8;margin-bottom:12px">
+        系统将自动为所有<strong>未分配 Gmail 的站点</strong>生成注册记录：<br>
+        - 域名取自站点域名<br>
+        - forward_to 自动设为站点域名<br>
+        - 生成后请通过 <strong>「批量分配环境到站点」</strong> 手动将环境ID和Gmail分配给站点
+      </p>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="color:#333;font-size:13px;white-space:nowrap">邮箱别名</span>
+        <n-input v-model:value="batchGenForm.alias" placeholder="默认 admin" style="flex:1" />
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:#333;font-size:13px;white-space:nowrap">转发邮箱</span>
+        <n-input v-model:value="batchGenForm.forward_to" placeholder="留空则默认使用站点域名" style="flex:1" />
+      </div>
+    </n-modal>
+
+    <!-- 详情弹窗 -->
+    <n-modal
+      v-model:show="showDetailModal"
+      preset="card"
+      title="注册记录详情"
+      style="max-width:640px"
+      :mask-closable="true"
+      @close="showDetailModal = false"
+    >
+      <n-grid v-if="detailData" cols="2" x-gap="12" y-gap="8">
+        <n-gi><n-text depth="3">别名</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.alias }}</n-text></n-gi>
+        <n-gi><n-text depth="3">站点域名</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.domain }}</n-text></n-gi>
+        <n-gi><n-text depth="3">姓名</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.full_name }}</n-text></n-gi>
+        <n-gi><n-text depth="3">密码</n-text></n-gi>
+        <n-gi>
+          <n-button size="tiny" quaternary @click="navigator.clipboard.writeText(detailData.password);message.success('已复制')">
+            {{ detailData.password }}
+          </n-button>
+        </n-gi>
+        <n-gi><n-text depth="3">转发目标</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.forward_to || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">恢复邮箱</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.recovery_email || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">邮编</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.zip_code || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">国家</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.country || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">省/州</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.province_state || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">城市</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.city || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">地址1</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.shipping_address_1 || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">地址2</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.shipping_address_2 || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">电话</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.phone || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">注册邮箱</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.registration_email || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">ImprovMX别名ID</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.improvmx_alias_id || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">环境ID</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.env_id || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">环境名称</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.env_name || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">SMS request_id</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.sms_request_id ?? '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">SMS号码</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.sms_phone_number || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">SMS验证码</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.sms_code || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">注册状态</n-text></n-gi>
+        <n-gi>
+          <n-tag :type="statusColorMap[detailData.registration_status] || 'default'" size="small">
+            {{ statusLabelMap[detailData.registration_status] || detailData.registration_status }}
+          </n-tag>
+        </n-gi>
+        <n-gi><n-text depth="3">创建时间</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.created_at || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">更新时间</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.updated_at || '-' }}</n-text></n-gi>
+      </n-grid>
+    </n-modal>
+
+  </CommonPage>
+</template>
+
+<script setup>
+import { h, reactive, ref } from 'vue'
+import {
+  NButton, NButtonGroup, NTag, NSelect, NSpace, NGrid, NGi, NText, NDivider,
+  NPopconfirm, NPopover, NInputNumber, NInput, NTooltip, NModal, useMessage,
+} from 'naive-ui'
+import TheIcon from '@/components/icon/TheIcon.vue'
+import api from '@/api/gmail'
+
+const message = useMessage()
+const generating = ref(false)
+const queryItems = reactive({ alias: '', domain: '', registration_status: '' })
+const pagination = reactive({ page: 1, pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50] })
+const $table = ref(null)
+const checkedRowKeys = ref([])
+const showBatchMenu = ref(false)
+const batchLoading = ref(null)  // 当前正在执行的批量操作名
+const showBatchDeleteConfirm = ref(false)
+const batchDeleteLoading = ref(false)
+const showBatchStatusModal = ref(false)
+const batchTargetStatus = ref('completed')
+const showBatchGenModal = ref(false)
+const batchGenLoading = ref(false)
+const batchGenForm = reactive({
+  alias: 'admin',
+  forward_to: '',
+})
+
+// ── 详情弹窗 ──
+const showDetailModal = ref(false)
+const detailData = ref(null)
+
+function handleDetail(row) {
+  detailData.value = row
+  showDetailModal.value = true
+}
+
+// ── 批量分配环境 ──
+const showBatchAssignEnvModal = ref(false)
+const batchAssignEnvLoading = ref(false)
+
+const statusOptions = [
+  { label: '待处理', value: 'pending' },
+  { label: '转发已创建', value: 'forwarding_created' },
+  { label: '环境已创建', value: 'env_created' },
+  { label: '注册中', value: 'registering' },
+  { label: '已完成', value: 'completed' },
+  { label: '失败', value: 'failed' },
+]
+
+const statusColorMap = {
+  pending: 'default',
+  forwarding_created: 'info',
+  env_created: 'info',
+  registering: 'warning',
+  completed: 'success',
+  failed: 'error',
+}
+const statusLabelMap = {
+  pending: '待处理',
+  forwarding_created: '转发已创建',
+  env_created: '环境已创建',
+  registering: '注册中',
+  completed: '已完成',
+  failed: '失败',
+}
+
+// ── 操作弹窗 ──
+const showActionModal = ref(false)
+const actionModalTitle = ref('')
+const actionModalLoading = ref(false)
+const actionType = ref('')
+const actionTargetRow = ref(null)
+const actionForm = reactive({ country_id: 0, application_id: 2, max_price: null, timeout: 300, interval: 10 })
+const actionFormRef = ref(null)
+
+// ── 新增/编辑弹窗 ──
+const modalVisible = ref(false)
+const modalTitle = ref('新增注册')
+const modalLoading = ref(false)
+const modalFormRef = ref(null)
+
+const modalForm = reactive({
+  id: null,
+  alias: '',
+  domain: '',
+  full_name: '',
+  first_name: '',
+  last_name: '',
+  password: '',
+  forward_to: '',
+  zip_code: '',
+  shipping_address_1: '',
+  shipping_address_2: '',
+  country: '',
+  province_state: '',
+  city: '',
+  phone: '',
+  registration_email: '',
+  recovery_email: '',
+  registration_status: 'pending',
+  env_id: '',
+})
+
+function handleAdd() {
+  modalTitle.value = '新增注册'
+  Object.assign(modalForm, {
+    id: null,
+    alias: '',
+    domain: '',
+    full_name: '',
+    first_name: '',
+    last_name: '',
+    password: '',
+    forward_to: '',
+    zip_code: '',
+    shipping_address_1: '',
+    shipping_address_2: '',
+    country: '',
+    province_state: '',
+    city: '',
+    phone: '',
+    registration_email: '',
+    recovery_email: '',
+    registration_status: 'pending',
+    env_id: '',
+  })
+  modalVisible.value = true
+}
+
+async function handleAutoGenerate() {
+  generating.value = true
+  try {
+    const res = await api.regGenerateInfo()
+    const data = res.data || {}
+    if (data.alias) modalForm.alias = data.alias
+    if (data.full_name) modalForm.full_name = data.full_name
+    if (data.first_name) modalForm.first_name = data.first_name
+    if (data.last_name) modalForm.last_name = data.last_name
+    if (data.password) modalForm.password = data.password
+    if (data.country) modalForm.country = data.country
+    if (data.province_state) modalForm.province_state = data.province_state
+    if (data.city) modalForm.city = data.city
+    if (data.zip_code) modalForm.zip_code = data.zip_code
+    if (data.shipping_address_1) modalForm.shipping_address_1 = data.shipping_address_1
+    if (data.phone) modalForm.phone = data.phone
+    message.success('已自动填充注册信息')
+  } catch (e) {
+    message.error('自动生成失败')
+  } finally {
+    generating.value = false
+  }
+}
+
+function handleEdit(row) {
+  modalTitle.value = '编辑注册'
+  Object.assign(modalForm, {
+    id: row.id,
+    alias: row.alias,
+    domain: row.domain,
+    full_name: row.full_name,
+    first_name: row.first_name || '',
+    last_name: row.last_name || '',
+    password: row.password,
+    forward_to: row.forward_to,
+    zip_code: row.zip_code || '',
+    shipping_address_1: row.shipping_address_1 || '',
+    shipping_address_2: row.shipping_address_2 || '',
+    country: row.country || '',
+    province_state: row.province_state || '',
+    city: row.city || '',
+    phone: row.phone || '',
+    registration_email: row.registration_email,
+    recovery_email: row.recovery_email,
+    registration_status: row.registration_status,
+    env_id: row.env_id,
+  })
+  modalVisible.value = true
+}
+
+async function handleSave() {
+  modalLoading.value = true
+  try {
+    if (modalForm.id) {
+      await api.regUpdate({ ...modalForm })
+    } else {
+      if (!modalForm.alias || !modalForm.domain) {
+        message.warning('别名和域名不能为空')
+        modalLoading.value = false
+        return
+      }
+      await api.regCreate({ ...modalForm })
+    }
+    message.success(modalForm.id ? '更新成功' : '创建成功')
+    modalVisible.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '操作失败')
+  } finally {
+    modalLoading.value = false
+  }
+}
+
+// ── 流程操作 ──
+
+function openActionModal(type, row, title) {
+  actionType.value = type
+  actionTargetRow.value = row
+  actionModalTitle.value = title
+  showActionModal.value = true
+}
+
+async function confirmAction() {
+  actionModalLoading.value = true
+  const row = actionTargetRow.value
+  try {
+    switch (actionType.value) {
+      case 'createForwarding':
+        await api.regCreateForwarding({ registration_id: row.id })
+        message.success('转发邮箱创建成功')
+        break
+      case 'createEnv':
+        await api.regCreateEnv({ registration_id: row.id })
+        message.success('环境创建成功')
+        break
+      case 'getPhone':
+        await api.regGetPhone({
+          registration_id: row.id,
+          country_id: actionForm.country_id || null,
+          application_id: actionForm.application_id || null,
+          max_price: actionForm.max_price || null,
+        })
+        message.success('号码获取成功')
+        break
+      case 'waitSms':
+        await api.regWaitSms({ registration_id: row.id, timeout: actionForm.timeout, interval: actionForm.interval })
+        message.success('验证码接收成功')
+        break
+      case 'confirmSms':
+        await api.regConfirmSms({ registration_id: row.id, status: 'used' })
+        message.success('SMS 已确认')
+        break
+    }
+    showActionModal.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '操作失败')
+  } finally {
+    actionModalLoading.value = false
+  }
+}
+
+// ── 批量操作 ──
+
+function onCheckedChange(keys) {
+  checkedRowKeys.value = keys
+}
+
+async function handleDeleteSingle(id) {
+  try {
+    await api.regBatchDelete([id])
+    message.success('删除成功')
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '删除失败')
+  }
+}
+
+// ── 统一批量操作 ──
+
+const batchOpMap = {
+  createForwarding: { api: 'regBatchCreateForwarding', label: '创建转发' },
+  createEnv: { api: 'regBatchCreateEnv', label: '创建环境' },
+  getPhone: { api: 'regBatchGetPhone', label: '获取号码' },
+  waitSms: { api: 'regBatchWaitSms', label: '等待短信' },
+  confirmSms: { api: 'regBatchConfirmSms', label: '确认完成' },
+}
+
+async function handleBatchOp(op) {
+  if (!checkedRowKeys.value.length) return
+  const { api: apiMethod, label } = batchOpMap[op]
+  batchLoading.value = op
+  try {
+    const res = await api[apiMethod](checkedRowKeys.value)
+    const data = res.data || {}
+    message.success(`${label}：成功 ${data.ok || 0} 条，失败 ${data.fail || 0} 条`)
+    checkedRowKeys.value = []
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || `${label}失败`)
+    throw e
+  } finally {
+    batchLoading.value = null
+  }
+}
+
+async function handleBatchDelete() {
+  if (!checkedRowKeys.value.length) return
+  batchDeleteLoading.value = true
+  try {
+    await api.regBatchDelete(checkedRowKeys.value)
+    message.success(`已删除 ${checkedRowKeys.value.length} 条`)
+    checkedRowKeys.value = []
+    showBatchDeleteConfirm.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '删除失败')
+    throw e
+  } finally {
+    batchDeleteLoading.value = false
+  }
+}
+
+async function handleBatchAssignEnv() {
+  if (!checkedRowKeys.value.length) return
+  batchAssignEnvLoading.value = true
+  try {
+    const res = await api.regBatchAssignEnv({
+      ids: checkedRowKeys.value,
+    })
+    const data = res.data || {}
+    const reasons = data.skip_reasons || []
+    if ((data.assigned || 0) > 0) {
+      message.success(`已分配 ${data.assigned} 条`)
+    }
+    if ((data.skipped || 0) > 0 || (data.no_site || 0) > 0) {
+      message.warning(`跳过 ${data.skipped || 0} 条，无可用站点 ${data.no_site || 0} 条`)
+    }
+    if (reasons.length > 0) {
+      reasons.forEach((r) => message.info(r))
+    }
+    checkedRowKeys.value = []
+    showBatchAssignEnvModal.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '分配失败')
+    throw e
+  } finally {
+    batchAssignEnvLoading.value = false
+  }
+}
+
+function openBatchGenerate() {
+  batchGenForm.alias = 'admin'
+  batchGenForm.forward_to = ''
+  showBatchGenModal.value = true
+}
+
+async function handleBatchGenerate() {
+  batchGenLoading.value = true
+  try {
+    const res = await api.regBatchGenerate({ alias: batchGenForm.alias, forward_to: batchGenForm.forward_to })
+    const data = res.data || {}
+    message.success(`成功生成 ${data.created || 0} 条，跳过 ${data.skipped || 0} 条，失败 ${data.failed || 0} 条`)
+    showBatchGenModal.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '批量生成失败')
+    throw e
+  } finally {
+    batchGenLoading.value = false
+  }
+}
+
+async function handleBatchStatusUpdate() {
+  if (!checkedRowKeys.value.length) return
+  try {
+    await api.regBatchUpdateStatus({
+      ids: checkedRowKeys.value,
+      registration_status: batchTargetStatus.value,
+    })
+    message.success('状态已更新')
+    checkedRowKeys.value = []
+    showBatchStatusModal.value = false
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '更新失败')
+  }
+}
+
+// ── 表格列定义 ──
+
+const columns = [
+  { type: 'selection', width: 40 },
+  {
+    title: '序号', key: '_index', width: 50, align: 'center',
+    render: (_row, rowIndex) => (pagination.page - 1) * pagination.pageSize + rowIndex + 1,
+  },
+  { title: '别名', key: 'alias', width: 100 },
+  { title: '站点域名', key: 'domain', width: 140 },
+  { title: '姓名', key: 'full_name', width: 140 },
+  {
+    title: '密码', key: 'password', width: 80,
+    render: (row) => h(
+      NButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        onClick: () => {
+          navigator.clipboard.writeText(row.password)
+          message.success('密码已复制')
+        },
+      },
+      { default: () => row.password },
+    ),
+  },
+  { title: '环境 ID', key: 'env_id', width: 130 },
+  {
+    title: 'SMS号码', key: 'sms_phone_number', width: 100,
+    render: (row) => row.sms_phone_number ? h(
+      NButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        onClick: () => {
+          navigator.clipboard.writeText(row.sms_phone_number)
+          message.success('号码已复制')
+        },
+      },
+      { default: () => row.sms_phone_number },
+    ) : null,
+  },
+  {
+    title: '验证码', key: 'sms_code', width: 80,
+    render: (row) => row.sms_code ? h(
+      NButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        onClick: () => {
+          navigator.clipboard.writeText(row.sms_code)
+          message.success('验证码已复制')
+        },
+      },
+      { default: () => row.sms_code },
+    ) : null,
+  },
+  {
+    title: '注册状态', key: 'registration_status', width: 90,
+    render: (row) => h(
+      NTag,
+      { type: statusColorMap[row.registration_status] || 'default', size: 'small' },
+      { default: () => statusLabelMap[row.registration_status] || row.registration_status },
+    ),
+  },
+  {
+    title: '操作', key: 'actions', width: 480, fixed: 'right',
+    render: (row) => {
+      const isCompleted = row.registration_status === 'completed'
+      const hasEnv = !!row.env_id
+      const hasForwarding = row.improvmx_status === 'success'
+      const hasPhone = row.sms_status === 'acquired'
+      const hasCode = row.sms_status === 'code_received'
+
+      return h(NSpace, { size: 'small' }, {
+        default: () => [
+          h(NButton, { size: 'tiny', onClick: () => handleDetail(row) }, { default: () => '详情' }),
+          h(NButton, { size: 'tiny', onClick: () => handleEdit(row) }, { default: () => '编辑' }),
+          h(NButton, {
+            size: 'tiny',
+            type: hasForwarding ? 'default' : 'primary',
+            disabled: isCompleted || hasForwarding,
+            onClick: () => openActionModal('createForwarding', row, '创建转发邮箱'),
+          }, { default: () => hasForwarding ? '已转发' : '创建转发' }),
+          h(NButton, {
+            size: 'tiny',
+            type: hasEnv ? 'default' : 'primary',
+            disabled: isCompleted || hasEnv || !hasForwarding,
+            onClick: () => openActionModal('createEnv', row, '创建环境'),
+          }, { default: () => hasEnv ? '已建环境' : '创建环境' }),
+          h(NButton, {
+            size: 'tiny',
+            type: hasPhone ? 'default' : 'warning',
+            disabled: isCompleted || hasPhone || !hasEnv,
+            onClick: () => openActionModal('getPhone', row, '获取号码'),
+          }, { default: () => hasPhone ? '已取号' : '取号码' }),
+          h(NButton, {
+            size: 'tiny',
+            type: hasCode ? 'default' : 'warning',
+            disabled: isCompleted || hasCode || !hasPhone,
+            onClick: () => openActionModal('waitSms', row, '等待验证码'),
+          }, { default: () => hasCode ? '已验证' : '等验证码' }),
+          h(NButton, {
+            size: 'tiny',
+            type: 'success',
+            disabled: isCompleted || !hasCode,
+            onClick: () => openActionModal('confirmSms', row, '确认完成'),
+          }, { default: () => '完成' }),
+          h(NPopconfirm, { onPositiveClick: () => handleDeleteSingle(row.id) }, {
+            default: () => '确定删除？',
+            trigger: () => h(NButton, { size: 'tiny', type: 'error' }, { default: () => '删除' }),
+          }),
+        ],
+      })
+    },
+  },
+]
+</script>

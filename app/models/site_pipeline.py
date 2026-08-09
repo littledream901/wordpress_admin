@@ -33,6 +33,13 @@ class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     woo_product_count = fields.IntField(default=0, description='WooCommerce远端产品总数')
     shopify_store_url = fields.CharField(max_length=500, default='', description='Shopify店铺URL')
     shopify_token = fields.CharField(max_length=255, default='', description='Shopify Access Token')
+    gateway_defense_status = fields.CharField(max_length=64, default='', description='网关防御状态', db_index=True)
+    gateway_defense_type = fields.CharField(max_length=32, default='', description='网关防御类型: worker / nginx_lua')
+    gateway_site_key = fields.CharField(max_length=255, default='', description='网关站点密钥 (site_xxxxxxxx)')
+    gateway_site_secret = fields.CharField(max_length=255, default='', description='网关签名密钥')
+    gateway_deployed_at = fields.DatetimeField(null=True, description='网关部署时间')
+    gateway_config_json = fields.TextField(default='{}', description='网关配置(JSON)')
+    gateway_last_error = fields.TextField(default='', description='最后错误信息')
 
     class Meta:
         table = 'site_pipeline_site'

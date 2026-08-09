@@ -22,6 +22,11 @@ from app.schemas.site_pipeline import (
     HubStudioJobCreate, HubStudioJobReport,
     SiteBatchCreate, SiteCreate, SiteUpdate,
 )
+from app.schemas.gateway_defense import (
+    GatewayDefenseCreate,
+    GatewayDefenseBatchDeploy,
+    GatewayDefenseUpdate,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -180,6 +185,28 @@ async def batch_import_products(site_ids: list[int] = Body(...)):
     return Success(data=data)
 
 
+@router.post('/site/batch-gateway-defense', summary='批量部署网关防御')
+async def batch_deploy_gateway_defense(payload: GatewayDefenseBatchDeploy):
+    """
+    批量部署网关防御
+    
+    支持三种密钥模式：
+    1. 统一密钥：所有站点使用相同的 site_key 和 site_secret
+    2. 独立密钥：通过 credentials_map 为每个站点指定不同密钥
+    3. 自动生成：不提供密钥时自动为每个站点生成
+    """
+    result = await site_pipeline_controller.batch_deploy_gateway_defense(
+        site_ids=payload.site_ids,
+        gateway_url=payload.gateway_url,
+        site_key=payload.site_key,
+        site_secret=payload.site_secret,
+        credentials_map=payload.credentials_map,
+        fail_mode=payload.fail_mode,
+        sdk_inject=payload.sdk_inject
+    )
+    return Success(data=result['data'], msg=f'已部署 {result["data"]["success"]} 个站点')
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  单条操作端点
 # ══════════════════════════════════════════════════════════════════════════
@@ -230,6 +257,71 @@ async def refresh_product_count(site_id: int):
     if result['ok']:
         return Success(data=result['data'], msg=f'远端产品总数: {result["data"]["product_count"]}')
     return Fail(code=result.get('code', 500), msg=result.get('error'))
+
+
+@router.post('/site/{site_id}/gateway-defense', summary='部署网关防御')
+async def deploy_gateway_defense(site_id: int, payload: GatewayDefenseCreate):
+    """
+    部署网关防御
+    
+    支持外部提供密钥或自动生成：
+    - 提供 site_key 和 site_secret：使用外部密钥
+    - 不提供：自动生成新密钥
+    """
+    result = await site_pipeline_controller.deploy_gateway_defense(
+        site_id=site_id,
+        gateway_url=payload.gateway_url,
+        site_key=payload.site_key,
+        site_secret=payload.site_secret,
+        fail_mode=payload.fail_mode,
+        sdk_inject=payload.sdk_inject
+    )
+    if result['ok']:
+        return Success(data=result, msg='网关防御部署成功')
+    return Fail(code=500, msg=result.get('error'))
+
+
+@router.get('/site/{site_id}/gateway-credentials', summary='获取站点网关凭证')
+async def get_gateway_credentials(site_id: int):
+    """获取站点的网关凭证信息"""
+    result = await site_pipeline_controller.get_gateway_credentials(site_id)
+    return Success(data=result['data'])
+
+
+@router.get('/site/{site_id}/gateway-provider-info', summary='获取站点网关防御 Provider 信息')
+async def get_gateway_provider_info(site_id: int):
+    """
+    获取站点网关防御相关的 Provider 信息
+    
+    返回：
+    - Shopify 站点：返回绑定的 Cloudflare Provider
+    - WordPress 站点：返回绑定的 1Panel Provider
+    """
+    result = await site_pipeline_controller.get_gateway_provider_info(site_id)
+    return Success(data=result['data'])
+
+
+@router.post('/site/{site_id}/gateway-defense/update', summary='更新网关防御配置')
+async def update_gateway_defense(site_id: int, payload: GatewayDefenseUpdate):
+    """更新已部署的网关防御配置（重新部署）"""
+    site = await site_controller.get(id=site_id)
+    
+    # 使用现有配置作为默认值
+    import json
+    gateway_url = payload.gateway_url or json.loads(site.gateway_config_json or '{}').get('gateway_url', '')
+    
+    result = await site_pipeline_controller.deploy_gateway_defense(
+        site_id=site_id,
+        gateway_url=gateway_url,
+        site_key=payload.site_key or site.gateway_site_key,
+        site_secret=payload.site_secret or site.gateway_site_secret,
+        fail_mode=payload.fail_mode or 'open',
+        sdk_inject=payload.sdk_inject if payload.sdk_inject is not None else True
+    )
+    
+    if result['ok']:
+        return Success(data=result, msg='网关防御配置已更新')
+    return Fail(code=500, msg=result.get('error'))
 
 
 # ══════════════════════════════════════════════════════════════════════════
