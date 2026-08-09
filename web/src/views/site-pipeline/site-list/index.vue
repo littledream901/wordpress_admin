@@ -102,9 +102,14 @@
         <n-form-item v-if="currentBatchAction === 'redirect'" label="目标URL" label-placement="left">
           <n-input v-model:value="batchExtraTargetUrl" placeholder="https://target.com/$1" />
         </n-form-item>
-        <n-form-item v-if="currentBatchAction === 'gateway-defense'" label="网关地址" label-placement="left">
-          <n-input v-model:value="batchGatewayUrl" placeholder="https://gateway.foxfingerlab.com" />
-        </n-form-item>
+        <template v-if="currentBatchAction === 'gateway-defense'">
+          <n-form-item label="网关地址" label-placement="left">
+            <n-input v-model:value="batchGatewayUrl" placeholder="https://gateway.foxfingerlab.com" />
+          </n-form-item>
+          <n-alert type="info" :bordered="false" style="margin-top: 8px">
+            将为每个站点生成独立的密钥对；已配置密钥的站点会复用原有密钥。
+          </n-alert>
+        </template>
         <template v-if="currentBatchAction === 'assign'">
           <n-form-item label="分配至部门" label-placement="left">
             <n-tree-select v-model:value="batchAssignDeptId" :options="deptOption" key-field="id" label-field="name" placeholder="留空不改变部门" clearable default-expand-all />
@@ -265,27 +270,47 @@
           </n-alert>
 
           <n-form :model="gatewayForm" label-placement="left" label-width="100">
-            <n-form-item label="网关地址">
-              <n-input v-model:value="gatewayForm.gateway_url" placeholder="https://gateway.foxfingerlab.com" />
-            </n-form-item>
-            
-            <n-form-item label="密钥来源">
-              <n-radio-group v-model:value="gatewayForm.key_source">
-                <n-space>
-                  <n-radio value="auto">自动生成</n-radio>
-                  <n-radio value="manual">手动输入</n-radio>
-                </n-space>
-              </n-radio-group>
+            <n-form-item label="粘贴配置">
+              <n-input-group>
+                <n-input
+                  v-model:value="configSnippet"
+                  type="textarea"
+                  :autosize="{ minRows: 2, maxRows: 6 }"
+                  placeholder='粘贴 nginx.conf 片段自动解析，例如：&#10;set $fangyu_gateway_url  "https://gateway.example.com";&#10;set $fangyu_site_id      "3";&#10;set $fangyu_site_key     "site_a8d1e78e";&#10;set $fangyu_site_secret  "aefb...";'
+                />
+                <n-button type="primary" ghost @click="parseConfigSnippet">解析</n-button>
+              </n-input-group>
+              <template #feedback>
+                <n-text depth="3" style="font-size: 12px">
+                  支持从 set $fangyu_* 指令中提取网关地址、站点标识与密钥
+                </n-text>
+              </template>
             </n-form-item>
 
-            <template v-if="gatewayForm.key_source === 'manual'">
-              <n-form-item label="站点密钥">
-                <n-input v-model:value="gatewayForm.site_key" placeholder="site_xxxxxxxx" />
-              </n-form-item>
-              <n-form-item label="签名密钥">
-                <n-input v-model:value="gatewayForm.site_secret" type="password" show-password-on="click" placeholder="48位十六进制字符串" />
-              </n-form-item>
-            </template>
+            <n-form-item label="网关地址" required>
+              <n-input v-model:value="gatewayForm.gateway_url" placeholder="https://gateway.foxfingerlab.com" />
+            </n-form-item>
+
+            <n-form-item label="网关站点ID" required>
+              <n-input v-model:value="gatewayForm.gateway_site_id" placeholder="由网关侧分配，如 3" />
+              <template #feedback>
+                <n-text depth="3" style="font-size: 12px">
+                  对应 $fangyu_site_id，由网关侧分配，不是本系统的站点ID
+                </n-text>
+              </template>
+            </n-form-item>
+
+            <n-form-item label="站点密钥" required>
+              <n-input v-model:value="gatewayForm.site_key" placeholder="site_xxxxxxxx" />
+            </n-form-item>
+            <n-form-item label="签名密钥" required>
+              <n-input v-model:value="gatewayForm.site_secret" type="password" show-password-on="click" placeholder="48位十六进制字符串" />
+              <template #feedback>
+                <n-text depth="3" style="font-size: 12px">
+                  网关站点ID与密钥均须显式提供，后端不会自动生成
+                </n-text>
+              </template>
+            </n-form-item>
 
             <n-form-item label="失败模式">
               <n-radio-group v-model:value="gatewayForm.fail_mode">
@@ -316,6 +341,32 @@
             已部署于：{{ currentSite.gateway_deployed_at || '-' }}<br>
             防御类型：{{ currentSite.gateway_defense_type === 'worker' ? 'Cloudflare Worker' : 'Nginx Lua' }}
           </n-alert>
+
+          <n-alert v-if="currentSite?.gateway_defense_status === 'failed' && currentSite?.gateway_last_error" type="error" :bordered="false">
+            <template #header>部署失败</template>
+            {{ currentSite.gateway_last_error }}
+          </n-alert>
+
+          <!-- 部署日志展示 -->
+          <n-collapse v-if="deploymentLog && deploymentLog.length > 0" arrow-placement="right">
+            <n-collapse-item title="查看部署日志" name="1">
+              <n-timeline size="small">
+                <n-timeline-item
+                  v-for="(log, idx) in deploymentLog"
+                  :key="idx"
+                  :type="log.ok ? 'success' : 'error'"
+                  :title="log.step"
+                  :time="formatLogTime(log.ts)"
+                >
+                  <n-text v-if="log.msg" :depth="log.ok ? 3 : 1" style="font-size: 12px">{{ log.msg }}</n-text>
+                </n-timeline-item>
+              </n-timeline>
+              <n-divider style="margin: 12px 0" />
+              <n-text depth="3" style="font-size: 12px">
+                总耗时: {{ deploymentDuration ? `${deploymentDuration}ms` : '-' }}
+              </n-text>
+            </n-collapse-item>
+          </n-collapse>
         </n-space>
         
         <template #footer>
@@ -333,8 +384,12 @@
       <n-modal v-model:show="showGatewayCredentials" preset="card" title="网关凭证" style="max-width: 600px">
         <n-space vertical :size="12" v-if="gatewayCredentials">
           <n-descriptions :column="1" bordered size="small">
-            <n-descriptions-item label="站点ID">{{ gatewayCredentials.site_id }}</n-descriptions-item>
+            <n-descriptions-item label="本地站点ID">{{ gatewayCredentials.site_id }}</n-descriptions-item>
             <n-descriptions-item label="域名">{{ gatewayCredentials.domain }}</n-descriptions-item>
+            <n-descriptions-item label="网关站点ID">
+              <n-text v-if="gatewayCredentials.gateway_site_id" code>{{ gatewayCredentials.gateway_site_id }}</n-text>
+              <n-text v-else depth="3">未配置</n-text>
+            </n-descriptions-item>
             <n-descriptions-item label="站点密钥">
               <n-text code>{{ gatewayCredentials.gateway_site_key }}</n-text>
             </n-descriptions-item>
@@ -353,6 +408,33 @@
               {{ gatewayCredentials.gateway_deployed_at || '-' }}
             </n-descriptions-item>
           </n-descriptions>
+
+          <!-- 最后错误信息 -->
+          <n-alert v-if="gatewayCredentials.gateway_last_error" type="error" :bordered="false">
+            <template #header>最后错误</template>
+            {{ gatewayCredentials.gateway_last_error }}
+          </n-alert>
+
+          <!-- 历史部署日志 -->
+          <n-collapse v-if="credentialLog && credentialLog.length > 0" arrow-placement="right">
+            <n-collapse-item title="查看部署日志" name="1">
+              <n-timeline size="small">
+                <n-timeline-item
+                  v-for="(log, idx) in credentialLog"
+                  :key="idx"
+                  :type="log.ok ? 'success' : 'error'"
+                  :title="log.step"
+                  :time="formatLogTime(log.ts)"
+                >
+                  <n-text v-if="log.msg" :depth="log.ok ? 3 : 1" style="font-size: 12px">{{ log.msg }}</n-text>
+                </n-timeline-item>
+              </n-timeline>
+              <n-divider style="margin: 12px 0" />
+              <n-text depth="3" style="font-size: 12px">
+                总耗时: {{ credentialDuration ? `${credentialDuration}ms` : '-' }}
+              </n-text>
+            </n-collapse-item>
+          </n-collapse>
         </n-space>
         <template #footer>
           <n-space justify="end">
@@ -480,7 +562,7 @@
 <script setup>
 import { ref, reactive, h, onMounted, computed, watch, resolveDirective, withDirectives } from 'vue'
 import { useRouter } from 'vue-router'
-import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, useMessage, useNotification } from 'naive-ui'
+import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, NTooltip, useMessage, useNotification } from 'naive-ui'
 import DateRangeFilter from '@/components/common/DateRangeFilter.vue'
 import api from '@/api/site-pipeline'
 import baseApi from '@/api'
@@ -624,57 +706,142 @@ const showGatewayCredentials = ref(false)
 const currentSite = ref(null)
 const gatewayDeployLoading = ref(false)
 const gatewayCredentials = ref(null)
+// 部署日志（来自后端 task_log）
+const deploymentLog = ref([])
+const deploymentDuration = ref(null)
+// 凭证弹窗中的历史部署日志
+const credentialLog = ref([])
+const credentialDuration = ref(null)
+// 粘贴的 nginx 配置片段（用于自动解析凭证）
+const configSnippet = ref('')
 const gatewayForm = reactive({
   gateway_url: 'https://gateway.foxfingerlab.com',
-  key_source: 'auto',
+  gateway_site_id: '',
   site_key: '',
   site_secret: '',
   fail_mode: 'open',
   sdk_inject: true,
 })
 
+// 格式化日志时间（ISO 字符串 → HH:mm:ss）
+function formatLogTime(ts) {
+  if (!ts) return ''
+  try {
+    return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false })
+  } catch {
+    return ts
+  }
+}
+
 function openGatewayDefenseDialog(row) {
   currentSite.value = row
+  configSnippet.value = ''
   gatewayForm.gateway_url = 'https://gateway.foxfingerlab.com'
-  gatewayForm.key_source = 'auto'
-  gatewayForm.site_key = ''
-  gatewayForm.site_secret = ''
+  gatewayForm.gateway_site_id = row.gateway_site_id || ''
+  gatewayForm.site_key = row.gateway_site_key || ''
+  gatewayForm.site_secret = row.gateway_site_secret || ''
   gatewayForm.fail_mode = 'open'
   gatewayForm.sdk_inject = true
+  loadDeploymentLog(row)
   showGatewayDefense.value = true
+}
+
+// 解析粘贴的 nginx 配置片段，提取 $fangyu_* 变量
+function parseConfigSnippet() {
+  if (!configSnippet.value.trim()) {
+    message.warning('请先粘贴配置片段')
+    return
+  }
+  
+  const text = configSnippet.value
+  const patterns = {
+    gateway_url: /set\s+\$fangyu_gateway_url\s+["']([^"']+)["']/,
+    gateway_site_id: /set\s+\$fangyu_site_id\s+["']([^"']+)["']/,
+    site_key: /set\s+\$fangyu_site_key\s+["']([^"']+)["']/,
+    site_secret: /set\s+\$fangyu_site_secret\s+["']([^"']+)["']/,
+  }
+  
+  let found = 0
+  for (const [key, regex] of Object.entries(patterns)) {
+    const match = text.match(regex)
+    if (match && match[1]) {
+      gatewayForm[key] = match[1]
+      found++
+    }
+  }
+  
+  if (found > 0) {
+    message.success(`已解析 ${found} 个字段`)
+  } else {
+    message.warning('未识别到有效的 $fangyu_* 变量')
+  }
+}
+
+// 从站点配置中解析历史部署日志
+function loadDeploymentLog(row) {
+  deploymentLog.value = []
+  deploymentDuration.value = null
+  if (!row?.gateway_config_json) return
+  try {
+    const config = typeof row.gateway_config_json === 'string'
+      ? JSON.parse(row.gateway_config_json)
+      : row.gateway_config_json
+    deploymentLog.value = config?.task_log || []
+    deploymentDuration.value = config?.duration_ms ?? null
+  } catch {
+    deploymentLog.value = []
+  }
 }
 
 async function deployGatewayDefense() {
   if (!currentSite.value) return
   
-  // 验证手动输入的密钥
-  if (gatewayForm.key_source === 'manual') {
-    if (!gatewayForm.site_key || !gatewayForm.site_secret) {
-      message.error('请输入完整的站点密钥和签名密钥')
-      return
-    }
+  // 网关地址、网关站点ID、密钥对均须外部提供
+  if (!gatewayForm.gateway_url) {
+    message.error('请填写网关地址')
+    return
+  }
+  if (!gatewayForm.gateway_site_id) {
+    message.error('请填写网关站点ID（由网关侧分配，可从配置片段解析）')
+    return
+  }
+  if (!gatewayForm.site_key || !gatewayForm.site_secret) {
+    message.error('请填写站点密钥和签名密钥（可从配置片段解析）')
+    return
   }
   
   gatewayDeployLoading.value = true
   try {
-    const payload = {
+    const res = await api.deployGatewayDefense(currentSite.value.id, {
       gateway_url: gatewayForm.gateway_url,
+      gateway_site_id: gatewayForm.gateway_site_id,
+      site_key: gatewayForm.site_key,
+      site_secret: gatewayForm.site_secret,
       fail_mode: gatewayForm.fail_mode,
       sdk_inject: gatewayForm.sdk_inject,
+    })
+    
+    // 接入任务队列后，返回 job_id，启动轮询查看进度
+    const jobId = res?.data?.job_id
+    if (jobId) {
+      message.success(`网关防御部署已提交，任务 #${jobId}`)
+      startGatewayDefensePolling(jobId, currentSite.value.domain, currentSite.value.id)
+      // 清空旧日志，等轮询获取新结果
+      deploymentLog.value = []
+      deploymentDuration.value = null
+    } else {
+      // 兜底：旧版同步返回
+      if (res?.data?.task_log) {
+        deploymentLog.value = res.data.task_log
+        deploymentDuration.value = res.data.duration_ms ?? null
+      }
+      message.success('网关防御部署成功')
     }
     
-    // 只在手动输入时传递密钥
-    if (gatewayForm.key_source === 'manual') {
-      payload.site_key = gatewayForm.site_key
-      payload.site_secret = gatewayForm.site_secret
-    }
-    
-    await api.deployGatewayDefense(currentSite.value.id, payload)
-    message.success('网关防御部署成功')
-    showGatewayDefense.value = false
     reload()
   } catch (e) {
-    message.error(e?.response?.data?.msg || '部署失败')
+    const errMsg = e?.response?.data?.msg || '部署失败'
+    message.error(errMsg)
   } finally {
     gatewayDeployLoading.value = false
   }
@@ -686,6 +853,10 @@ async function viewGatewayCredentials() {
   try {
     const res = await api.getGatewayCredentials(currentSite.value.id)
     gatewayCredentials.value = res?.data || null
+    // 从 gateway_config 中解析部署日志
+    const config = gatewayCredentials.value?.gateway_config || {}
+    credentialLog.value = config.task_log || []
+    credentialDuration.value = config.duration_ms ?? null
     showGatewayCredentials.value = true
   } catch (e) {
     message.error(e?.response?.data?.msg || '获取凭证失败')
@@ -790,10 +961,25 @@ const columns = [
     }),
   },
   { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
-  { title: '域名', key: 'domain', width: 140, ellipsis: { tooltip: true }, align: 'center' },
-  { title: '服务器IP', key: 'server_ip', width: 140, align: 'center',
-    render: (r) => r.platform === 'shopify' ? h('span', { style: 'color:#999' }, '-') : (r.server_ip || '-'),
+  { 
+    title: '域名', 
+    key: 'domain', 
+    width: 140, 
+    align: 'center',
+    render: (row) => {
+      const tooltipText = row.platform === 'shopify' 
+        ? row.domain 
+        : (row.server_ip ? `${row.domain}\nIP: ${row.server_ip}` : row.domain)
+      
+      return h('span', { 
+        style: 'cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block;',
+        title: tooltipText 
+      }, row.domain)
+    }
   },
+  // { title: '服务器IP', key: 'server_ip', width: 140, align: 'center',
+  //   render: (r) => r.platform === 'shopify' ? h('span', { style: 'color:#999' }, '-') : (r.server_ip || '-'),
+  // },
   { title: '平台', key: 'platform', width: 60, render: (r) => h(NTag, { type: r.platform === 'shopify' ? 'success' : 'info', size: 'small' }, { default: () => r.platform === 'shopify' ? 'Shopify' : 'WP' }), align: 'center' },
   { title: '解析状态', key: 'cloudflare_status', width: 70, render: (r) => statusTag(r.cloudflare_status), align: 'center' },
   { title: '站点状态', key: 'status', width: 70, render: (r) => statusTag(r.status), align: 'center' },
@@ -817,10 +1003,33 @@ const columns = [
   { title: '网关防御', key: 'gateway_defense_status', width: 90, 
     render: (r) => {
       const status = r.gateway_defense_status || ''
-      if (!status) return h(NTag, { type: 'default', size: 'small' }, { default: () => '未部署' })
-      if (status === 'deployed') return h(NTag, { type: 'success', size: 'small' }, { default: () => '已部署' })
-      if (status === 'failed') return h(NTag, { type: 'error', size: 'small' }, { default: () => '失败' })
-      return h(NTag, { type: 'warning', size: 'small' }, { default: () => status })
+      const error = r.gateway_last_error || ''
+      
+      let tagType = 'default'
+      let tagText = '未部署'
+      
+      if (status === 'deployed') {
+        tagType = 'success'
+        tagText = '已部署'
+      } else if (status === 'failed') {
+        tagType = 'error'
+        tagText = '失败'
+      } else if (status) {
+        tagType = 'warning'
+        tagText = status
+      }
+      
+      const tag = h(NTag, { type: tagType, size: 'small' }, { default: () => tagText })
+      
+      // 如果有错误信息，包裹在 tooltip 中
+      if (error && status === 'failed') {
+        return h(NTooltip, {}, {
+          trigger: () => tag,
+          default: () => error
+        })
+      }
+      
+      return tag
     }, 
     align: 'center' 
   },
@@ -841,7 +1050,7 @@ const columns = [
             ? h(NButton, { size: 'tiny', type: 'default', disabled: true }, { default: () => '建站' })
             : withDirectives(h(NButton, { size: 'tiny', type: 'success', ghost: !provisionOk, onClick: () => doSingleAction('provision', row.id) }, { default: () => '建站' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/provision']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'primary', ghost: !importOk, onClick: () => doSingleAction('woo-import', row.id) }, { default: () => '导入产品' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/woo-import']]),
-          withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/redirect']]),
+          // withDirectives(h(NButton, { size: 'tiny', type: 'warning', ghost: !redirectOk, onClick: () => doSingleAction('redirect', row.id) }, { default: () => '重定向' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/redirect']]),
           withDirectives(h(NButton, { size: 'tiny', type: 'error', ghost: !gatewayOk, onClick: () => openGatewayDefenseDialog(row) }, { default: () => '网关防御' }), [[vPermission, 'post/api/v1/site-pipeline/site/{site_id}/gateway-defense']]),
           row.gmail_username
             ? withDirectives(h(NButton, { size: 'tiny', type: 'success', onClick: () => doSingleAction('unassign-gmail', row.id) }, { default: () => '取消Gmail' }), [[vPermission, 'post/api/v1/gmail/unassign']])
@@ -1039,12 +1248,47 @@ async function executeBatchAction() {
     } else if (action === 'redirect') {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
     } else if (action === 'gateway-defense') {
+      // 凭证必须外部提供：仅下发已配置齐全的站点，缺失的由后端标记失败
+      const rows = $table.value?.tableData || []
+      const credentialsMap = {}
+      for (const id of ids) {
+        const row = rows.find(r => r.id === id)
+        if (row?.gateway_site_id && row?.gateway_site_key && row?.gateway_site_secret) {
+          credentialsMap[id] = {
+            gateway_site_id: row.gateway_site_id,
+            site_key: row.gateway_site_key,
+            site_secret: row.gateway_site_secret,
+          }
+        }
+      }
       res = await api.batchDeployGatewayDefense({
         site_ids: ids,
         gateway_url: batchGatewayUrl.value || 'https://gateway.foxfingerlab.com',
+        credentials_map: credentialsMap,
         fail_mode: 'open',
         sdk_inject: true,
       })
+      // 接入任务队列后为异步入队，展示汇总并引导任务中心
+      const gwData = res?.data ?? {}
+      const queued = gwData.queued ?? 0
+      const rejected = gwData.rejected ?? 0
+      notification.create({
+        type: rejected > 0 ? 'warning' : 'info',
+        title: '批量网关防御部署已提交',
+        content: () => h('div', { style: 'line-height: 1.8' }, [
+          `已入队 ${queued} / ${gwData.total ?? ids.length} 个站点`,
+          rejected > 0 ? `，${rejected} 个被拒绝（重复任务或站点不存在）` : '',
+          h('br'),
+          h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
+        ]),
+        duration: 15000,
+        closable: true,
+      })
+      showBatchConfirm.value = false
+      checkedRowKeys.value = []
+      currentBatchAction.value = ''
+      reload()
+      return  // 异步后台任务，不展示结果表
     } else if (action === 'assign-gmail') {
       res = await gmailApi.batchAutoAssign(ids)
     } else if (action === 'assign') {
@@ -1199,6 +1443,189 @@ const MAX_POLL_JOBS = 3                  // 当前页最多同时轮询的 job �
 const provisionJobs = new Map()          // key → { jobId, domain, n, pending: bool }
 let provisionPoller = null               // 全局 setInterval id
 let provisionPollRound = 0               // 轮询轮次（用于降低 pending 复查频率）
+
+// 网关防御部署轮询（复用相同机制，独立 Map）
+const gatewayDefenseJobs = new Map()
+let gatewayDefensePoller = null
+let gatewayDefensePollRound = 0
+
+function startGatewayDefensePolling(jobId, domain, siteId) {
+  const key = `${siteId}_${jobId}`
+  
+  if (gatewayDefenseJobs.size >= MAX_POLL_JOBS) {
+    notification.create({
+      type: 'info',
+      title: '网关防御部署已提交',
+      content: `任务 #${jobId} (${domain}) 已提交，当前轮询任务已达上限，请前往任务中心查看`,
+      duration: 8000,
+      closable: true,
+    })
+    return
+  }
+  
+  const old = gatewayDefenseJobs.get(key)
+  if (old) { old.n.destroy(); gatewayDefenseJobs.delete(key) }
+  
+  const n = notification.create({
+    title: `网关防御部署中: ${domain}`,
+    content: '准备中...',
+    duration: 0,
+    closable: true,
+    onClose: () => {
+      gatewayDefenseJobs.delete(key)
+      if (gatewayDefenseJobs.size === 0 && gatewayDefensePoller) {
+        clearInterval(gatewayDefensePoller)
+        gatewayDefensePoller = null
+      }
+    },
+  })
+  
+  gatewayDefenseJobs.set(key, {
+    jobId,
+    domain,
+    siteId,
+    n,
+    pending: false,
+    retries: 0,
+    pollCount: 0,
+    maxPollCount: 60,  // 60 × 10s = 600s，与后端超时一致
+  })
+  
+  if (!gatewayDefensePoller) {
+    registerStopAllPollingHandler(_stopGatewayDefensePoll)
+    gatewayDefensePoller = setInterval(_pollAllGatewayDefense, 10000)
+    _pollAllGatewayDefense()
+  }
+}
+
+async function _pollAllGatewayDefense() {
+  if (isForceLoggingOut()) {
+    _stopGatewayDefensePoll()
+    gatewayDefenseJobs.clear()
+    return
+  }
+  
+  gatewayDefensePollRound++
+  const recheckPending = gatewayDefensePollRound % 3 === 0
+  
+  const entries = [...gatewayDefenseJobs.entries()]
+  for (const [k, v] of entries) {
+    v.pollCount = (v.pollCount || 0) + 1
+    if (v.pollCount > (v.maxPollCount || 60)) {
+      v.n.type = 'info'
+      v.n.title = `后台继续执行: ${v.domain}`
+      v.n.content = () => {
+        return h('span', [
+          `任务 #${v.jobId} 仍在执行，`,
+          h('a', {
+            href: 'javascript:void(0)',
+            onClick: goToJobs,
+            style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer',
+          }, '点击前往任务中心查看'),
+        ])
+      }
+      v.n.duration = 12000
+      v.n.closable = true
+      gatewayDefenseJobs.delete(k)
+      continue
+    }
+    
+    if (v.pending && !recheckPending) continue
+    if (!v.jobId) continue
+    
+    try {
+      const res = await api.getJob({ id: v.jobId })
+      const job = res?.data
+      if (!job) continue
+      
+      if (job.status === 'pending' || job.status === 'queued') {
+        v.pending = true
+        v.n.content = '[等待中...]'
+        continue
+      }
+      
+      v.pending = false
+      if (job.status === 'success') {
+        v.n.type = 'success'
+        v.n.title = `网关防御部署完成: ${v.domain}`
+        v.n.content = '部署成功，配置已生效'
+        v.n.duration = 8000
+        v.n.closable = true
+        gatewayDefenseJobs.delete(k)
+        
+        // 刷新表格 + 如果当前打开的就是该站点，刷新日志
+        setTimeout(() => {
+          reload()
+          if (currentSite.value?.id === v.siteId) {
+            try {
+              const result = JSON.parse(job.result_json || '{}')
+              deploymentLog.value = result.steps || []
+            } catch {}
+          }
+        }, 1000)
+      } else if (job.status === 'failed' || job.status === 'cancelled') {
+        v.n.type = job.status === 'cancelled' ? 'warning' : 'error'
+        v.n.title = `网关防御部署${job.status === 'cancelled' ? '取消' : '失败'}: ${v.domain}`
+        v.n.content = job.error_message || (job.status === 'cancelled' ? '任务已被取消' : '未知错误')
+        v.n.duration = 15000
+        v.n.closable = true
+        gatewayDefenseJobs.delete(k)
+        setTimeout(reload, 1000)
+      } else if (job.status === 'running') {
+        v.n.content = `[部署中] ${job.step || 'deploying'}`
+      }
+    } catch (err) {
+      if (err?.__forceLogout) {
+        gatewayDefenseJobs.delete(k)
+        _stopGatewayDefensePoll()
+        break
+      }
+      const code = err?.code || err?.response?.status || 0
+      if (code === 404) {
+        v.n.type = 'warning'
+        v.n.title = `任务丢失: ${v.domain}`
+        v.n.content = `任务 #${v.jobId} 不存在`
+        v.n.duration = 10000
+        v.n.closable = true
+        gatewayDefenseJobs.delete(k)
+      } else if (code === 401) {
+        v.n.content = '[登录已过期]'
+        v.n.duration = 5000
+        v.n.closable = true
+        gatewayDefenseJobs.delete(k)
+        _stopGatewayDefensePoll()
+      } else if (code === 403 || code === 422) {
+        v.n.type = 'error'
+        v.n.title = `轮询失败: ${v.domain}`
+        v.n.content = `状态码 ${code}，已停止轮询`
+        v.n.duration = 10000
+        v.n.closable = true
+        gatewayDefenseJobs.delete(k)
+      } else {
+        v.retries = (v.retries || 0) + 1
+        if (v.retries > 5) {
+          v.n.type = 'error'
+          v.n.title = `轮询中断: ${v.domain}`
+          v.n.content = `连续失败 ${v.retries} 次，已停止轮询`
+          v.n.duration = 10000
+          v.n.closable = true
+          gatewayDefenseJobs.delete(k)
+        }
+      }
+    }
+  }
+  
+  if (gatewayDefenseJobs.size === 0 && gatewayDefensePoller) {
+    _stopGatewayDefensePoll()
+  }
+}
+
+function _stopGatewayDefensePoll() {
+  if (gatewayDefensePoller) {
+    clearInterval(gatewayDefensePoller)
+    gatewayDefensePoller = null
+  }
+}
 
 function startProvisionPolling(jobId, domain, siteId) {
   const key = `${siteId}_${jobId}`

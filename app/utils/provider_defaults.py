@@ -101,6 +101,22 @@ _PROVIDER_DEFAULTS: List[_ProviderDef] = [
         ("gmc_check_cron_statuses",  '["未检测","有违规","已暂停","审核中","未创建","未知"]',
          "GMC 巡检需查询的状态标签（JSON），可选: 未检测/正常/审核中/有违规/已暂停/未创建/未知", "json", False, False),
     ]),
+    # ── ImprovMX ──
+    ("improvmx", "ImprovMX 主账号", "默认 ImprovMX 邮件转发配置", 100, [
+        ("api_key",  "", "ImprovMX API Key", "token", True, True),
+        ("api_url",  "https://api.improvmx.com/v3", "ImprovMX API 地址", "url", False, True),
+        ("timeout",  "30", "API 超时秒数", "int", False, False),
+    ]),
+    # ── SMSMan ──
+    ("smsman", "SMSMan 主账号", "默认 SMSMan 短信验证配置", 100, [
+        ("api_token",          "", "SMSMan API Token", "token", True, True),
+        ("api_url",            "https://api.sms-man.com/control", "SMSMan API 地址", "url", False, True),
+        ("timeout",            "30", "API 超时秒数", "int", False, False),
+        ("default_country_id", "0", "默认国家 ID（0=随机）", "int", False, False),
+        ("default_application_id", "2", "默认服务 ID（Google）", "int", False, False),
+        ("sms_wait_timeout",   "300", "等待验证码超时秒数", "int", False, False),
+        ("sms_poll_interval",  "10", "验证码轮询间隔秒数", "int", False, False),
+    ]),
     # ── Shopify ──
     ("shopify", "Shopify采集默认配置", "默认 Shopify 采集配置", 100, [
         ("request_timeout", "30", "API 请求超时秒数", "int", False, False),

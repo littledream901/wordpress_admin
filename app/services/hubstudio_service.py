@@ -33,7 +33,7 @@ from app.utils.db_utils import safe_count
 
 
 # 任务类型定义
-JOB_TYPES = ["create_env", "create_account", "update_env", "wp_login", "gmc_check", "open_env"]
+JOB_TYPES = ["create_env", "create_gmail_env", "create_account", "update_env", "wp_login", "gmc_check", "open_env"]
 
 # Agent 心跳超时阈值（秒）
 AGENT_HEARTBEAT_TIMEOUT = int(os.getenv("HUB_AGENT_HEARTBEAT_TIMEOUT", "120"))

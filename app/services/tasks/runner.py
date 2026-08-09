@@ -203,16 +203,22 @@ class TaskRunner:
                              job.resource_id, job.action_type, job.id)
                 pass
         if site:
-            self._append_site_log(
-                site, job.action_type,
-                data={"result": result} if result else {},
-                provider_info=provider_info,
-                action=job.action_type,
-                status=job.status,
-                started_at=job.started_at,
-                completed_at=job.finished_at,
-                error=error,
-            )
+            try:
+                self._append_site_log(
+                    site, job.action_type,
+                    data={"result": result} if result else {},
+                    provider_info=provider_info,
+                    action=job.action_type,
+                    status=job.status,
+                    started_at=job.started_at,
+                    completed_at=job.finished_at,
+                    error=error,
+                )
+            except Exception:
+                _log.exception(
+                    "_complete_job: pipeline_log 追加失败，不影响主流程 job_id=%s site_id=%s",
+                    job.id, job.resource_id,
+                )
 
     @staticmethod
     def _append_site_log(

@@ -262,3 +262,17 @@ class ProviderResolver:
             return _read_cache_map(provider_type)
         except Exception:
             return {}
+
+    @classmethod
+    def clear_cache(cls):
+        """清空配置缓存（用于 Provider 配置更新后刷新）"""
+        with _cache_lock:
+            _config_cache.clear()
+            _cache_ready.clear()
+        _log.info("[ProviderResolver] 配置缓存已清空")
+
+    @classmethod
+    async def reload_cache(cls):
+        """重新加载配置缓存（异步方法）"""
+        await _load_configs_to_cache()
+        _log.info("[ProviderResolver] 配置缓存已重新加载")

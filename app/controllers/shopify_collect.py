@@ -319,6 +319,17 @@ class ShopifyProductController(CRUDBase[ShopifyProduct, ShopifyProductUpdate, Sh
     async def get_by_product_url(self, product_url: str):
         return await self.model.filter(product_url=product_url).first()
 
+    async def unbind_by_site(self, site_id: int) -> int:
+        """解绑指定站点的所有产品（清空 assigned_site_id 和 imported_site_id）"""
+        count = 0
+        count += await self.model.filter(assigned_site_id=site_id).update(
+            assigned_site_id=None, assigned_status=''
+        )
+        count += await self.model.filter(imported_site_id=site_id).update(
+            imported_site_id=None, imported_status='', imported_result=''
+        )
+        return count
+
 
 shopify_source_controller = ShopifySourceController()
 shopify_product_controller = ShopifyProductController()

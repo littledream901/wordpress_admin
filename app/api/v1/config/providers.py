@@ -60,18 +60,27 @@ async def create_provider(payload: ConfigProviderCreate):
 @router.post('/provider/update', summary='更新 Provider')
 async def update_provider(payload: ConfigProviderUpdate):
     await provider_controller.update(id=payload.id, obj_in=payload)
+    # 清空配置缓存，触发下次访问时重新加载
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(msg='更新成功')
 
 
 @router.post('/provider/delete', summary='删除 Provider')
 async def delete_provider(id: int = Query(...)):
     await provider_controller.soft_remove(id=id)
+    # 清空配置缓存
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(msg='已移入回收站')
 
 
 @router.post('/provider/set-default', summary='设为默认')
 async def set_default_provider(id: int = Query(...)):
     await provider_controller.set_default(id)
+    # 清空配置缓存
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(msg='已设为默认')
 
 
@@ -79,6 +88,14 @@ async def set_default_provider(id: int = Query(...)):
 async def get_provider_types():
     from app.models.config_provider import ConfigProvider
     return Success(data=[{"value": t[0], "label": t[1]} for t in ConfigProvider.PROVIDER_TYPES])
+
+
+@router.post('/provider/reload-cache', summary='手动刷新 Provider 配置缓存')
+async def reload_provider_cache():
+    """手动清空并重新加载 Provider 配置缓存，用于配置改动后立即生效"""
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
+    return Success(msg='配置缓存已刷新')
 
 
 # ── Provider Config Items ──
@@ -96,18 +113,27 @@ async def update_item(payload: ProviderConfigItemUpdate):
     if payload.config_value is not None and payload.config_type:
         _validate_config_value(f"id={payload.id}", payload.config_type, payload.config_value)
     await provider_item_controller.update(id=payload.id, obj_in=payload)
+    # 清空配置缓存，触发下次访问时重新加载
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(msg='更新成功')
 
 
 @router.post('/items/batch-save', summary='批量保存配置项')
 async def batch_save_items(payload: BatchSaveItemsRequest):
     count = await provider_item_controller.batch_save(payload.provider_id, payload.items)
+    # 清空配置缓存，触发下次访问时重新加载
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(data={'saved': count}, msg=f'批量保存 {count} 项成功')
 
 
 @router.post('/items/delete', summary='删除单个配置项')
 async def delete_item(id: int = Query(..., description='配置项ID')):
     await provider_item_controller.remove(id=id)
+    # 清空配置缓存
+    from app.utils.provider_resolver import ProviderResolver
+    await ProviderResolver.reload_cache()
     return Success(msg='删除成功')
 
 

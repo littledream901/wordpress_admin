@@ -297,6 +297,43 @@ update_deploy() {
     # 确保 update 不会强制重置 admin 密码（保护用户自行修改的密码）
     sed -i "s/^RESET_ADMIN_PASSWORD=.*/RESET_ADMIN_PASSWORD=false/" .env 2>/dev/null || true
 
+    # 3.1 更新版本号（交互式输入，触发菜单同步）
+    step "更新版本号（用于触发菜单/API/角色同步）..."
+    CURRENT_VERSION=$(grep -m1 "^VERSION=" .env 2>/dev/null | cut -d= -f2)
+    if [ -z "$CURRENT_VERSION" ]; then
+        # .env 里没有 VERSION，从 config.py 读取默认值
+        CURRENT_VERSION=$(grep "VERSION: str" app/settings/config.py | sed -n 's/.*VERSION: str = "\(.*\)"/\1/p' | head -1)
+    fi
+    
+    echo ""
+    echo -e "${BLUE}当前版本: ${CURRENT_VERSION}${NC}"
+    echo -e "${YELLOW}提示: 修改版本号会触发菜单/API/角色的重新同步${NC}"
+    echo -e "${YELLOW}      格式建议: v1.0.1 或 0.1.2 或延续当前版本号${NC}"
+    echo ""
+
+    # 支持非交互模式：NEW_VERSION 环境变量预设，或无 TTY 时自动跳过
+    if [ -n "${NEW_VERSION:-}" ]; then
+        log "使用预设版本号: ${NEW_VERSION}"
+    elif [ ! -t 0 ]; then
+        NEW_VERSION=""
+        warn "非交互环境（无 TTY），版本号保持不变"
+    else
+        read -r -p "请输入新版本号（直接回车保持 ${CURRENT_VERSION}）: " NEW_VERSION
+    fi
+
+    if [ -z "$NEW_VERSION" ]; then
+        NEW_VERSION="$CURRENT_VERSION"
+        log "版本号保持不变: ${CURRENT_VERSION}"
+    else
+        # 写入或更新 .env 中的 VERSION
+        if grep -q "^VERSION=" .env 2>/dev/null; then
+            sed -i "s/^VERSION=.*/VERSION=${NEW_VERSION}/" .env
+        else
+            echo "VERSION=${NEW_VERSION}" >> .env
+        fi
+        log "版本号已更新: ${CURRENT_VERSION} → ${NEW_VERSION}"
+    fi
+
     # 4. 构建新镜像（旧容器保持运行，用户不中断）
     step "构建新镜像（老服务继续运行）..."
     docker compose build app || { err "构建失败"; exit 1; }

@@ -129,9 +129,11 @@ MENU_DEFINITIONS = [
     {"name": "Hub任务列表",    "path": "hub-jobs",            "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 3,  "icon": "mdi:clipboard-list-outline",               "is_hidden": False, "component": "/site-pipeline/hub-jobs", "redirect": None},
     {"name": "Feed管理",       "path": "feed-manager",        "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 5,  "icon": "mdi:file-replace-outline",                 "is_hidden": False, "component": "/site-pipeline/feed-manager", "redirect": None},
     {"name": "ADS管理",        "path": "ads-manager",         "parent_path": "/site-pipeline", "menu_type": MenuType.MENU,    "order": 6,  "icon": "mdi:monitor-eye",                           "is_hidden": False, "component": "/site-pipeline/ads-manager", "redirect": None},
-    # ── Gmail 管理 ──
-    {"name": "Gmail管理",      "path": "/gmail",              "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 20, "icon": "mdi:gmail",                                  "is_hidden": False, "component": "Layout", "redirect": "/gmail/account-list"},
-    {"name": "Gmail账号",      "path": "account-list",        "parent_path": "/gmail",        "menu_type": MenuType.MENU,    "order": 1,  "icon": "basil:gmail-solid",                         "is_hidden": False, "component": "/gmail/account-list", "redirect": None},
+    # ── 邮箱管理 ──
+    {"name": "邮箱管理",      "path": "/gmail",              "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 20, "icon": "mdi:email-multiple-outline",                                  "is_hidden": False, "component": "Layout", "redirect": "/gmail/account-list"},
+    {"name": "Gmail自注册",      "path": "registration",        "parent_path": "/gmail",        "menu_type": MenuType.MENU,    "order": 2,  "icon": "mdi:account-plus-outline",                  "is_hidden": False, "component": "/gmail/registration", "redirect": None},
+    {"name": "Gmail管理",      "path": "account-list",        "parent_path": "/gmail",        "menu_type": MenuType.MENU,    "order": 1,  "icon": "basil:gmail-solid",                         "is_hidden": False, "component": "/gmail/account-list", "redirect": None},
+    {"name": "Outlook管理",      "path": "outlook-list",        "parent_path": "/gmail",        "menu_type": MenuType.MENU,    "order": 3,  "icon": "mdi:microsoft-outlook",                     "is_hidden": False, "component": "/gmail/outlook-list", "redirect": None},
     # ── Shopify 采集 ──
     {"name": "Shopify采集",    "path": "/shopify",            "parent_path": "",              "menu_type": MenuType.CATALOG, "order": 30, "icon": "mdi:shopping-search",                        "is_hidden": False, "component": "Layout", "redirect": "/shopify/source-list"},
     {"name": "待采集列表",     "path": "source-list",         "parent_path": "/shopify",      "menu_type": MenuType.MENU,    "order": 1,  "icon": "mdi:link-variant",                          "is_hidden": False, "component": "/shopify/source-list", "redirect": None},
@@ -183,7 +185,21 @@ async def init_db():
         logger.info("[DB] 首次建表完成（含 M2M 中间表）")
         return
 
-    logger.debug("[DB] 业务表已存在，跳过建表")
+    logger.debug("[DB] 业务表已存在，跳过全量建表")
+
+    # ── Schema 演进：检测并补齐新增的表 ──
+    _new_tables = [
+        "site_pipeline_gmail_registration",
+    ]
+    for table_name in _new_tables:
+        try:
+            result = await conn.execute_query(f"SHOW TABLES LIKE '{table_name}'")
+            if not result[1]:
+                logger.info(f"[DB] 检测到新表 {table_name}，调用 generate_schemas 补建")
+                await Tortoise.generate_schemas(safe=True)
+                break
+        except Exception as e:
+            logger.warning(f"[DB] 检测表 {table_name} 失败: {e}")
 
     # ── Schema 演进：历史模型新增的列（声明式，仅补齐缺失项）──
     _needed_columns: list[dict] = [
@@ -203,6 +219,59 @@ async def init_db():
         {"table": "role", "col": "code", "sql": "ALTER TABLE `role` ADD COLUMN `code` VARCHAR(64) NULL COMMENT '角色编码（admin/user/hub_agent，用于逻辑判断）'"},
     ]
 
+    # ── Schema 演进：检查并创建缺失的表 ──
+    _needed_tables: list[dict] = [
+        {
+            "table": "site_pipeline_outlook_account",
+            "sql": """
+                CREATE TABLE IF NOT EXISTS `site_pipeline_outlook_account` (
+                    `id` BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+                    `last_name` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'last name',
+                    `first_name` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'first name',
+                    `full_name` VARCHAR(200) NOT NULL DEFAULT '' COMMENT 'full name',
+                    `zip_code` VARCHAR(32) NOT NULL DEFAULT '' COMMENT 'zip code',
+                    `shipping_address_1` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Shipping address 1',
+                    `shipping_address_2` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Shipping address 2',
+                    `country` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'Country',
+                    `province_state` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'Province/State',
+                    `city` VARCHAR(100) NOT NULL DEFAULT '' COMMENT 'City',
+                    `phone` VARCHAR(64) NOT NULL DEFAULT '' COMMENT 'phone',
+                    `username` VARCHAR(255) NOT NULL COMMENT 'Username',
+                    `password` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Password',
+                    `two_fa_key` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '2FA Key',
+                    `two_fa_code` VARCHAR(16) NOT NULL DEFAULT '' COMMENT '2FA 验证码',
+                    `link_to_generate_login_code` VARCHAR(500) NOT NULL DEFAULT '' COMMENT 'Link To Generate Login Code from 2FA Key',
+                    `recovery_email` VARCHAR(255) NOT NULL DEFAULT '' COMMENT 'Recovery Email',
+                    `status` VARCHAR(64) NOT NULL DEFAULT '正常' COMMENT '健康状态',
+                    `assigned_site_id` INT NULL COMMENT '分配站点ID',
+                    `assigned_site_domain` VARCHAR(255) NOT NULL DEFAULT '' COMMENT '分配站点域名',
+                    `is_deleted` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '软删除标记',
+                    `deleted_at` DATETIME NULL COMMENT '删除时间',
+                    `created_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    `updated_at` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                    UNIQUE KEY `uid_site_pipel_usernam_8a9f0b` (`username`),
+                    KEY `idx_site_pipel_id_c14b90` (`id`),
+                    KEY `idx_site_pipel_usernam_a55c3d` (`username`),
+                    KEY `idx_site_pipel_status_7c0a8b` (`status`),
+                    KEY `idx_site_pipel_assigne_f30b4a` (`assigned_site_id`),
+                    KEY `idx_site_pipel_is_dele_a51b3f` (`is_deleted`),
+                    KEY `idx_site_pipel_created_89c73d` (`created_at`),
+                    KEY `idx_site_pipel_updated_6cd6c2` (`updated_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Outlook 账号库'
+            """
+        }
+    ]
+
+    # ── 检查并创建缺失的表 ──
+    for t in _needed_tables:
+        try:
+            result = await conn.execute_query(f"SHOW TABLES LIKE '{t['table']}'")
+            if not result[1]:
+                await conn.execute_query(t["sql"])
+                logger.info(f"[DB] Schema 演进: 创建表 {t['table']}")
+        except Exception as e:
+            logger.warning(f"[DB] Schema 演进失败 创建表 {t['table']}: {e}")
+
     # ── Schema 演进：历史模型新增的索引 ──
     _needed_indexes: list[dict] = [
         {"table": "menu", "idx": "idx_menu_parent_id", "sql": "ALTER TABLE `menu` ADD INDEX `idx_menu_parent_id` (`parent_id`)"},
@@ -211,6 +280,8 @@ async def init_db():
         {"table": "ads_env", "idx": "idx_is_deleted", "sql": "ALTER TABLE `ads_env` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
         {"table": "site_pipeline_gmail_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
         {"table": "site_pipeline_gmail_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_gmail_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
+        {"table": "site_pipeline_outlook_account", "idx": "idx_is_deleted", "sql": "ALTER TABLE `site_pipeline_outlook_account` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
+        {"table": "site_pipeline_outlook_account", "idx": "idx_assigned_site_id", "sql": "ALTER TABLE `site_pipeline_outlook_account` ADD INDEX `idx_assigned_site_id` (`assigned_site_id`)"},
         {"table": "config_provider", "idx": "idx_is_deleted", "sql": "ALTER TABLE `config_provider` ADD INDEX `idx_is_deleted` (`is_deleted`)"},
         {"table": "api", "idx": "idx_api_method", "sql": "ALTER TABLE `api` ADD INDEX `idx_api_method` (`method`)"},
     ]

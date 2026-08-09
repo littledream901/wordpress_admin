@@ -1,5 +1,6 @@
 """站点流水线 API —— 站点 CRUD / 批量操作 / DNS / 建站 / Dynadot / HubStudio / 产品导入"""
 import asyncio
+import json
 import logging
 import time
 
@@ -188,23 +189,23 @@ async def batch_import_products(site_ids: list[int] = Body(...)):
 @router.post('/site/batch-gateway-defense', summary='批量部署网关防御')
 async def batch_deploy_gateway_defense(payload: GatewayDefenseBatchDeploy):
     """
-    批量部署网关防御
+    批量部署网关防御（逐站入队，接口秒返回）
     
-    支持三种密钥模式：
-    1. 统一密钥：所有站点使用相同的 site_key 和 site_secret
-    2. 独立密钥：通过 credentials_map 为每个站点指定不同密钥
-    3. 自动生成：不提供密钥时自动为每个站点生成
+    凭证均需外部提供，不自动生成：
+    - 通过 credentials_map 为每个站点指定 gateway_site_id / site_key / site_secret
+    - 未在 credentials_map 中提供的站点，复用数据库已保存的凭证；缺失则该站点部署失败
+    
+    返回 batch_id 与每站 job_id，进度请在任务中心查看。
     """
     result = await site_pipeline_controller.batch_deploy_gateway_defense(
         site_ids=payload.site_ids,
         gateway_url=payload.gateway_url,
-        site_key=payload.site_key,
-        site_secret=payload.site_secret,
         credentials_map=payload.credentials_map,
         fail_mode=payload.fail_mode,
         sdk_inject=payload.sdk_inject
     )
-    return Success(data=result['data'], msg=f'已部署 {result["data"]["success"]} 个站点')
+    data = result['data']
+    return Success(data=data, msg=f'已入队 {data["queued"]}/{data["total"]} 个站点，请在任务中心查看进度')
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -262,11 +263,14 @@ async def refresh_product_count(site_id: int):
 @router.post('/site/{site_id}/gateway-defense', summary='部署网关防御')
 async def deploy_gateway_defense(site_id: int, payload: GatewayDefenseCreate):
     """
-    部署网关防御
+    部署网关防御（异步任务，立即返回 job_id）
     
-    支持外部提供密钥或自动生成：
-    - 提供 site_key 和 site_secret：使用外部密钥
-    - 不提供：自动生成新密钥
+    凭证必须外部提供，后端不自动生成：
+    - gateway_site_id：网关侧分配的站点标识（非本项目主键）
+    - site_key / site_secret：站点密钥对
+    - 三者留空时复用数据库已保存的值，仍缺失则部署失败
+    
+    部署进度请通过任务中心查询 job_id（action_type=gateway_defense）。
     """
     result = await site_pipeline_controller.deploy_gateway_defense(
         site_id=site_id,
@@ -274,11 +278,12 @@ async def deploy_gateway_defense(site_id: int, payload: GatewayDefenseCreate):
         site_key=payload.site_key,
         site_secret=payload.site_secret,
         fail_mode=payload.fail_mode,
-        sdk_inject=payload.sdk_inject
+        sdk_inject=payload.sdk_inject,
+        gateway_site_id=payload.gateway_site_id,
     )
     if result['ok']:
-        return Success(data=result, msg='网关防御部署成功')
-    return Fail(code=500, msg=result.get('error'))
+        return Success(data=result, msg='网关防御部署任务已提交')
+    return Fail(code=result.get('code', 500), msg=result.get('error'))
 
 
 @router.get('/site/{site_id}/gateway-credentials', summary='获取站点网关凭证')
@@ -303,12 +308,15 @@ async def get_gateway_provider_info(site_id: int):
 
 @router.post('/site/{site_id}/gateway-defense/update', summary='更新网关防御配置')
 async def update_gateway_defense(site_id: int, payload: GatewayDefenseUpdate):
-    """更新已部署的网关防御配置（重新部署）"""
+    """更新已部署的网关防御配置（异步重新部署，立即返回 job_id）"""
     site = await site_controller.get(id=site_id)
+    if not site:
+        return Fail(code=404, msg=f'站点不存在: id={site_id}')
     
     # 使用现有配置作为默认值
-    import json
     gateway_url = payload.gateway_url or json.loads(site.gateway_config_json or '{}').get('gateway_url', '')
+    if not gateway_url:
+        return Fail(code=400, msg='gateway_url 未提供且站点无历史配置可复用')
     
     result = await site_pipeline_controller.deploy_gateway_defense(
         site_id=site_id,
@@ -316,12 +324,13 @@ async def update_gateway_defense(site_id: int, payload: GatewayDefenseUpdate):
         site_key=payload.site_key or site.gateway_site_key,
         site_secret=payload.site_secret or site.gateway_site_secret,
         fail_mode=payload.fail_mode or 'open',
-        sdk_inject=payload.sdk_inject if payload.sdk_inject is not None else True
+        sdk_inject=payload.sdk_inject if payload.sdk_inject is not None else True,
+        gateway_site_id=payload.gateway_site_id or site.gateway_site_id,
     )
     
     if result['ok']:
-        return Success(data=result, msg='网关防御配置已更新')
-    return Fail(code=500, msg=result.get('error'))
+        return Success(data=result, msg='网关防御更新任务已提交')
+    return Fail(code=result.get('code', 500), msg=result.get('error'))
 
 
 # ══════════════════════════════════════════════════════════════════════════

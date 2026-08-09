@@ -5,6 +5,8 @@ from . import config_provider
 from . import site_pipeline
 from . import feed_file
 from . import gmail_account
+from . import gmail_registration
+from . import outlook_account
 from . import shopify_collect
 from . import operation_job
 from . import import_job

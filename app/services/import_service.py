@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.controllers.import_job import import_job_controller
 from app.models.gmail_account import GmailAccount
+from app.models.outlook_account import OutlookAccount
 from app.models.import_job import ImportJob
 from app.models.shopify_collect import ShopifyProduct, ShopifySource
 from app.models.site_pipeline import Site
@@ -25,6 +26,24 @@ FIELD_MAPS = {
         "IP": "server_ip", "服务器IP": "server_ip",
     },
     "gmail": {
+        "username": "username", "Username": "username", "Email": "username",
+        "password": "password", "Password": "password", "密码": "password",
+        "last_name": "last_name", "last name": "last_name",
+        "first_name": "first_name", "first name": "first_name",
+        "full_name": "full_name", "full name": "full_name",
+        "zip_code": "zip_code", "zip code": "zip_code", "zip": "zip_code",
+        "shipping_address_1": "shipping_address_1", "Shipping address 1": "shipping_address_1",
+        "shipping_address_2": "shipping_address_2", "Shipping address 2": "shipping_address_2",
+        "country": "country", "Country": "country", "国家": "country",
+        "province_state": "province_state", "Province/State": "province_state", "省份": "province_state",
+        "city": "city", "City": "city", "城市": "city",
+        "phone": "phone", "Phone": "phone", "电话": "phone",
+        "two_fa_key": "two_fa_key", "2FA Key": "two_fa_key", "2fa": "two_fa_key",
+        "link_to_generate_login_code": "link_to_generate_login_code",
+        "Link To Generate Login Code from 2FA Key": "link_to_generate_login_code",
+        "recovery_email": "recovery_email", "Recovery Email": "recovery_email",
+    },
+    "outlook": {
         "username": "username", "Username": "username", "Email": "username",
         "password": "password", "Password": "password", "密码": "password",
         "last_name": "last_name", "last name": "last_name",
@@ -60,6 +79,7 @@ FIELD_MAPS = {
 _UNIQUE_KEYS = {
     "sites": "domain",
     "gmail": "username",
+    "outlook": "username",
     "shopify_sources": "source_url",
     "shopify_products": "product_url",
 }
@@ -230,6 +250,7 @@ class ImportService:
         models = {
             "sites": Site,
             "gmail": GmailAccount,
+            "outlook": OutlookAccount,
             "shopify_sources": ShopifySource,
             "shopify_products": ShopifyProduct,
         }

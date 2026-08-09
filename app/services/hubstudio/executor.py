@@ -10,6 +10,7 @@ from .runtime import HubStudioRuntime
 from .tasks import (
     create_account,
     create_env,
+    create_gmail_env,
     gmc_check,
     open_env,
     update_env,
@@ -78,6 +79,7 @@ class HubStudioLocalExecutor:
 
         _map = {
             "create_env": create_env.execute_create_env,
+            "create_gmail_env": create_gmail_env.execute_create_gmail_env,
             "create_account": create_account.execute_create_account,
             "update_env": update_env.execute_update_env,
             "wp_login": wp_login.execute_wp_login,

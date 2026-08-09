@@ -20,6 +20,8 @@ class ConfigProvider(BaseModel, SoftDeleteMixin, TimestampMixin):
         ("hubstudio", "HubStudio"),
         ("shopify", "Shopify"),
         ("woo", "WooCommerce"),
+        ("improvmx", "ImprovMX"),
+        ("smsman", "SMSMan"),
         ("pipeline", "流水线"),
     ]
 

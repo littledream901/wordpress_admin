@@ -1,0 +1,110 @@
+version: "3.8"
+
+services:
+  fastclaw:
+    image: debian:stable-slim
+    container_name: fastclaw
+    restart: unless-stopped
+    stop_grace_period: 30s
+    dns:
+      - 223.5.5.5
+      - 114.114.114.114
+      - 8.8.8.8
+    ports:
+      - "${FASTCLAW_PORT:-18953}:18953"
+    volumes:
+      - fastclaw-data:/root/.fastclaw
+    environment:
+      - TZ=Asia/Shanghai
+      - FASTCLAW_GATEWAY_PORT=${FASTCLAW_GATEWAY_PORT:-18953}
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "${FASTCLAW_CPU_LIMIT:-1}"
+          memory: "${FASTCLAW_MEMORY_LIMIT:-512m}"
+        reservations:
+          cpus: "0.25"
+          memory: "128m"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:18953/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+
+        # 1. 基础工具准备
+        if ! command -v socat >/dev/null 2>&1; then
+          apt-get update && apt-get install -y curl ca-certificates socat tar && rm -rf /var/lib/apt/lists/*
+        fi
+
+        mkdir -p /root/.fastclaw/logs /root/.local/bin /usr/local/bin
+        chmod 755 /root/.fastclaw
+
+        # 2. 条件安装：多镜像自动重试
+        if [ ! -f /root/.local/bin/fastclaw ]; then
+          echo '[fastclaw] Installing FastClaw...'
+          
+          # 下载原始脚本
+          curl -fsSL https://raw.githubusercontent.com/fastclaw-ai/fastclaw/main/install.sh -o /tmp/install.sh || \
+          curl -fsSL https://mirror.ghproxy.com/https://raw.githubusercontent.com/fastclaw-ai/fastclaw/main/install.sh -o /tmp/install.sh || \
+          curl -fsSL https://ghp.ci/https://raw.githubusercontent.com/fastclaw-ai/fastclaw/main/install.sh -o /tmp/install.sh
+
+          # 尝试更换不同的镜像前缀执行安装
+          if bash /tmp/install.sh; then
+            echo '[fastclaw] Installation succeeded with default/script proxy.';
+          else
+            echo '[fastclaw] Default download failed, switching to mirror.ghproxy.com...'
+            sed -i 's|https://github.com|https://mirror.ghproxy.com/https://github.com|g' /tmp/install.sh
+            bash /tmp/install.sh
+          fi
+        fi
+        ln -sf /root/.local/bin/fastclaw /usr/local/bin/fastclaw
+
+        # 3. 启动守护进程与端口转发
+        echo '[fastclaw] Starting daemon...'
+        /usr/local/bin/fastclaw daemon start || true
+        sleep 2
+
+        touch /root/.fastclaw/logs/gateway.log
+
+        echo "[fastclaw] Exposing port ${FASTCLAW_GATEWAY_PORT:-18953} via socat..."
+        socat TCP-LISTEN:${FASTCLAW_GATEWAY_PORT:-18953},fork,reuseaddr TCP:127.0.0.1:18953 &
+        SOCAT_PID=$$!
+
+        # 实时打印日志
+        tail -f /root/.fastclaw/logs/gateway.log &
+
+        # 4. 进程保活
+        while true; do
+          if ! pgrep -f 'fastclaw daemon' > /dev/null; then
+            echo '[fastclaw] Daemon process died, exiting...'
+            exit 1
+          fi
+          if ! kill -0 $$SOCAT_PID 2>/dev/null; then
+            echo '[fastclaw] Socat process died, exiting...'
+            exit 1
+          fi
+          sleep 5
+        done
+
+volumes:
+  fastclaw-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

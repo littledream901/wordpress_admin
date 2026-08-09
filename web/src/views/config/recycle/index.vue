@@ -76,6 +76,8 @@ const tableRef = ref(null)
 const typeOptions = [
   { value: 'site', label: '站点' },
   { value: 'gmail', label: 'Gmail' },
+  { value: 'gmail_registration', label: 'Gmail注册' },
+  { value: 'outlook', label: 'Outlook' },
   { value: 'account', label: '账号' },
   { value: 'provider', label: '配置' },
   { value: 'ads', label: 'ADS' },
@@ -91,6 +93,18 @@ const FIELD_GROUPS = {
     { title: 'GMC 数据', logKey: 'gmc_data' },
   ],
   gmail: [
+    { title: '基本信息', keys: ['id', 'username', 'password', 'status', 'assigned_site_id', 'assigned_site_domain', 'created_at', 'updated_at'] },
+    { title: '个人信息', keys: ['last_name', 'first_name', 'full_name', 'phone', 'recovery_email'] },
+    { title: '地址信息', keys: ['country', 'province_state', 'city', 'zip_code', 'shipping_address_1', 'shipping_address_2'] },
+    { title: '安全信息', keys: ['two_fa_key', 'two_fa_code'] },
+  ],
+  gmail_registration: [
+    { title: '基本信息', keys: ['id', 'alias', 'domain', 'registration_status', 'registration_email', 'registration_error', 'created_at', 'updated_at', 'deleted_at'] },
+    { title: '转发配置', keys: ['forward_to', 'recovery_email', 'two_fa_key', 'improvmx_alias_id', 'improvmx_status', 'improvmx_error'] },
+    { title: '环境信息', keys: ['env_id', 'env_name', 'env_status', 'env_error'] },
+    { title: 'SMS验证', keys: ['sms_request_id', 'sms_phone_number', 'sms_code', 'sms_status', 'sms_error'] },
+  ],
+  outlook: [
     { title: '基本信息', keys: ['id', 'username', 'password', 'status', 'assigned_site_id', 'assigned_site_domain', 'created_at', 'updated_at'] },
     { title: '个人信息', keys: ['last_name', 'first_name', 'full_name', 'phone', 'recovery_email'] },
     { title: '地址信息', keys: ['country', 'province_state', 'city', 'zip_code', 'shipping_address_1', 'shipping_address_2'] },
@@ -253,7 +267,13 @@ const LABEL_MAP = {
   account_type: '账号类型', env_id: '环境ID', provider_id: 'Provider ID', two_fa: '2FA', remark: '备注',
   provider_name: 'Provider名称', provider_type: 'Provider类型', is_default: '默认', priority: '优先级',
   description: '描述', base_url: '基础URL', api_version: 'API版本', error_message: '错误信息',
-  ads_env_id: 'ADS环境ID', domain: '域名', deleted_at: '删除时间',
+  ads_env_id: 'ADS环境ID', deleted_at: '删除时间',
+  alias: '别名', forward_to: '转发目标', registration_status: '注册状态',
+  registration_email: '注册邮箱', registration_error: '注册错误',
+  improvmx_alias_id: 'ImprovMX别名ID', improvmx_status: 'ImprovMX状态', improvmx_error: 'ImprovMX错误',
+  env_name: '环境名称', env_status: '环境状态', env_error: '环境错误',
+  sms_request_id: 'SMS请求ID', sms_phone_number: 'SMS号码', sms_code: 'SMS验证码',
+  sms_status: 'SMS状态', sms_error: 'SMS错误',
 }
 
 function fieldLabel(key) {

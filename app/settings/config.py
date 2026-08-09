@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     """调试模式：True 时开启 /docs /redoc /openapi.json 文档和热重载；开发时请在 .env 中显式设置 DEBUG=true"""
 
-    VERSION: str = "0.1.0"
+    VERSION: str = "0.1.1"
     APP_TITLE: str = "Wordpress 管理"
     PROJECT_NAME: str = "Wordpress 管理"
     APP_DESCRIPTION: str = "Wordpress 站点管理平台"
@@ -119,6 +119,8 @@ class Settings(BaseSettings):
                         "app.models.site_pipeline",
                         "app.models.feed_file",
                         "app.models.gmail_account",
+                        "app.models.gmail_registration",
+                        "app.models.outlook_account",
                         "app.models.shopify_collect",
                         "app.models.operation_job",
                         "app.models.import_job",
@@ -132,6 +134,10 @@ class Settings(BaseSettings):
         }
 
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
+
+    # ── Gmail 注册 ──
+    GMAIL_REGISTRATION_DEFAULT_ALIAS: str = "info"
+    """批量获取待注册站点时使用的默认邮箱别名前缀（Gmail 前缀，如 info@example.com）"""
 
     def validate_production_settings(self) -> list[str]:
         """校验生产环境关键配置，返回告警列表。

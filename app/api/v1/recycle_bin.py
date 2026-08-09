@@ -5,6 +5,8 @@ from app.controllers.account import account_controller
 from app.controllers.ads_manager import ads_env_controller
 from app.controllers.config_provider import provider_controller
 from app.controllers.gmail_account import gmail_account_controller
+from app.controllers.gmail_registration import gmail_registration_controller
+from app.controllers.outlook_account import outlook_account_controller
 from app.controllers.site_pipeline import site_controller
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.recycle_bin import RecycleBinAction, RecycleBinEmpty, RecycleBinType
@@ -15,6 +17,8 @@ router = APIRouter(tags=["回收站"])
 _CONTROLLER_MAP = {
     RecycleBinType.site: site_controller,
     RecycleBinType.gmail: gmail_account_controller,
+    RecycleBinType.gmail_registration: gmail_registration_controller,
+    RecycleBinType.outlook: outlook_account_controller,
     RecycleBinType.account: account_controller,
     RecycleBinType.provider: provider_controller,
     RecycleBinType.ads: ads_env_controller,
@@ -24,6 +28,8 @@ _CONTROLLER_MAP = {
 _TYPE_LABELS = {
     RecycleBinType.site: "站点",
     RecycleBinType.gmail: "Gmail账号",
+    RecycleBinType.gmail_registration: "Gmail注册记录",
+    RecycleBinType.outlook: "Outlook账号",
     RecycleBinType.account: "账号",
     RecycleBinType.provider: "配置提供者",
     RecycleBinType.ads: "ADS账号",
@@ -35,6 +41,10 @@ def _get_summary_row(obj_dict: dict, item_type: RecycleBinType) -> str:
     if item_type == RecycleBinType.site:
         return obj_dict.get("domain", "")
     elif item_type == RecycleBinType.gmail:
+        return obj_dict.get("username", "")
+    elif item_type == RecycleBinType.gmail_registration:
+        return f"{obj_dict.get('alias', '')}@{obj_dict.get('domain', '')}"
+    elif item_type == RecycleBinType.outlook:
         return obj_dict.get("username", "")
     elif item_type == RecycleBinType.account:
         return f"[{obj_dict.get('account_type', '')}] {obj_dict.get('username', '')}"

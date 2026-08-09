@@ -11,6 +11,9 @@ from tortoise.expressions import Q
 
 from app.core.crud import CRUDBase
 from app.controllers.gmail_account import gmail_account_controller
+from app.controllers.gmail_registration import gmail_registration_controller
+from app.controllers.outlook_account import outlook_account_controller
+from app.controllers.shopify_collect import shopify_product_controller
 from app.models.admin import Dept, User
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.gmail_account import GmailAccount
@@ -31,7 +34,6 @@ from app.services.importers import get_importer
 from app.utils.config_reader import get_config_async
 from app.utils.provider_resolver import ProviderResolver
 from app.utils.orm_guard import guard_thread_pool
-from app.services.gateway_defense import CloudflareWorkerDefenseService, NginxLuaDefenseService
 
 _log = logging.getLogger(__name__)
 
@@ -56,22 +58,14 @@ dynadot_service = DynadotService()
 
 woo_import_service = WooImportService()
 
-_onepanel_api = None
-_onepanel_files = None
-
-
 def _get_onepanel_api():
-    global _onepanel_api
-    if _onepanel_api is None:
-        _onepanel_api = OnePanelAPI()
-    return _onepanel_api
+    """获取 OnePanelAPI 实例（每次新建，读取最新 Provider 配置）"""
+    return OnePanelAPI()
 
 
 def _get_onepanel_files():
-    global _onepanel_files
-    if _onepanel_files is None:
-        _onepanel_files = OnePanelFileManager(_get_onepanel_api())
-    return _onepanel_files
+    """获取 OnePanelFileManager（每次新建，确保使用最新的 API 实例）"""
+    return OnePanelFileManager(_get_onepanel_api())
 
 _provision_semaphore: asyncio.Semaphore | None = None
 _import_semaphore: asyncio.Semaphore | None = None
@@ -573,17 +567,76 @@ class SitePipelineController:
             _log.warning("同步 onepanel_status 失败: domain=%s error=%s", site.domain, e)
 
     # ── 删除 ──
+    async def _cleanup_site_relations(self, site_id: int, domain: str) -> dict:
+        """清理站点的关联数据
+
+        - 软删除：Gmail 账号、Outlook 账号、Gmail 注册记录（按域名）
+        - 解绑：Shopify 产品、Provider 绑定
+        - 物理删除：HubStudio 任务记录
+        """
+        stats = {}
+        try:
+            stats["gmail_deleted"] = await gmail_account_controller.soft_delete_by_site(site_id)
+        except Exception as e:
+            _log.warning("清理 Gmail 账号失败 site_id=%s: %s", site_id, e)
+            stats["gmail_deleted"] = 0
+        try:
+            stats["outlook_deleted"] = await outlook_account_controller.soft_delete_by_site(site_id)
+        except Exception as e:
+            _log.warning("清理 Outlook 账号失败 site_id=%s: %s", site_id, e)
+            stats["outlook_deleted"] = 0
+        try:
+            stats["registration_deleted"] = (
+                await gmail_registration_controller.soft_delete_by_domain(domain) if domain else 0
+            )
+        except Exception as e:
+            _log.warning("清理 Gmail 注册记录失败 domain=%s: %s", domain, e)
+            stats["registration_deleted"] = 0
+        try:
+            stats["product_unbound"] = await shopify_product_controller.unbind_by_site(site_id)
+        except Exception as e:
+            _log.warning("解绑 Shopify 产品失败 site_id=%s: %s", site_id, e)
+            stats["product_unbound"] = 0
+        try:
+            stats["binding_removed"] = await ResourceProviderBinding.filter(
+                resource_type='site', resource_id=site_id
+            ).delete()
+        except Exception as e:
+            _log.warning("解绑 Provider 失败 site_id=%s: %s", site_id, e)
+            stats["binding_removed"] = 0
+        try:
+            stats["hub_job_deleted"] = await HubStudioJob.filter(site_id=site_id).delete()
+        except Exception as e:
+            _log.warning("删除 HubStudio 任务记录失败 site_id=%s: %s", site_id, e)
+            stats["hub_job_deleted"] = 0
+        return stats
+
+    @staticmethod
+    async def _snapshot_site_for_delete(site) -> dict:
+        """删除前快照站点信息，并预取 onepanel 首选 provider_id（绑定随后会被清理）"""
+        binding = await ResourceProviderBinding.filter(
+            resource_type='site', resource_id=site.id,
+            provider_type='onepanel', bind_type='preferred'
+        ).first()
+        return {
+            "id": site.id,
+            "domain": site.domain,
+            "onepanel_status": site.onepanel_status,
+            "onepanel_provider_id": binding.provider_id if binding else 0,
+        }
+
     async def delete_site(self, site_id: int) -> dict:
-        """软删除站点并异步删除 1Panel 网站"""
+        """软删除站点、清理关联数据并异步删除 1Panel 网站"""
         site = await site_controller.get(id=site_id)
         info = None
+        stats = {}
         if site:
-            info = {"id": site.id, "domain": site.domain, "onepanel_status": site.onepanel_status}
+            info = await self._snapshot_site_for_delete(site)
         await site_controller.soft_remove(id=site_id)
-        await gmail_account_controller.soft_delete_by_site(site_id)
         if info:
+            stats = await self._cleanup_site_relations(site_id, info["domain"])
             asyncio.create_task(self._delete_from_1panel_by_info(info))
-        return {"ok": True, "info": info}
+        return {"ok": True, "info": info, "cleanup": stats}
 
     async def _delete_from_1panel_by_info(self, info: dict) -> dict:
         """通过域名和状态信息执行 1Panel 删除"""
@@ -593,12 +646,9 @@ class SitePipelineController:
 
         candidates = []
         seen_ids = set()
-        binding = await ResourceProviderBinding.filter(
-            resource_type='site', resource_id=info["id"],
-            provider_type='onepanel', bind_type='preferred'
-        ).first()
-        if binding:
-            p = await ConfigProvider.filter(id=binding.provider_id, status='active').first()
+        provider_id = info.get("onepanel_provider_id") or 0
+        if provider_id:
+            p = await ConfigProvider.filter(id=provider_id, status='active').first()
             if p:
                 candidates.append(p)
                 seen_ids.add(p.id)
@@ -692,18 +742,21 @@ class SitePipelineController:
     async def batch_delete_sites(self, ids: List[int]) -> dict:
         """批量删除站点并异步删除 1Panel"""
         count = 0
-        gmail_deleted = 0
         db_failed = 0
         sites_info = []
+        cleanup_total = {}
         for sid in ids:
             try:
                 site = await site_controller.get(id=sid)
                 if not site:
                     continue
+                info = await self._snapshot_site_for_delete(site)
                 await site_controller.soft_remove(id=sid)
-                gmail_deleted += await gmail_account_controller.soft_delete_by_site(sid)
+                stats = await self._cleanup_site_relations(sid, info["domain"])
+                for k, v in stats.items():
+                    cleanup_total[k] = cleanup_total.get(k, 0) + v
                 count += 1
-                sites_info.append({"id": site.id, "domain": site.domain, "onepanel_status": site.onepanel_status})
+                sites_info.append(info)
             except Exception as e:
                 _log.warning("删除站点失败 id=%s: %s", sid, e)
                 db_failed += 1
@@ -713,7 +766,7 @@ class SitePipelineController:
         job = await self._create_job(0, f"batch-delete-{int(time.time())}", "batch_delete",
                                      batch_id=f"delete-{int(time.time())}", total_steps=len(sites_info))
         job.result_json = json.dumps({
-            "deleted_from_db": count, "db_failed": db_failed, "gmail_deleted": gmail_deleted, "results": [],
+            "deleted_from_db": count, "db_failed": db_failed, "cleanup": cleanup_total, "results": [],
         })
         await job.save()
 
@@ -735,7 +788,7 @@ class SitePipelineController:
                     del_fail += 1
             job.status = "success" if del_fail == 0 else "failed"
             job.result_json = json.dumps({
-                "deleted_from_db": count, "db_failed": db_failed, "gmail_deleted": gmail_deleted,
+                "deleted_from_db": count, "db_failed": db_failed, "cleanup": cleanup_total,
                 "1panel_deleted": del_ok, "1panel_failed": del_fail, "1panel_skipped": del_skip, "results": results,
             }, ensure_ascii=False)
             job.finished_at = datetime.now()
@@ -743,7 +796,7 @@ class SitePipelineController:
 
         asyncio.create_task(_bg_delete())
         return {"ok": True, "data": {
-            "deleted": count, "db_failed": db_failed, "gmail_deleted": gmail_deleted,
+            "deleted": count, "db_failed": db_failed, "cleanup": cleanup_total,
             "pending_1panel_delete": len(sites_info), "job_id": job.id,
         }}
 
@@ -968,109 +1021,101 @@ class SitePipelineController:
         site_key: Optional[str] = None,
         site_secret: Optional[str] = None,
         fail_mode: str = 'open',
-        sdk_inject: bool = True
+        sdk_inject: bool = True,
+        gateway_site_id: Optional[str] = None,
     ) -> dict:
         """
         部署网关防御（根据平台自动选择 Worker 或 Nginx Lua）
         
+        接入任务队列后，立即返回 job_id，前端轮询任务中心查看进度。
+        
         Args:
-            site_id: 站点ID
+            site_id: 本项目站点ID（数据库主键）
             gateway_url: 网关地址
-            site_key: 外部提供的站点密钥（可选）
-            site_secret: 外部提供的签名密钥（可选）
+            site_key: 外部提供的站点密钥（可选，留空复用已保存值）
+            site_secret: 外部提供的签名密钥（可选，留空复用已保存值）
             fail_mode: 失败模式 (open/closed)
             sdk_inject: 是否注入 SDK
+            gateway_site_id: 网关侧站点标识（可选，留空复用已保存值）
+        
+        Returns:
+            {'ok': True, 'job_id': int, 'site_id': int, 'domain': str, 'status': 'running'}
+            或 {'ok': False, 'code': int, 'error': str}
         """
-        site = await site_controller.get(id=site_id)
+        from app.services.tasks.gateway_defense import gateway_defense_task_runner
         
-        # 验证密钥对的完整性
-        if (site_key and not site_secret) or (not site_key and site_secret):
-            return {'ok': False, 'error': 'site_key 和 site_secret 必须同时提供'}
-        
-        # 根据平台选择服务（服务内部会使用绑定的 Provider）
-        if site.platform == 'shopify':
-            service = CloudflareWorkerDefenseService()
-        else:
-            service = NginxLuaDefenseService()
-        
-        # 部署
-        result = await service.deploy(
-            site, 
-            gateway_url, 
+        return await gateway_defense_task_runner.execute(
+            site_id=site_id,
+            gateway_url=gateway_url,
             site_key=site_key,
             site_secret=site_secret,
             fail_mode=fail_mode,
-            sdk_inject=sdk_inject
+            sdk_inject=sdk_inject,
+            gateway_site_id=gateway_site_id,
         )
-        
-        # 记录日志
-        log_entry = {
-            'ts': datetime.now().isoformat(),
-            'source': 'gateway_defense',
-            'action': 'deploy',
-            'type': 'worker' if site.platform == 'shopify' else 'nginx_lua',
-            'status': 'success' if result['ok'] else 'failed',
-            'gateway_url': gateway_url,
-            'has_external_key': bool(site_key),
-            'used_provider': json.loads(site.gateway_config_json or '{}').get('provider_type'),
-            'result': result
-        }
-        site.append_log(log_entry)
-        await site.save()
-        
-        return result
     
     async def batch_deploy_gateway_defense(
         self, 
         site_ids: list, 
         gateway_url: str,
-        site_key: Optional[str] = None,
-        site_secret: Optional[str] = None,
         credentials_map: Optional[dict] = None,
         fail_mode: str = 'open',
         sdk_inject: bool = True
     ) -> dict:
         """
-        批量部署网关防御
+        批量部署网关防御（逐站入队，接口秒返回）
+        
+        实际部署由 gateway_defense_task_runner 在后台按信号量并发执行，
+        每个站点一个独立 OperationJob，共享同一 batch_id。
         
         Args:
             site_ids: 站点ID列表
             gateway_url: 网关地址
-            site_key: 统一的站点密钥（可选）
-            site_secret: 统一的签名密钥（可选）
-            credentials_map: 每个站点独立的密钥映射（可选）
+            credentials_map: 每个站点独立的凭证映射
+                {site_id: {gateway_site_id, site_key, site_secret}}
+                未提供时该站点复用数据库中已保存的凭证
             fail_mode: 失败模式
             sdk_inject: 是否注入 SDK
         """
+        from app.services.tasks.gateway_defense import gateway_defense_task_runner
+        
+        batch_id = f"gwdef-{int(time.time())}"
         results = []
         for site_id in site_ids:
-            # 检查是否有独立密钥
-            if credentials_map and site_id in credentials_map:
-                cred = credentials_map[site_id]
-                key = cred.get('site_key')
-                secret = cred.get('site_secret')
-            else:
-                key = site_key
-                secret = site_secret
+            # 逐站点取凭证；未提供则由服务层复用已保存值，缺失时报错
+            cred = (credentials_map or {}).get(site_id) or {}
+            key = cred.get('site_key')
+            secret = cred.get('site_secret')
+            gw_site_id = cred.get('gateway_site_id')
             
-            result = await self.deploy_gateway_defense(
-                site_id, gateway_url, key, secret, fail_mode, sdk_inject
+            result = await gateway_defense_task_runner.execute(
+                site_id=site_id,
+                gateway_url=gateway_url,
+                site_key=key,
+                site_secret=secret,
+                fail_mode=fail_mode,
+                sdk_inject=sdk_inject,
+                gateway_site_id=gw_site_id,
+                batch_id=batch_id,
             )
             
             results.append({
                 'site_id': site_id,
                 'ok': result['ok'],
+                'job_id': result.get('job_id'),
+                'domain': result.get('domain', ''),
                 'error': result.get('error', ''),
                 'has_custom_key': bool(key)
             })
         
-        success = sum(1 for r in results if r['ok'])
+        queued = sum(1 for r in results if r['ok'])
         return {
             'ok': True,
             'data': {
+                'batch_id': batch_id,
                 'total': len(results),
-                'success': success,
-                'fail': len(results) - success,
+                'queued': queued,
+                'rejected': len(results) - queued,
                 'results': results
             }
         }
@@ -1084,11 +1129,13 @@ class SitePipelineController:
             'data': {
                 'site_id': site.id,
                 'domain': site.domain,
+                'gateway_site_id': site.gateway_site_id,
                 'gateway_site_key': site.gateway_site_key,
                 'gateway_site_secret': site.gateway_site_secret,
                 'gateway_defense_status': site.gateway_defense_status,
                 'gateway_defense_type': site.gateway_defense_type,
                 'gateway_deployed_at': site.gateway_deployed_at.isoformat() if site.gateway_deployed_at else None,
+                'gateway_last_error': site.gateway_last_error or '',
                 'gateway_config': json.loads(site.gateway_config_json) if site.gateway_config_json else {}
             }
         }

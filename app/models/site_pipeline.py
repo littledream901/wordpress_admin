@@ -35,6 +35,7 @@ class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     shopify_token = fields.CharField(max_length=255, default='', description='Shopify Access Token')
     gateway_defense_status = fields.CharField(max_length=64, default='', description='网关防御状态', db_index=True)
     gateway_defense_type = fields.CharField(max_length=32, default='', description='网关防御类型: worker / nginx_lua')
+    gateway_site_id = fields.CharField(max_length=64, default='', description='网关侧站点标识（必须外部提供，用作 Fangyu 变量 $fangyu_site_id）')
     gateway_site_key = fields.CharField(max_length=255, default='', description='网关站点密钥 (site_xxxxxxxx)')
     gateway_site_secret = fields.CharField(max_length=255, default='', description='网关签名密钥')
     gateway_deployed_at = fields.DatetimeField(null=True, description='网关部署时间')

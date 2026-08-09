@@ -24,6 +24,7 @@ class OperationJob(BaseModel, TimestampMixin):
         ("dynadot_ns", "Dynadot NS"),
         ("redirect", "301重定向"),
         ("provision", "1Panel建站"),
+        ("gateway_defense", "网关防御部署"),
         ("assign_gmail", "分配Gmail"),
         ("collect_shopify", "采集商品"),
         ("assign_products", "分配产品"),

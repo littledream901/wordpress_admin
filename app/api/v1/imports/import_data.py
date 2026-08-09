@@ -24,6 +24,10 @@ _TEMPLATE_HEADERS = {
               "Shipping address 1", "Shipping address 2", "Country", "Province/State",
               "City", "Phone", "Username", "Password", "2FA Key",
               "Link To Generate Login Code from 2FA Key", "Recovery Email"],
+    "outlook": ["Last name", "First name", "Full name", "Zip code",
+                "Shipping address 1", "Shipping address 2", "Country", "Province/State",
+                "City", "Phone", "Username", "Password", "2FA Key",
+                "Link To Generate Login Code from 2FA Key", "Recovery Email"],
     "shopify_sources": ["source_url", "source_type", "max_products", "remark"],
     "shopify_products": ["product_url", "handle", "title", "vendor", "product_type", "tags"],
 }
@@ -31,6 +35,7 @@ _TEMPLATE_HEADERS = {
 _TEMPLATE_NAMES = {
     "sites": "站点导入模板",
     "gmail": "Gmail导入模板",
+    "outlook": "Outlook导入模板",
     "shopify_sources": "采集源导入模板",
     "shopify_products": "商品导入模板",
 }
@@ -62,6 +67,16 @@ async def import_gmail(file: UploadFile = File(...)):
     try:
         data = await file.read()
         result = await import_service.import_data("gmail", file.filename, data)
+        return Success(data=result)
+    except BaseException as e:
+        return Fail(code=500, msg=f"导入失败: {e}")
+
+
+@router.post('/outlook', summary='导入 Outlook 账号（CSV/XLSX）')
+async def import_outlook(file: UploadFile = File(...)):
+    try:
+        data = await file.read()
+        result = await import_service.import_data("outlook", file.filename, data)
         return Success(data=result)
     except BaseException as e:
         return Fail(code=500, msg=f"导入失败: {e}")
@@ -105,6 +120,13 @@ async def download_template(import_type: str):
                          "s6porf4qe2kmn7yl5izwp6lebkukij3d",
                          "https://2fa.dad/s6porf4qe2kmn7yl5izwp6lebkukij3d",
                          "recovery@outlook.com"])
+    elif import_type == "outlook":
+        writer.writerow(["Thakkar", "Kirit", "Kirit Thakkar", "60563-3726",
+                         "1204 Snapper Rd", "", "US", "Illinois", "Naperville", "+1 8479628308",
+                         "example@outlook.com", "password123",
+                         "s6porf4qe2kmn7yl5izwp6lebkukij3d",
+                         "https://2fa.dad/s6porf4qe2kmn7yl5izwp6lebkukij3d",
+                         "recovery@gmail.com"])
     elif import_type == "shopify_sources":
         writer.writerow(["https://example.myshopify.com/collections/all", "collection", "100", ""])
     elif import_type == "shopify_products":

@@ -5,8 +5,13 @@
         <n-button v-permission="'post/api/v1/gmail/registration/create'" type="primary" @click="handleAdd">
           新增注册
         </n-button>
-        <n-button v-permission="'post/api/v1/gmail/registration/create'" type="warning" @click="openBatchGenerate">
-          批量随机生成
+        <n-button
+          v-permission="'post/api/v1/gmail/registration/batch-fetch'"
+          type="warning"
+          :loading="batchFetchLoading"
+          @click="handleBatchFetch"
+        >
+          批量获取
         </n-button>
       </n-space>
     </template>
@@ -40,6 +45,21 @@
           clearable
           style="width: 160px"
           :options="statusOptions"
+          @update:value="$table?.handleSearch()"
+        />
+        <n-input
+          v-model:value="queryItems.outlook_account_username"
+          placeholder="Outlook 邮箱搜索"
+          clearable
+          style="width: 190px"
+          @keyup.enter="$table?.handleSearch()"
+        />
+        <n-select
+          v-model:value="queryItems.outlook_assigned"
+          placeholder="Outlook 分配情况"
+          clearable
+          style="width: 170px"
+          :options="outlookAssignedOptions"
           @update:value="$table?.handleSearch()"
         />
       </template>
@@ -114,6 +134,16 @@
               </n-button>
               <n-divider style="margin: 2px 0" />
               <n-button
+                v-permission="'post/api/v1/gmail/registration/batch-assign-outlook'"
+                @click="showBatchMenu = false; showBatchAssignOutlookModal = true"
+                style="justify-content: flex-start"
+              >
+                <template #icon>
+                  <TheIcon icon="mdi:email-multiple-outline" :size="18" />
+                </template>
+                批量分配 Outlook
+              </n-button>
+              <n-button
                 v-permission="'post/api/v1/gmail/registration/batch-assign-env'"
                 @click="showBatchMenu = false; showBatchAssignEnvModal = true"
                 style="justify-content: flex-start"
@@ -149,17 +179,6 @@
     >
       <n-form ref="modalFormRef" :model="modalForm" label-placement="left" :label-width="120">
         <n-grid :cols="2" :x-gap="16">
-          <n-gi :span="2">
-            <n-button
-              dashed
-              type="info"
-              :loading="generating"
-              @click="handleAutoGenerate"
-              style="width:100%"
-            >
-              自动生成 注册信息
-            </n-button>
-          </n-gi>
           <n-gi>
             <n-form-item label="别名" path="alias">
               <n-input v-model:value="modalForm.alias" placeholder="Gmail 邮箱前缀" />
@@ -170,60 +189,78 @@
               <n-input v-model:value="modalForm.domain" placeholder="example.com" />
             </n-form-item>
           </n-gi>
+          <n-gi :span="2">
+            <n-form-item label="Outlook 邮箱">
+              <n-select
+                v-model:value="modalForm.outlook_account_id"
+                placeholder="选择 Outlook 邮箱（分配后自动同步身份信息）"
+                clearable
+                filterable
+                :loading="outlookLoading"
+                :options="outlookOptions"
+                @focus="loadOutlookOptions"
+              />
+            </n-form-item>
+          </n-gi>
+          <n-gi :span="2">
+            <n-alert type="info" :bordered="false" style="margin-bottom: 8px">
+              姓名、密码、地址、电话由所选 Outlook 邮箱同步填充，无需手动录入。
+            </n-alert>
+          </n-gi>
+          <n-gi :span="2"><n-divider style="margin: 4px 0">身份信息（来自 Outlook，只读）</n-divider></n-gi>
           <n-gi>
             <n-form-item label="姓名">
-              <n-input v-model:value="modalForm.full_name" placeholder="Full Name" />
+                <n-input v-model:value="modalForm.full_name" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="密码">
-              <n-input v-model:value="modalForm.password" placeholder="Gmail 密码" />
+              <n-input v-model:value="modalForm.password" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
-          <n-gi :span="2"><n-divider style="margin: 4px 0">地址信息</n-divider></n-gi>
           <n-gi>
             <n-form-item label="名">
-              <n-input v-model:value="modalForm.first_name" placeholder="First Name" />
+              <n-input v-model:value="modalForm.first_name" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="姓">
-              <n-input v-model:value="modalForm.last_name" placeholder="Last Name" />
+              <n-input v-model:value="modalForm.last_name" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="国家">
-              <n-input v-model:value="modalForm.country" placeholder="US" />
+              <n-input v-model:value="modalForm.country" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="省/州">
-              <n-input v-model:value="modalForm.province_state" placeholder="California" />
+              <n-input v-model:value="modalForm.province_state" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="城市">
-              <n-input v-model:value="modalForm.city" placeholder="Los Angeles" />
+              <n-input v-model:value="modalForm.city" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="邮编">
-              <n-input v-model:value="modalForm.zip_code" placeholder="90001" />
+              <n-input v-model:value="modalForm.zip_code" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi :span="2">
             <n-form-item label="地址1">
-              <n-input v-model:value="modalForm.shipping_address_1" placeholder="Shipping Address 1" />
+              <n-input v-model:value="modalForm.shipping_address_1" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi :span="2">
             <n-form-item label="地址2">
-              <n-input v-model:value="modalForm.shipping_address_2" placeholder="Shipping Address 2 (可选)" />
+              <n-input v-model:value="modalForm.shipping_address_2" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi>
             <n-form-item label="电话">
-              <n-input v-model:value="modalForm.phone" placeholder="+1 555-123-4567" />
+              <n-input v-model:value="modalForm.phone" readonly placeholder="由 Outlook 同步" />
             </n-form-item>
           </n-gi>
           <n-gi :span="2">
@@ -311,6 +348,24 @@
       确定要删除 <b>{{ checkedRowKeys.length }}</b> 条注册记录吗？
     </n-modal>
 
+    <!-- 批量分配 Outlook -->
+    <n-modal
+      v-model:show="showBatchAssignOutlookModal"
+      preset="dialog"
+      title="批量分配 Outlook 邮箱"
+      positive-text="确认分配"
+      :loading="batchAssignOutlookLoading"
+      @positive-click="handleBatchAssignOutlook"
+      @negative-click="showBatchAssignOutlookModal = false"
+    >
+      <p>
+        将已选 <b>{{ checkedRowKeys.length }}</b> 条注册记录，自动分配可用 Outlook 邮箱。
+      </p>
+      <n-text depth="3" style="font-size: 13px">
+        系统将从可用 Outlook 账号池中依次分配，并同步身份信息（姓名、密码、地址、电话等）。
+      </n-text>
+    </n-modal>
+
     <!-- 批量分配环境 -->
     <n-modal
       v-model:show="showBatchAssignEnvModal"
@@ -330,31 +385,6 @@
       </n-text>
     </n-modal>
 
-    <!-- 批量自动生成 -->
-    <n-modal
-      v-model:show="showBatchGenModal"
-      preset="dialog"
-      title="批量生成注册记录"
-      positive-text="开始生成"
-      :loading="batchGenLoading"
-      @positive-click="handleBatchGenerate"
-      @negative-click="showBatchGenModal = false"
-    >
-      <p style="color:#333;font-size:13px;line-height:1.8;margin-bottom:12px">
-        系统将自动为所有<strong>未分配 Gmail 的站点</strong>生成注册记录：<br>
-        - 域名取自站点域名<br>
-        - forward_to 自动设为站点域名<br>
-        - 生成后请通过 <strong>「批量分配环境到站点」</strong> 手动将环境ID和Gmail分配给站点
-      </p>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-        <span style="color:#333;font-size:13px;white-space:nowrap">邮箱别名</span>
-        <n-input v-model:value="batchGenForm.alias" placeholder="默认 admin" style="flex:1" />
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="color:#333;font-size:13px;white-space:nowrap">转发邮箱</span>
-        <n-input v-model:value="batchGenForm.forward_to" placeholder="留空则默认使用站点域名" style="flex:1" />
-      </div>
-    </n-modal>
 
     <!-- 详情弹窗 -->
     <n-modal
@@ -380,8 +410,10 @@
         </n-gi>
         <n-gi><n-text depth="3">转发目标</n-text></n-gi>
         <n-gi><n-text>{{ detailData.forward_to || '-' }}</n-text></n-gi>
-        <n-gi><n-text depth="3">恢复邮箱</n-text></n-gi>
+        <n-gi><n-text depth="3">辅助邮箱</n-text></n-gi>
         <n-gi><n-text>{{ detailData.recovery_email || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">2FA Key</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.two_fa_key || '-' }}</n-text></n-gi>
         <n-gi><n-text depth="3">邮编</n-text></n-gi>
         <n-gi><n-text>{{ detailData.zip_code || '-' }}</n-text></n-gi>
         <n-gi><n-text depth="3">国家</n-text></n-gi>
@@ -430,14 +462,20 @@
 import { h, reactive, ref } from 'vue'
 import {
   NButton, NButtonGroup, NTag, NSelect, NSpace, NGrid, NGi, NText, NDivider,
-  NPopconfirm, NPopover, NInputNumber, NInput, NTooltip, NModal, useMessage,
+  NPopconfirm, NPopover, NInputNumber, NInput, NTooltip, NModal, useMessage, useDialog,
 } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import api from '@/api/gmail'
 
 const message = useMessage()
-const generating = ref(false)
-const queryItems = reactive({ alias: '', domain: '', registration_status: '' })
+const dialog = useDialog()
+const queryItems = reactive({
+  alias: '',
+  domain: '',
+  registration_status: '',
+  outlook_account_username: '',
+  outlook_assigned: '',
+})
 const pagination = reactive({ page: 1, pageSize: 10, showSizePicker: true, pageSizes: [10, 20, 50] })
 const $table = ref(null)
 const checkedRowKeys = ref([])
@@ -447,12 +485,7 @@ const showBatchDeleteConfirm = ref(false)
 const batchDeleteLoading = ref(false)
 const showBatchStatusModal = ref(false)
 const batchTargetStatus = ref('completed')
-const showBatchGenModal = ref(false)
-const batchGenLoading = ref(false)
-const batchGenForm = reactive({
-  alias: 'admin',
-  forward_to: '',
-})
+const batchFetchLoading = ref(false)
 
 // ── 详情弹窗 ──
 const showDetailModal = ref(false)
@@ -466,6 +499,100 @@ function handleDetail(row) {
 // ── 批量分配环境 ──
 const showBatchAssignEnvModal = ref(false)
 const batchAssignEnvLoading = ref(false)
+
+// ── Outlook 分配 ──
+const showBatchAssignOutlookModal = ref(false)
+const batchAssignOutlookLoading = ref(false)
+const outlookOptions = ref([])
+const outlookLoading = ref(false)
+
+const outlookAssignedOptions = [
+  { label: '已分配 Outlook', value: 'yes' },
+  { label: '未分配 Outlook', value: 'no' },
+]
+
+async function loadOutlookOptions() {
+  if (outlookLoading.value) return
+  outlookLoading.value = true
+  try {
+    const res = await api.regAvailableOutlook({ limit: 300 })
+    const list = res.data || []
+    // 编辑态下当前已绑定的账号不在可用池里，需补进选项避免显示为空
+    const current = modalForm.outlook_account_id
+    const options = list.map((a) => ({
+      label: a.full_name ? `${a.username}（${a.full_name}）` : a.username,
+      value: a.id,
+    }))
+    if (current && !options.some((o) => o.value === current)) {
+      options.unshift({
+        label: modalForm.outlook_account_username || `账号 #${current}`,
+        value: current,
+      })
+    }
+    outlookOptions.value = options
+  } catch (e) {
+    message.error(`加载 Outlook 列表失败: ${e.message || e}`)
+  } finally {
+    outlookLoading.value = false
+  }
+}
+
+function buildRowOutlookOptions(row) {
+  const opts = outlookOptions.value.slice()
+  // 如果当前行已绑定但不在可用池，补入当前绑定
+  if (row.outlook_account_id && !opts.some((o) => o.value === row.outlook_account_id)) {
+    opts.unshift({
+      label: row.outlook_account_username || `账号 #${row.outlook_account_id}`,
+      value: row.outlook_account_id,
+    })
+  }
+  return opts
+}
+
+async function handleAssignOutlook(row, outlookAccountId) {
+  try {
+    await api.regAssignOutlook({
+      registration_id: row.id,
+      outlook_account_id: outlookAccountId ?? null,
+    })
+    message.success(outlookAccountId ? 'Outlook 已分配' : '已解绑 Outlook')
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(`操作失败: ${e.message || e}`)
+  }
+}
+
+async function handleSaveTwoFaKey(row) {
+  try {
+    await api.regUpdateTwoFaKey({
+      registration_id: row.id,
+      two_fa_key: row.two_fa_key || '',
+    })
+    message.success('2FA Key 已保存')
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(`保存失败: ${e.message || e}`)
+  }
+}
+
+async function handleBatchAssignOutlook() {
+  batchAssignOutlookLoading.value = true
+  try {
+    const res = await api.regBatchAssignOutlook({ ids: checkedRowKeys.value })
+    const d = res.data || {}
+    message.success(`分配完成：成功 ${d.assigned || 0}，跳过 ${d.skipped || 0}，账号不足 ${d.no_account || 0}`)
+    if (d.skip_reasons?.length) {
+      message.info(d.skip_reasons.slice(0, 5).join('；'))
+    }
+    showBatchAssignOutlookModal.value = false
+    checkedRowKeys.value = []
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(`批量分配失败: ${e.message || e}`)
+  } finally {
+    batchAssignOutlookLoading.value = false
+  }
+}
 
 const statusOptions = [
   { label: '待处理', value: 'pending' },
@@ -528,6 +655,8 @@ const modalForm = reactive({
   recovery_email: '',
   registration_status: 'pending',
   env_id: '',
+  outlook_account_id: null,
+  outlook_account_username: '',
 })
 
 function handleAdd() {
@@ -552,56 +681,8 @@ function handleAdd() {
     recovery_email: '',
     registration_status: 'pending',
     env_id: '',
-  })
-  modalVisible.value = true
-}
-
-async function handleAutoGenerate() {
-  generating.value = true
-  try {
-    const res = await api.regGenerateInfo()
-    const data = res.data || {}
-    if (data.alias) modalForm.alias = data.alias
-    if (data.full_name) modalForm.full_name = data.full_name
-    if (data.first_name) modalForm.first_name = data.first_name
-    if (data.last_name) modalForm.last_name = data.last_name
-    if (data.password) modalForm.password = data.password
-    if (data.country) modalForm.country = data.country
-    if (data.province_state) modalForm.province_state = data.province_state
-    if (data.city) modalForm.city = data.city
-    if (data.zip_code) modalForm.zip_code = data.zip_code
-    if (data.shipping_address_1) modalForm.shipping_address_1 = data.shipping_address_1
-    if (data.phone) modalForm.phone = data.phone
-    message.success('已自动填充注册信息')
-  } catch (e) {
-    message.error('自动生成失败')
-  } finally {
-    generating.value = false
-  }
-}
-
-function handleEdit(row) {
-  modalTitle.value = '编辑注册'
-  Object.assign(modalForm, {
-    id: row.id,
-    alias: row.alias,
-    domain: row.domain,
-    full_name: row.full_name,
-    first_name: row.first_name || '',
-    last_name: row.last_name || '',
-    password: row.password,
-    forward_to: row.forward_to,
-    zip_code: row.zip_code || '',
-    shipping_address_1: row.shipping_address_1 || '',
-    shipping_address_2: row.shipping_address_2 || '',
-    country: row.country || '',
-    province_state: row.province_state || '',
-    city: row.city || '',
-    phone: row.phone || '',
-    registration_email: row.registration_email,
-    recovery_email: row.recovery_email,
-    registration_status: row.registration_status,
-    env_id: row.env_id,
+    outlook_account_id: null,
+    outlook_account_username: '',
   })
   modalVisible.value = true
 }
@@ -609,17 +690,13 @@ function handleEdit(row) {
 async function handleSave() {
   modalLoading.value = true
   try {
-    if (modalForm.id) {
-      await api.regUpdate({ ...modalForm })
-    } else {
-      if (!modalForm.alias || !modalForm.domain) {
-        message.warning('别名和域名不能为空')
-        modalLoading.value = false
-        return
-      }
-      await api.regCreate({ ...modalForm })
+    if (!modalForm.alias || !modalForm.domain) {
+      message.warning('别名和域名不能为空')
+      modalLoading.value = false
+      return
     }
-    message.success(modalForm.id ? '更新成功' : '创建成功')
+    await api.regCreate({ ...modalForm })
+    message.success('创建成功')
     modalVisible.value = false
     $table.value?.handleSearch()
   } catch (e) {
@@ -768,28 +845,6 @@ async function handleBatchAssignEnv() {
   }
 }
 
-function openBatchGenerate() {
-  batchGenForm.alias = 'admin'
-  batchGenForm.forward_to = ''
-  showBatchGenModal.value = true
-}
-
-async function handleBatchGenerate() {
-  batchGenLoading.value = true
-  try {
-    const res = await api.regBatchGenerate({ alias: batchGenForm.alias, forward_to: batchGenForm.forward_to })
-    const data = res.data || {}
-    message.success(`成功生成 ${data.created || 0} 条，跳过 ${data.skipped || 0} 条，失败 ${data.failed || 0} 条`)
-    showBatchGenModal.value = false
-    $table.value?.handleSearch()
-  } catch (e) {
-    message.error(e?.response?.data?.msg || '批量生成失败')
-    throw e
-  } finally {
-    batchGenLoading.value = false
-  }
-}
-
 async function handleBatchStatusUpdate() {
   if (!checkedRowKeys.value.length) return
   try {
@@ -806,20 +861,68 @@ async function handleBatchStatusUpdate() {
   }
 }
 
+async function handleBatchFetch() {
+  batchFetchLoading.value = true
+  try {
+    const res = await api.regBatchFetch({ alias: '' })
+    const data = res.data || {}
+    const parts = [`新增 ${data.created || 0} 条`]
+    if (data.revived) parts.push(`恢复 ${data.revived} 条`)
+    parts.push(`跳过 ${data.skipped || 0} 条`, `失败 ${data.failed || 0} 条`)
+    message.success(parts.join('，'))
+    if (data.skip_reasons?.length) {
+      data.skip_reasons.slice(0, 3).forEach((r) => message.info(r))
+    }
+    $table.value?.handleSearch()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '批量获取失败')
+  } finally {
+    batchFetchLoading.value = false
+  }
+}
+
 // ── 表格列定义 ──
 
 const columns = [
-  { type: 'selection', width: 40 },
+  { type: 'selection', width: 40, align: 'center' },
   {
-    title: '序号', key: '_index', width: 50, align: 'center',
+    title: '序号', key: '_index', width: 60, align: 'center',
     render: (_row, rowIndex) => (pagination.page - 1) * pagination.pageSize + rowIndex + 1,
   },
-  { title: '别名', key: 'alias', width: 100 },
-  { title: '站点域名', key: 'domain', width: 140 },
-  { title: '姓名', key: 'full_name', width: 140 },
   {
-    title: '密码', key: 'password', width: 80,
-    render: (row) => h(
+    title: '站点域名', key: 'domain', width: 220,
+    render: (row) => {
+      const email = row.alias && row.domain ? `${row.alias}@${row.domain}` : (row.registration_email || '-')
+      return h(NTooltip, { trigger: 'hover', placement: 'top' }, {
+        trigger: () => h('div', { style: 'line-height:1.5;cursor:default' }, [
+          h('div', { style: 'font-size:13px' }, `邮箱：${email}`),
+          h('div', { style: 'font-size:12px;color:#909399' }, `域名：${row.domain || '-'}`),
+        ]),
+        default: () => h('div', { style: 'line-height:1.6' }, [
+          h('div', null, `邮箱：${email}`),
+          h('div', null, `域名：${row.domain || '-'}`),
+        ]),
+      })
+    },
+  },
+  {
+    title: '账号', key: 'outlook_account_username', width: 120, align: 'center',
+    render: (row) => row.outlook_account_username ? h(
+      NButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        onClick: () => {
+          navigator.clipboard.writeText(row.outlook_account_username)
+          message.success('账号已复制')
+        },
+      },
+      { default: () => row.outlook_account_username },
+    ) : '-',
+  },
+  {
+    title: '密码', key: 'password', width: 120, align: 'center',
+    render: (row) => row.password ? h(
       NButton,
       {
         size: 'tiny',
@@ -830,11 +933,75 @@ const columns = [
         },
       },
       { default: () => row.password },
-    ),
+    ) : '-',
   },
-  { title: '环境 ID', key: 'env_id', width: 130 },
   {
-    title: 'SMS号码', key: 'sms_phone_number', width: 100,
+    title: '辅助邮箱', key: 'recovery_email', width: 120, align: 'center',
+    render: (row) => row.recovery_email ? h(
+      NButton,
+      {
+        size: 'tiny',
+        quaternary: true,
+        onClick: () => {
+          navigator.clipboard.writeText(row.recovery_email)
+          message.success('辅助邮箱已复制')
+        },
+      },
+      { default: () => row.recovery_email },
+    ) : '-',
+  },
+  {
+    title: '2FA Key', key: 'two_fa_key', width: 80, align: 'center',
+    render: (row) => {
+      const hasTwoFa = !!row.two_fa_key
+      return h(
+        NTooltip,
+        {},
+        {
+          trigger: () => h(
+            'div',
+            {
+              style: { cursor: 'pointer', display: 'inline-flex', alignItems: 'center' },
+              onClick: () => {
+                if (hasTwoFa) {
+                  navigator.clipboard.writeText(row.two_fa_key)
+                  message.success('2FA Key 已复制')
+                } else {
+                  const inputValue = ref(row.two_fa_key || '')
+                  dialog.create({
+                    title: '回填 2FA Key',
+                    content: () => h(NInput, {
+                      value: inputValue.value,
+                      placeholder: '请输入 Google 2FA Key',
+                      clearable: true,
+                      onUpdateValue: (val) => { inputValue.value = val },
+                    }),
+                    positiveText: '保存',
+                    negativeText: '取消',
+                    onPositiveClick: () => {
+                      row.two_fa_key = inputValue.value
+                      handleSaveTwoFaKey(row)
+                    },
+                  })
+                }
+              },
+            },
+            [
+              h(TheIcon, {
+                icon: hasTwoFa ? 'mdi:shield-check' : 'mdi:shield-off-outline',
+                size: 20,
+                color: hasTwoFa ? '#18a058' : '#d0d0d0',
+              }),
+            ],
+          ),
+          default: () => hasTwoFa ? '点击复制 2FA Key' : '点击回填 2FA Key',
+        },
+      )
+    },
+  },
+  { title: '环境 ID', key: 'env_id', width: 130, align: 'center' },
+  {
+    title: 'SMS号码', key: 'sms_phone_number', width: 100, align: 'center',
     render: (row) => row.sms_phone_number ? h(
       NButton,
       {
@@ -849,7 +1016,7 @@ const columns = [
     ) : null,
   },
   {
-    title: '验证码', key: 'sms_code', width: 80,
+    title: '验证码', key: 'sms_code', width: 80, align: 'center',
     render: (row) => row.sms_code ? h(
       NButton,
       {
@@ -864,7 +1031,7 @@ const columns = [
     ) : null,
   },
   {
-    title: '注册状态', key: 'registration_status', width: 90,
+    title: '注册状态', key: 'registration_status', width: 90, align: 'center',
     render: (row) => h(
       NTag,
       { type: statusColorMap[row.registration_status] || 'default', size: 'small' },
@@ -872,7 +1039,7 @@ const columns = [
     ),
   },
   {
-    title: '操作', key: 'actions', width: 480, fixed: 'right',
+    title: '操作', key: 'actions', width: 420, fixed: 'right',
     render: (row) => {
       const isCompleted = row.registration_status === 'completed'
       const hasEnv = !!row.env_id
@@ -880,10 +1047,9 @@ const columns = [
       const hasPhone = row.sms_status === 'acquired'
       const hasCode = row.sms_status === 'code_received'
 
-      return h(NSpace, { size: 'small' }, {
+      return h(NSpace, { size: 'small', justify: 'center' }, {
         default: () => [
           h(NButton, { size: 'tiny', onClick: () => handleDetail(row) }, { default: () => '详情' }),
-          h(NButton, { size: 'tiny', onClick: () => handleEdit(row) }, { default: () => '编辑' }),
           h(NButton, {
             size: 'tiny',
             type: hasForwarding ? 'default' : 'primary',
@@ -893,7 +1059,7 @@ const columns = [
           h(NButton, {
             size: 'tiny',
             type: hasEnv ? 'default' : 'primary',
-            disabled: isCompleted || hasEnv || !hasForwarding,
+            disabled: isCompleted || hasEnv,
             onClick: () => openActionModal('createEnv', row, '创建环境'),
           }, { default: () => hasEnv ? '已建环境' : '创建环境' }),
           h(NButton, {

@@ -29,5 +29,12 @@ logs/
 app/uploads/
 uploads/
 
+# 临时数据库和日志
+*.sqlite3
+*.log
+
+# 构建错误日志
+agent_build/err*.txt
+
 .DS_Store
 ._.DS_Store

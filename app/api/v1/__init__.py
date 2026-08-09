@@ -13,6 +13,7 @@ from .roles import roles_router
 from .users import users_router
 from .site_pipeline import site_pipeline_router, feed_download_router
 from .gmail import gmail_router
+from .outlook import outlook_router
 from .shopify import shopify_router
 from .operation_jobs import operation_job_router
 from .imports import import_router, template_router
@@ -37,6 +38,8 @@ v1_router.include_router(feed_download_router, prefix="/site-pipeline/feed")
 v1_router.include_router(site_pipeline_router, prefix="/site-pipeline", dependencies=[DependPermission])
 
 v1_router.include_router(gmail_router, prefix="/gmail", dependencies=[DependPermission])
+
+v1_router.include_router(outlook_router, prefix="/outlook", dependencies=[DependPermission])
 
 v1_router.include_router(shopify_router, prefix="/shopify", dependencies=[DependPermission])
 
