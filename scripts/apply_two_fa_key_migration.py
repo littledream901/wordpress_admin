@@ -1,4 +1,4 @@
-"""执行 8_20260810160000_add_gmail_registration_two_fa_key 迁移"""
+"""执行 9_20260810160000_add_gmail_registration_two_fa_key 迁移"""
 import asyncio
 import sys
 from pathlib import Path
