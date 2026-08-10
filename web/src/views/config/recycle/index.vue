@@ -81,6 +81,7 @@ const typeOptions = [
   { value: 'account', label: '账号' },
   { value: 'provider', label: '配置' },
   { value: 'ads', label: 'ADS' },
+  { value: 'proxy', label: '代理' },
 ]
 
 // 详情字段分组定义
@@ -121,6 +122,12 @@ const FIELD_GROUPS = {
   ads: [
     { title: '基本信息', keys: ['id', 'ads_env_id', 'domain', 'status', 'remark', 'created_at', 'updated_at', 'deleted_at'] },
   ],
+  proxy: [
+    { title: '基本信息', keys: ['id', 'proxy_host', 'proxy_port', 'proxy_account', 'proxy_type_name', 'description', 'status'] },
+    { title: '地理位置', keys: ['reference_country_code', 'reference_city', 'reference_region_code'] },
+    { title: '使用统计', keys: ['usage_count', 'success_count', 'last_used_at', 'assigned_sites_count'] },
+    { title: '时间信息', keys: ['created_at', 'updated_at', 'deleted_at'] },
+  ],
 }
 
 const currentType = ref('site')
@@ -141,6 +148,18 @@ const columns = computed(() => {
     base.push(
       { title: '服务器IP', key: 'server_ip', width: 140 },
       { title: '环境ID', key: 'hub_env_id', width: 120 },
+    )
+  }
+  // 代理 tab 增加代理地址和分配站点数
+  if (currentType.value === 'proxy') {
+    base.push(
+      { 
+        title: '代理地址', 
+        key: 'proxy_address', 
+        width: 200,
+        render(row) { return `${row.proxy_host}:${row.proxy_port}` },
+      },
+      { title: '分配站点数', key: 'assigned_sites_count', width: 120 },
     )
   }
   base.push(
@@ -274,6 +293,11 @@ const LABEL_MAP = {
   env_name: '环境名称', env_status: '环境状态', env_error: '环境错误',
   sms_request_id: 'SMS请求ID', sms_phone_number: 'SMS号码', sms_code: 'SMS验证码',
   sms_status: 'SMS状态', sms_error: 'SMS错误',
+  proxy_host: '代理地址', proxy_port: '代理端口', proxy_account: '代理账号',
+  proxy_type_name: '代理类型', reference_country_code: '国家代码',
+  reference_city: '城市', reference_region_code: '区域代码',
+  usage_count: '使用次数', success_count: '成功次数', last_used_at: '最后使用时间',
+  assigned_sites_count: '分配站点数',
 }
 
 function fieldLabel(key) {

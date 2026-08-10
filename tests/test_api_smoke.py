@@ -23,7 +23,7 @@ PUBLIC_ENDPOINTS = [
     ("POST", "/api/v1/base/access_token"),
     ("POST", "/api/v1/base/refresh_token"),
     ("GET", "/api/v1/import/template/sites"),
-    ("GET", "/api/v1/site-pipeline/feed/download/test.csv"),  # 会 404 但不会 500
+    ("GET", "/feed/test.csv"),  # 会 404 但不会 500
 ]
 
 # ── GET 端点（需要认证） ──

@@ -117,9 +117,9 @@ class HubStudioOrchestrationService:
         if job_type in ("create_env", "update_env"):
             payload = await self._enrich_remark_from_gmail(payload, site)
 
-        # update_env: 从 provider 配置中读取代理配置，写入 payload
+        # update_env: 从数据库代理表读取代理配置，写入 payload
         if job_type == "update_env":
-            payload = await self._enrich_update_env_payload(payload, provider_id)
+            payload = await self._enrich_update_env_payload(payload, site_id)
 
         # create_account: 先清除之前的账号，再自动分配 Gmail 并将凭证写入 payload
         if job_type == "create_account":
@@ -205,18 +205,21 @@ class HubStudioOrchestrationService:
             "app_secret": "",
             "group_code": "",
             "real_kernel_version": "137",
-            # 代理相关字段（参考 hubstudio_s3_update_env.py FIXED_PROXY_CONFIG）
+            # 代理相关字段（已废弃，新逻辑使用 _get_proxy_config_for_site）
             "use_fixed_proxy": "true",
             "proxy_type_name": "HTTP",
             "proxy_host": "server.iphtml.biz",
             "proxy_port": "15000",
             "proxy_account": "uid-27498-zone-hubstudio",
             "proxy_password": "",
-            "proxy_country_code": "US",
-            "proxy_city": "New York",
-            "proxy_province": "CA",
-            "as_dynamic_type": "1",
+            "reference_country_code": "US",
+            "reference_city": "New York",
+            "reference_region_code": "CA",
+            "as_dynamic_type": "0",
             "ip_get_rule_type": "1",
+            "link_code": "",
+            "ip_database_channel": "0",
+            "ip_protocol_type": "0",
         }
         if provider_id:
             db_items = await ProviderConfigItem.get_map(provider_id)
@@ -239,9 +242,12 @@ class HubStudioOrchestrationService:
             "proxy_port": "HUB_PROXY_PORT",
             "proxy_account": "HUB_PROXY_ACCOUNT",
             "proxy_password": "HUB_PROXY_PASSWORD",
-            "proxy_country_code": "HUB_PROXY_COUNTRY_CODE",
-            "proxy_city": "HUB_PROXY_CITY",
-            "proxy_province": "HUB_PROXY_PROVINCE",
+            "reference_country_code": "HUB_PROXY_COUNTRY_CODE",
+            "reference_city": "HUB_PROXY_CITY",
+            "reference_region_code": "HUB_PROXY_PROVINCE",
+            "link_code": "HUB_PROXY_LINK_CODE",
+            "ip_database_channel": "HUB_PROXY_IP_DATABASE_CHANNEL",
+            "ip_protocol_type": "HUB_PROXY_IP_PROTOCOL_TYPE",
             "as_dynamic_type": "HUB_PROXY_AS_DYNAMIC_TYPE",
         }
         for key, env in env_map.items():
@@ -668,46 +674,45 @@ class HubStudioOrchestrationService:
 
     # ── 内部辅助 ──
 
-    async def _enrich_update_env_payload(self, payload: dict, provider_id: int) -> dict:
-        """为 update_env 任务从 provider 配置中补充代理配置
+    async def _enrich_update_env_payload(self, payload: dict, site_id: int) -> dict:
+        """为 update_env 任务补充站点绑定的代理配置
 
-        将 provider 中存储的代理字段写入 payload.proxy_config，
-        确保 Agent 领取任务时也能获得代理配置。
+        站点未绑定代理（proxy_config_id=0）时不下发 proxy_config，
+        由 HubStudio 侧沿用环境自身的默认代理。
         """
-        if not provider_id or payload.get("proxy_config"):
-            return payload  # 已有代理配置或无效 provider，不覆盖
+        if payload.get("proxy_config"):
+            return payload  # 已有代理配置，不覆盖
 
-        try:
-            provider_config = await self._get_provider_config(provider_id)
-        except Exception:
+        from app.models.site_pipeline import Site
+        from app.models.hubstudio_proxy import HubStudioProxyConfig
+        from tortoise.expressions import F
+        from datetime import datetime
+
+        site = await Site.get_or_none(id=site_id)
+        if not site or not site.proxy_config_id:
+            logger.info(f"[update_env] 站点未绑定代理，使用 HubStudio 默认代理: site_id={site_id}")
             return payload
 
-        proxy_config = {}
-        field_map = {
-            "proxyTypeName": "proxy_type_name",
-            "asDynamicType": "as_dynamic_type",
-            "proxyHost": "proxy_host",
-            "proxyPort": "proxy_port",
-            "proxyAccount": "proxy_account",
-            "proxyPassword": "proxy_password",
-            "referenceCountryCode": "proxy_country_code",
-            "referenceCity": "proxy_city",
-            "referenceProvince": "proxy_province",
-            "ipGetRuleType": "ip_get_rule_type",
-        }
-        for api_key, config_key in field_map.items():
-            val = provider_config.get(config_key)
-            if val is not None and str(val).strip() != "":
-                try:
-                    proxy_config[api_key] = int(val) if isinstance(val, int) or val.isdigit() else str(val).strip()
-                except Exception:
-                    proxy_config[api_key] = str(val).strip()
+        proxy = await HubStudioProxyConfig.get_or_none(
+            id=site.proxy_config_id, status='active', is_deleted=False
+        )
+        if not proxy:
+            logger.warning(
+                f"[update_env] 站点绑定的代理不存在、已禁用或已删除: site_id={site_id}, "
+                f"proxy_config_id={site.proxy_config_id}"
+            )
+            return payload
 
-        if proxy_config:
-            payload["proxy_config"] = proxy_config
-            logger.info(f"[update_env] 已从 provider[{provider_id}] 加载代理配置: "
-                        f"type={proxy_config.get('proxyTypeName')}, "
-                        f"host={proxy_config.get('proxyHost')}")
+        payload["proxy_config"] = proxy.to_api_params()
+        logger.info(
+            f"[update_env] 已加载代理配置: site_id={site_id}, proxy_id={proxy.id}, "
+            f"host={proxy.proxy_host}:{proxy.proxy_port}"
+        )
+
+        await HubStudioProxyConfig.filter(id=proxy.id).update(
+            usage_count=F("usage_count") + 1,
+            last_used_at=datetime.now(),
+        )
 
         return payload
 

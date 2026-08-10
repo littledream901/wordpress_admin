@@ -37,6 +37,7 @@ class SiteUpdate(BaseModel):
     hub_status: Optional[str] = ''
     hub_account_id: Optional[str] = ''
     hub_last_action: Optional[str] = ''
+    proxy_config_id: Optional[int] = None
     pipeline_status: Optional[str] = ''
     pipeline_log: Optional[str] = ''
     # Shopify 专属

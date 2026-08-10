@@ -57,12 +57,14 @@ def _safe_filename(original: str) -> str:
 
 
 def _make_processed_name(target_domain: str, ext: str) -> str:
-    """生成处理后的文件名：域名主体-6位随机字母.扩展名（去除顶级域名，. 改为 -）"""
+    """生成处理后的文件名：域名主体-6位随机字母-6位随机数字.扩展名（去除顶级域名，. 改为 -）"""
     # 去除顶级域名（.com / .net 等）
     domain_without_tld = re.sub(r'\.[a-zA-Z]{2,}$', '', target_domain)
     safe_domain = re.sub(r'[^a-zA-Z0-9.\-]', '-', domain_without_tld).strip('.-')
     safe_domain = safe_domain.replace('.', '-')
-    return f"{safe_domain}-{_random_suffix(6)}{ext}"
+    letters = ''.join(random.choices(string.ascii_lowercase, k=6))
+    digits = ''.join(random.choices(string.digits, k=6))
+    return f"{safe_domain}-{letters}-{digits}{ext}"
 
 
 def _detect_platform(content: str) -> str:
@@ -212,7 +214,7 @@ def _detect_domain_from_file(file_path: str, file_type: str) -> Optional[str]:
 def _make_download_url(filename: str) -> str:
     """根据文件名生成下载链接"""
     from urllib.parse import quote
-    return f"/api/v1/site-pipeline/feed/download/{quote(filename, safe='')}"
+    return f"/feed/{quote(filename, safe='')}"
 
 
 async def _feed_row(feed) -> dict:

@@ -118,6 +118,21 @@
             <n-select v-model:value="batchAssignTo" :options="batchAssignUserOption" label-field="label" value-field="value" placeholder="留空不改变归属人" clearable filterable />
           </n-form-item>
         </template>
+        <template v-if="currentBatchAction === 'assign-proxy'">
+          <n-form-item label="代理来源" label-placement="left">
+            <n-radio-group v-model:value="batchProxyUseDefault">
+              <n-space vertical>
+                <n-radio :value="true">使用 HubStudio 默认代理</n-radio>
+                <n-radio :value="false">从代理管理中分配</n-radio>
+              </n-space>
+            </n-radio-group>
+          </n-form-item>
+          <n-alert type="info" :bordered="false" style="margin-top: 8px">
+            {{ batchProxyUseDefault
+              ? '将清除站点绑定的代理，更新环境时沿用 HubStudio 环境自带的默认代理'
+              : `将从代理管理中为每个站点分配一条未被占用的代理，当前可用 ${availableProxyCount} 条` }}
+          </n-alert>
+        </template>
       </n-modal>
 
       <!-- 批量新增站点弹窗 -->
@@ -565,6 +580,7 @@ import { useRouter } from 'vue-router'
 import { NTag, NSpace, NButton, NCheckbox, NSelect, NTreeSelect, NTooltip, useMessage, useNotification } from 'naive-ui'
 import DateRangeFilter from '@/components/common/DateRangeFilter.vue'
 import api from '@/api/site-pipeline'
+import proxyApi from '@/api/hubstudio-proxy'
 import baseApi from '@/api'
 import gmailApi from '@/api/gmail'
 import { isForceLoggingOut, registerStopAllPollingHandler } from '@/utils'
@@ -1095,6 +1111,8 @@ const batchExtraTargetUrl = ref('')
 const batchGatewayUrl = ref('https://gateway.foxfingerlab.com')
 const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
+const batchProxyUseDefault = ref(true)
+const availableProxyCount = ref(0)
 
 // 批量分配弹窗：用户选项与所选部门联动，排除 admin
 const batchAssignUserOption = computed(() => {
@@ -1156,6 +1174,7 @@ const batchActionLabelMap = {
   redirect: '批量重定向',
   'gateway-defense': '批量网关防御',
   'assign-gmail': '批量分配Gmail',
+  'assign-proxy': '批量分配代理',
   assign: '批量分配用户',
   delete: '批量删除',
 }
@@ -1167,6 +1186,7 @@ const batchActions = [
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
   { label: '批量网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
+  { label: '批量分配代理', key: 'assign-proxy', icon: 'mdi:ip-network', permission: 'post/api/v1/hubstudio-proxy/batch-assign-sites' },
   { label: '批量分配用户', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
   { label: '批量删除', key: 'delete', icon: 'mdi:delete', permission: 'post/api/v1/site-pipeline/site/batch-delete' },
 ]
@@ -1184,6 +1204,8 @@ function handleBatchActionSelect(key) {
   batchExtraTargetUrl.value = ''
   batchAssignDeptId.value = null
   batchAssignTo.value = null
+  batchProxyUseDefault.value = true
+  if (key === 'assign-proxy') loadAvailableProxyCount()
   showBatchConfirm.value = true
 }
 
@@ -1193,6 +1215,7 @@ function cancelBatchAction() {
   batchExtraTargetUrl.value = ''
   batchAssignDeptId.value = null
   batchAssignTo.value = null
+  batchProxyUseDefault.value = true
   showBatchConfirm.value = false
 }
 
@@ -1297,6 +1320,11 @@ async function executeBatchAction() {
         dept_id: batchAssignDeptId.value,
         assign_to: batchAssignTo.value,
       })
+    } else if (action === 'assign-proxy') {
+      res = await proxyApi.batchAssignSites({
+        site_ids: ids,
+        use_default: batchProxyUseDefault.value,
+      })
     } else if (action === 'delete') {
       res = await api.batchDeleteSites(ids)
     }
@@ -1306,6 +1334,12 @@ async function executeBatchAction() {
     } else if (action === 'assign') {
       message.success(`已分配 ${res?.data?.updated ?? 0} / ${res?.data?.total ?? 0} 个站点`)
       showBatchConfirm.value = false
+      reload()
+    } else if (action === 'assign-proxy') {
+      const d = res?.data ?? {}
+      message.success(d.message || `已更新 ${d.updated ?? 0} 个站点`)
+      showBatchConfirm.value = false
+      loadAvailableProxyCount()
       reload()
     } else {
       batchResultActionType.value = action
@@ -1891,5 +1925,29 @@ onMounted(() => {
   baseApi.getUserList({ page: 1, page_size: 200 }).then((res) => {
     rawUserList.value = (res.data || []).map((u) => ({ label: `${u.username} (${u.dept?.name || '-'})`, value: u.id, username: u.username, dept: u.dept }))
   })
+  loadAvailableProxyCount()
 })
+
+async function loadAvailableProxyCount() {
+  try {
+    const res = await proxyApi.getList({ status: 'active', page: 1, page_size: 1000 })
+    const allProxies = res?.data || []
+    
+    // 获取已分配的代理ID（排除当前选中的站点，它们占用的代理视为可回收）
+    const assignedRes = await api.getList({ page: 1, page_size: 10000 })
+    const sites = assignedRes?.data || []
+    const selectedIds = new Set(checkedRowKeys.value)
+    const occupiedProxyIds = new Set(
+      sites
+        .filter(s => s.proxy_config_id > 0 && !selectedIds.has(s.id))
+        .map(s => s.proxy_config_id)
+    )
+    
+    // 计算可用代理数量
+    availableProxyCount.value = allProxies.filter(p => !occupiedProxyIds.has(p.id)).length
+  } catch (e) {
+    console.error('加载可用代理数量失败:', e)
+    availableProxyCount.value = 0
+  }
+}
 </script>

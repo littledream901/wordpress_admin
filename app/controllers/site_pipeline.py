@@ -14,6 +14,7 @@ from app.controllers.gmail_account import gmail_account_controller
 from app.controllers.gmail_registration import gmail_registration_controller
 from app.controllers.outlook_account import outlook_account_controller
 from app.controllers.shopify_collect import shopify_product_controller
+from app.controllers.hubstudio_proxy import hubstudio_proxy_controller
 from app.models.admin import Dept, User
 from app.models.config_provider import ConfigProvider, ProviderConfigItem, ResourceProviderBinding
 from app.models.gmail_account import GmailAccount
@@ -131,37 +132,60 @@ def _apply_dns_result_to_site(site, result: dict):
 
     root_ok = result.get('root_ok', False)
     www_ok = result.get('www_ok', False)
+    mx1_ok = result.get('mx1_ok', False)
+    mx2_ok = result.get('mx2_ok', False)
+    spf_ok = result.get('spf_ok', False)
     dynadot_r = result.get('dynadot_result')
 
     log_entry = json.dumps({
         "ts": now.isoformat(),
         "source": "cloudflare_dns_ns",
         "action": "Cloudflare DNS解析 + NS配置",
-        "status": "success" if (root_ok and www_ok) else "partial_fail",
+        "status": "success" if (root_ok and www_ok and mx1_ok and mx2_ok and spf_ok) else "partial_fail",
         "completed_at": now.isoformat(),
         "zone_id": result.get('zone_id'),
         "zone_status": result.get('zone_status'),
         "name_servers": result.get('name_servers'),
         "root_ok": root_ok,
         "www_ok": www_ok,
+        "mx1_ok": mx1_ok,
+        "mx2_ok": mx2_ok,
+        "spf_ok": spf_ok,
         "dynadot_result": dynadot_r,
     }, ensure_ascii=False)
     site.pipeline_log = (site.pipeline_log or '') + '\n' + log_entry
 
-    # 更新 CF / Dynadot 状态供前端展示（与 cloudflare_service.py 保持一致）
-    if root_ok and www_ok:
-        site.cloudflare_status = '已解析'
-    elif root_ok or www_ok:
-        site.cloudflare_status = '部分失败'
-    else:
-        site.cloudflare_status = '失败'
-
+    # CF 记录是否全部成功
+    cf_all_ok = root_ok and www_ok and mx1_ok and mx2_ok and spf_ok
+    
+    # NS 状态判断
+    ns_ok = True
+    ns_status_detail = ''
     if dynadot_r:
-        site.dynadot_status = 'ns_updated' if dynadot_r.get('success') else 'ns_failed'
+        ns_ok = dynadot_r.get('success', False)
+        if ns_ok:
+            site.dynadot_status = 'ns_updated'
+            ns_status_detail = 'ns_updated'
+        else:
+            error_msg = str(dynadot_r.get('error', ''))[:80]
+            site.dynadot_status = f'ns_failed:{error_msg}'
+            ns_status_detail = f'ns_failed:{error_msg}'
     else:
         # Zone 已 active，NS 已正确配置，无需 Dynadot 操作
         zone_status = result.get('zone_status', '')
         site.dynadot_status = f'zone_{zone_status}' if zone_status else 'zone_active'
+        ns_status_detail = site.dynadot_status
+
+    # 综合判断：CF 记录 + NS 状态
+    # 方案1：NS 失败时，即使 CF 记录全成功也标记为"部分失败"
+    if cf_all_ok and ns_ok:
+        site.cloudflare_status = '已解析'
+    elif cf_all_ok and not ns_ok:
+        site.cloudflare_status = f'部分失败(NS未生效:{ns_status_detail})'
+    elif root_ok or www_ok or mx1_ok or mx2_ok or spf_ok:
+        site.cloudflare_status = '部分失败'
+    else:
+        site.cloudflare_status = '失败'
 
 
 @guard_thread_pool
@@ -212,6 +236,9 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': cf_results.get('root_ok', False),
             'www_ok': cf_results.get('www_ok', False),
+            'mx1_ok': cf_results.get('mx1_ok', False),
+            'mx2_ok': cf_results.get('mx2_ok', False),
+            'spf_ok': cf_results.get('spf_ok', False),
             'dynadot_result': dynadot_result,
         }
     else:
@@ -235,6 +262,9 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': cf_results.get('root_ok', False),
             'www_ok': cf_results.get('www_ok', False),
+            'mx1_ok': cf_results.get('mx1_ok', False),
+            'mx2_ok': cf_results.get('mx2_ok', False),
+            'spf_ok': cf_results.get('spf_ok', False),
             'dynadot_result': dynadot_result,
         }
 
@@ -256,7 +286,18 @@ def _setup_cf_records(cf, zone_id, domain, root_type, root_value, www_type, www_
         www_ok = cf.add_or_update_cname_record(zone_id, 'www', www_value)
     else:
         www_ok = cf.add_or_update_a_record(zone_id, www_name, www_value)
-    return {'root_ok': root_ok, 'www_ok': www_ok}
+    time.sleep(0.3)
+    
+    # 添加 MX 记录
+    mx1_ok = cf.add_or_update_mx_record(zone_id, domain, 'mx1.improvmx.com.', priority=10)
+    time.sleep(0.3)
+    mx2_ok = cf.add_or_update_mx_record(zone_id, domain, 'mx2.improvmx.com.', priority=20)
+    time.sleep(0.3)
+    
+    # 添加 SPF 记录
+    spf_ok = cf.add_or_update_txt_record(zone_id, domain, 'v=spf1 include:spf.improvmx.com ~all')
+    
+    return {'root_ok': root_ok, 'www_ok': www_ok, 'mx1_ok': mx1_ok, 'mx2_ok': mx2_ok, 'spf_ok': spf_ok}
 
 
 # ── CRUD ──
@@ -609,6 +650,11 @@ class SitePipelineController:
         except Exception as e:
             _log.warning("删除 HubStudio 任务记录失败 site_id=%s: %s", site_id, e)
             stats["hub_job_deleted"] = 0
+        try:
+            stats["proxy_deleted"] = await hubstudio_proxy_controller.soft_delete_by_site(site_id)
+        except Exception as e:
+            _log.warning("软删除代理配置失败 site_id=%s: %s", site_id, e)
+            stats["proxy_deleted"] = 0
         return stats
 
     @staticmethod

@@ -25,6 +25,7 @@ class Site(BaseModel, SoftDeleteMixin, TimestampMixin):
     hub_status = fields.CharField(max_length=64, default='', description='Hub状态', db_index=True)
     hub_account_id = fields.CharField(max_length=255, default='', description='Hub账号ID')
     hub_last_action = fields.CharField(max_length=64, default='', description='Hub最后操作类型')
+    proxy_config_id = fields.IntField(default=0, description='绑定的代理配置ID，0表示使用Provider默认代理', db_index=True)
     woo_import_status = fields.CharField(max_length=64, default='', description='Woo导入状态', db_index=True)
     gmc_status = fields.CharField(max_length=64, default='', description='GMC状态', db_index=True)
     gmc_data = fields.TextField(default='', description='GMC详细数据(JSON)')

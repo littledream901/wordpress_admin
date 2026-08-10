@@ -2,37 +2,43 @@
 
 from ._common import build_container_name, build_remark
 
-# ── 默认固定代理配置 ──
+# ── 默认固定代理配置（兜底，正常应从 HubStudioProxyConfig 表读取）──
+# 字段含义参考 HubStudio /api/v1/env/proxy/update：
+#   asDynamicType     0=关闭IP变更提醒 1=开启
+#   ipGetRuleType     1=IP失效时提取新IP 2=每次打开环境时提取（API提取代理时必填）
+#   ipDatabaseChannel 1=IP2Location 2=DB-IP 3=MaxMind
+#   ipProtocolType    1=速度优先 2=IPv4 3=IPv6
+# containerCode 为环境ID，由调用方单独传入，不属于代理配置
 DEFAULT_FIXED_PROXY_CONFIG = {
     "proxyTypeName": "HTTP",
-    "asDynamicType": 1,
+    "asDynamicType": 0,
+    "ipGetRuleType": 1,
     "proxyHost": "server.iphtml.biz",
     "proxyPort": 15000,
     "proxyAccount": "uid-27498-zone-hubstudio",
     "proxyPassword": "",
     "referenceCountryCode": "US",
     "referenceCity": "New York",
-    "referenceProvince": "CA",
-    "ipGetRuleType": 1,
+    "referenceRegionCode": "CA",
+    "ipDatabaseChannel": 1,
+    "ipProtocolType": 1,
 }
 
-# ── 代理字段映射 ──
+# ── 代理字段映射：HubStudio API 字段 → payload 字段 ──
 PROXY_FIELD_MAP = {
     "proxyTypeName": "proxy_type_name",
     "asDynamicType": "as_dynamic_type",
-    "proxyIp": "proxy_ip",
-    "proxyHost": "proxy_host",
-    "proxyPort": "proxy_port",
-    "proxyUser": "proxy_user",
-    "proxyAccount": "proxy_account",
-    "proxyPassword": "proxy_password",
-    "proxyPwd": "proxy_pwd",
-    "referenceCountryCode": "proxy_country_code",
-    "proxyCountry": "proxy_country",
-    "referenceProvince": "proxy_province",
-    "referenceCity": "proxy_city",
     "ipGetRuleType": "ip_get_rule_type",
     "linkCode": "link_code",
+    "proxyHost": "proxy_host",
+    "proxyPort": "proxy_port",
+    "proxyAccount": "proxy_account",
+    "proxyPassword": "proxy_password",
+    "referenceCountryCode": "reference_country_code",
+    "referenceCity": "reference_city",
+    "referenceRegionCode": "reference_region_code",
+    "ipDatabaseChannel": "ip_database_channel",
+    "ipProtocolType": "ip_protocol_type",
 }
 
 

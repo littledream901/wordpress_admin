@@ -1,0 +1,99 @@
+代理管理简化重构完成记录
+================================
+
+## 改动概述
+
+按用户要求简化代理管理功能：
+1. 移除 provider 绑定、is_default、priority、name、code 字段
+2. 移除设为默认、优先级查找、兜底策略等复杂逻辑
+3. 简化站点批量分配：只需选择"使用默认"或"从代理池分配"
+
+## 数据库变更
+
+已执行 SQL（通过 test/remove_proxy_unused_fields.py）：
+- 删除字段：name, code, provider_id, is_default, priority
+- 保留字段：id, proxy_host, proxy_port, proxy_account, proxy_password, 
+  reference_country_code, reference_city, reference_region_code,
+  as_dynamic_type, ip_get_rule_type, link_code, ip_database_channel, 
+  ip_protocol_type, use_fixed_proxy, status, usage_count, success_count,
+  last_used_at, last_check_at, created_at, updated_at
+
+## 后端文件改动
+
+1. app/models/hubstudio_proxy.py
+   - 移除字段：name, code, provider_id, is_default, priority
+   - 简化 Meta 定义
+
+2. app/schemas/hubstudio_proxy.py
+   - 移除对应字段
+   - SiteBatchAssignProxy 改为 use_default: bool
+
+3. app/controllers/hubstudio_proxy.py
+   - 移除 set_default 方法
+   - 简化 batch_import（移除 name_prefix、provider_id）
+   - 重写 batch_assign_sites：
+     * use_default=True 时清除 proxy_config_id
+     * use_default=False 时从代理池分配（排除本批站点自己占用的代理）
+
+4. app/api/v1/hubstudio_proxy.py
+   - 移除 /set-default 接口
+   - 移除 /options 接口
+
+5. app/services/hubstudio_service.py
+   - 移除 _get_proxy_config_for_site 方法（三级查找）
+   - 移除 _enrich_update_env_payload 方法
+   - update_env 改为直接查询 site.proxy_config_id：
+     * proxy_config_id > 0 时读取配置并转换为 API 参数
+     * proxy_config_id = 0 时不设置代理，沿用 HubStudio 默认
+
+## 前端文件改动
+
+1. web/src/api/hubstudio-proxy.js
+   - 移除 setDefault、getOptions 方法
+
+2. web/src/views/site-pipeline/proxy-config/index.vue
+   - 移除字段：name, code, provider_id, priority
+   - 移除"设为默认"按钮
+   - 移除批量导入时的 name_prefix、provider_id 选项
+   - 表单只保留核心代理参数
+
+3. web/src/views/site-pipeline/site-list/index.vue
+   - 批量分配代理弹窗改为单选：
+     * 使用 HubStudio 默认代理
+     * 从代理管理中分配（显示可用数量）
+   - loadAvailableProxyCount 计算时排除当前选中站点占用的代理
+
+## 验证清单
+
+### 后端测试
+□ 启动服务无报错
+□ GET /api/v1/hubstudio-proxy/list 返回正常
+□ POST /api/v1/hubstudio-proxy/batch-import 批量导入成功
+□ POST /api/v1/hubstudio-proxy/update 更新代理成功
+□ DELETE /api/v1/hubstudio-proxy/delete 删除未占用代理成功
+□ POST /api/v1/hubstudio-proxy/batch-assign-sites use_default=true 清除成功
+□ POST /api/v1/hubstudio-proxy/batch-assign-sites use_default=false 分配成功
+
+### 前端测试
+□ 代理管理页面加载正常
+□ 批量粘贴导入代理成功
+□ 新增/编辑代理成功
+□ 删除代理成功
+□ 站点列表批量分配代理弹窗显示正常
+□ 选择"使用默认"后分配成功
+□ 选择"从代理管理中分配"后分配成功
+□ 可用代理数量计算准确
+
+### 业务逻辑测试
+□ 站点 proxy_config_id=0 时 update_env 不附加代理参数
+□ 站点 proxy_config_id>0 时 update_env 正确附加代理参数
+□ 同一批站点重复分配时不会误报代理不足
+□ 删除被占用的代理时正确拦截
+
+## 迁移文件
+
+migrations/models/10_20260810170000_add_hubstudio_proxy_config_table.py
+- 已更新为最终表结构（无 name, code, provider_id, is_default, priority）
+
+test/remove_proxy_unused_fields.py
+- 删除多余字段的 SQL 脚本（已执行）

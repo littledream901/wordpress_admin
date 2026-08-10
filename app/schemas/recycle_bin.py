@@ -11,6 +11,7 @@ class RecycleBinType(str, Enum):
     account = "account"
     provider = "provider"
     ads = "ads"
+    proxy = "proxy"
 
 
 class RecycleBinQuery(BaseModel):

@@ -161,15 +161,18 @@ def create_executor_from_config(config: dict) -> Tuple[HubStudioRuntime, HubStud
 
     proxy_field_map = {
         "proxyTypeName": "proxy_type_name",
+        "asDynamicType": "as_dynamic_type",
+        "ipGetRuleType": "ip_get_rule_type",
+        "linkCode": "link_code",
         "proxyHost": "proxy_host",
         "proxyPort": "proxy_port",
         "proxyAccount": "proxy_account",
         "proxyPassword": "proxy_password",
-        "referenceCountryCode": "proxy_country_code",
-        "referenceCity": "proxy_city",
-        "referenceProvince": "proxy_province",
-        "asDynamicType": "as_dynamic_type",
-        "ipGetRuleType": "ip_get_rule_type",
+        "referenceCountryCode": "reference_country_code",
+        "referenceCity": "reference_city",
+        "referenceRegionCode": "reference_region_code",
+        "ipDatabaseChannel": "ip_database_channel",
+        "ipProtocolType": "ip_protocol_type",
     }
     for api_key, config_key in proxy_field_map.items():
         val = config.get(config_key)

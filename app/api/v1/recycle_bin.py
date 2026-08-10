@@ -8,6 +8,7 @@ from app.controllers.gmail_account import gmail_account_controller
 from app.controllers.gmail_registration import gmail_registration_controller
 from app.controllers.outlook_account import outlook_account_controller
 from app.controllers.site_pipeline import site_controller
+from app.controllers.hubstudio_proxy import proxy_controller
 from app.schemas.base import Success, SuccessExtra
 from app.schemas.recycle_bin import RecycleBinAction, RecycleBinEmpty, RecycleBinType
 
@@ -22,6 +23,7 @@ _CONTROLLER_MAP = {
     RecycleBinType.account: account_controller,
     RecycleBinType.provider: provider_controller,
     RecycleBinType.ads: ads_env_controller,
+    RecycleBinType.proxy: proxy_controller,
 }
 
 # 类型 → 显示名称映射
@@ -33,6 +35,7 @@ _TYPE_LABELS = {
     RecycleBinType.account: "账号",
     RecycleBinType.provider: "配置提供者",
     RecycleBinType.ads: "ADS账号",
+    RecycleBinType.proxy: "代理",
 }
 
 
@@ -52,6 +55,8 @@ def _get_summary_row(obj_dict: dict, item_type: RecycleBinType) -> str:
         return f"[{obj_dict.get('provider_type', '')}] {obj_dict.get('provider_name', '')}"
     elif item_type == RecycleBinType.ads:
         return f"[{obj_dict.get('ads_env_id', '')}] {obj_dict.get('domain', '')}"
+    elif item_type == RecycleBinType.proxy:
+        return f"{obj_dict.get('proxy_host', '')}:{obj_dict.get('proxy_port', '')}"
     return ""
 
 
@@ -72,6 +77,13 @@ async def recycle_bin_list(
         d["resource_type"] = type.value
         d["resource_label"] = _TYPE_LABELS.get(type, type.value)
         d["summary"] = _get_summary_row(d, type)
+        
+        # 代理类型需要附加分配站点数
+        if type == RecycleBinType.proxy:
+            from app.models.site_pipeline import Site
+            assigned_count = await Site.filter(proxy_config_id=obj.id).count()
+            d['assigned_sites_count'] = assigned_count
+        
         data.append(d)
 
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)

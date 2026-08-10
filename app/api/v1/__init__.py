@@ -18,6 +18,7 @@ from .shopify import shopify_router
 from .operation_jobs import operation_job_router
 from .imports import import_router, template_router
 from .recycle_bin import router as recycle_bin_router
+from .hubstudio_proxy import router as hubstudio_proxy_router
 
 v1_router = APIRouter()
 
@@ -48,3 +49,5 @@ v1_router.include_router(template_router, prefix="/import")  # 模板下载无�
 v1_router.include_router(import_router, prefix="/import", dependencies=[DependPermission])
 
 v1_router.include_router(recycle_bin_router, prefix="/recycle-bin", dependencies=[DependPermission])
+
+v1_router.include_router(hubstudio_proxy_router, prefix="/hubstudio-proxy", dependencies=[DependPermission])

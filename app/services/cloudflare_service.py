@@ -150,6 +150,38 @@ class CloudflareService:
         data = self._post(f'/zones/{zone_id}/dns_records', payload)
         return bool(data.get('success'))
 
+    def add_or_update_mx_record(self, zone_id: str, record_name: str, mail_server: str, priority: int = 10) -> bool:
+        """添加或更新 MX 记录"""
+        data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='MX')
+        if not data.get('success'):
+            return False
+        payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': self.ttl}
+        records = data.get('result') or []
+        for record in records:
+            if record.get('content') == mail_server:
+                if record.get('priority') == priority:
+                    return True
+                data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
+                return bool(data.get('success'))
+        data = self._post(f'/zones/{zone_id}/dns_records', payload)
+        return bool(data.get('success'))
+
+    def add_or_update_txt_record(self, zone_id: str, record_name: str, content: str) -> bool:
+        """添加或更新 TXT 记录（用于 SPF、DKIM 等）"""
+        data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='TXT')
+        if not data.get('success'):
+            return False
+        payload = {'type': 'TXT', 'name': record_name, 'content': content, 'ttl': self.ttl}
+        records = data.get('result') or []
+        if records:
+            record = records[0]
+            if record.get('content') == content:
+                return True
+            data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
+            return bool(data.get('success'))
+        data = self._post(f'/zones/{zone_id}/dns_records', payload)
+        return bool(data.get('success'))
+
     async def provision_dns(self, site: Site) -> Dict[str, Any]:
         """DNS + NS 一起运行：
         1. 获取/创建 Cloudflare Zone
@@ -185,7 +217,31 @@ class CloudflareService:
 
         root_ok = self.add_or_update_a_record(zone_id, site.domain, site.server_ip)
         www_ok = self.add_or_update_a_record(zone_id, f'www.{site.domain}', site.server_ip)
-        site.cloudflare_status = '已解析' if root_ok and www_ok else '部分失败'
+        
+        # 添加 MX 记录
+        mx1_ok = self.add_or_update_mx_record(zone_id, site.domain, 'mx1.improvmx.com.', priority=10)
+        mx2_ok = self.add_or_update_mx_record(zone_id, site.domain, 'mx2.improvmx.com.', priority=20)
+        
+        # 添加 SPF 记录
+        spf_ok = self.add_or_update_txt_record(zone_id, site.domain, 'v=spf1 include:spf.improvmx.com ~all')
+        
+        # CF 记录是否全部成功
+        cf_all_ok = root_ok and www_ok and mx1_ok and mx2_ok and spf_ok
+        
+        # NS 状态判断
+        ns_ok = True
+        if dynadot_result:
+            ns_ok = dynadot_result.get('success', False)
+        
+        # 综合判断：CF 记录 + NS 状态
+        if cf_all_ok and ns_ok:
+            site.cloudflare_status = '已解析'
+        elif cf_all_ok and not ns_ok:
+            site.cloudflare_status = f'部分失败(NS未生效)'
+        elif root_ok or www_ok or mx1_ok or mx2_ok or spf_ok:
+            site.cloudflare_status = '部分失败'
+        else:
+            site.cloudflare_status = '失败'
 
         now = datetime.now()
         provider_info = await get_provider_info("cloudflare")
@@ -193,7 +249,7 @@ class CloudflareService:
             "ts": now.isoformat(),
             "source": "cloudflare_dns_ns",
             "action": "Cloudflare DNS解析 + NS配置",
-            "status": "success" if (root_ok and www_ok) else "partial_fail",
+            "status": "success" if (root_ok and www_ok and mx1_ok and mx2_ok and spf_ok) else "partial_fail",
             "started_at": started.isoformat() if dynadot_result else now.isoformat(),
             "completed_at": now.isoformat(),
             "duration_ms": int((now - started).total_seconds() * 1000),
@@ -202,6 +258,9 @@ class CloudflareService:
             "name_servers": ns,
             "root_ok": root_ok,
             "www_ok": www_ok,
+            "mx1_ok": mx1_ok,
+            "mx2_ok": mx2_ok,
+            "spf_ok": spf_ok,
             "dynadot_result": dynadot_result,
             "provider": provider_info,
         }, ensure_ascii=False)
@@ -211,6 +270,7 @@ class CloudflareService:
         return {
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': root_ok, 'www_ok': www_ok,
+            'mx1_ok': mx1_ok, 'mx2_ok': mx2_ok, 'spf_ok': spf_ok,
             'dynadot_result': dynadot_result,
         }
 
@@ -261,7 +321,23 @@ class CloudflareService:
         # CNAME 记录：www → shops.myshopify.com.
         www_ok = self.add_or_update_cname_record(zone_id, f'www.{site.domain}', SHOPIFY_CNAME)
 
-        site.cloudflare_status = '已解析' if root_ok and www_ok else '部分失败'
+        # CF 记录是否全部成功
+        cf_all_ok = root_ok and www_ok
+        
+        # NS 状态判断
+        ns_ok = True
+        if dynadot_result:
+            ns_ok = dynadot_result.get('success', False)
+        
+        # 综合判断：CF 记录 + NS 状态
+        if cf_all_ok and ns_ok:
+            site.cloudflare_status = '已解析'
+        elif cf_all_ok and not ns_ok:
+            site.cloudflare_status = f'部分失败(NS未生效)'
+        elif root_ok or www_ok:
+            site.cloudflare_status = '部分失败'
+        else:
+            site.cloudflare_status = '失败'
 
         now = datetime.now()
         provider_info = await get_provider_info("cloudflare")

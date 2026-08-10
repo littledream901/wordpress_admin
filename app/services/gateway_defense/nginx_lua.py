@@ -935,6 +935,8 @@ class NginxLuaDefenseService(GatewayDefenseService):
     def __init__(self):
         # Lua 源代码路径
         self.lua_source = "app/services/defense_file/nginx_lua/defense.lua"
+        # 任务日志（结构化步骤记录，供前端展示与排障）
+        self.task_log: List[Dict[str, Any]] = []
 
     def _verify_lua_source(self) -> bool:
         """验证 Lua 源文件是否存在"""
