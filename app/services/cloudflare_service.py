@@ -188,8 +188,8 @@ class CloudflareService:
         if not data.get('success'):
             logger.error("MX 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
             return False
-        # MX 记录 TTL 最小值为 60 秒（Cloudflare 限制），自动代理时使用 1 即可（表示 auto）
-        mx_ttl = 1 if self.proxied else max(self.ttl, 60)
+        # MX 记录不支持 proxied，TTL 最小值为 60 秒（Cloudflare 限制）
+        mx_ttl = max(self.ttl, 60)
         payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': mx_ttl}
         records = data.get('result') or []
         for record in records:
