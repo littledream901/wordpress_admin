@@ -23,12 +23,22 @@ class CloudflareService:
         self._session = None
         self._config_loaded = False
         self._last_token = None
+        self._last_account_id = None
 
     def _ensure_config(self):
-        """延迟加载配置（首次 API 调用时触发）"""
+        """延迟加载配置（每次调用检查关键配置是否变更）"""
+        # 每次都读取 account_id，支持动态更新
+        current_account_id = ProviderResolver.sync_get_config('cloudflare', 'account_id', '')
+        
+        # 如果 account_id 变化，标记为未加载以触发重新加载
+        if self._last_account_id != current_account_id:
+            self._config_loaded = False
+            self._last_account_id = current_account_id
+        
         if self._config_loaded:
             return
-        self.account_id = ProviderResolver.sync_get_config('cloudflare', 'account_id', '')
+        
+        self.account_id = current_account_id
         self.proxied = ProviderResolver.sync_get_config('cloudflare', 'proxied', 'false').lower() == 'true'
         self.ttl = int(ProviderResolver.sync_get_config('cloudflare', 'ttl', '') or '1')
         self.timeout_val = int(ProviderResolver.sync_get_config('cloudflare', 'timeout', '') or '20')
