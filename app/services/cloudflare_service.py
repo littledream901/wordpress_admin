@@ -195,9 +195,10 @@ class CloudflareService:
         mx_ttl = max(self.ttl, 60)
         # Cloudflare MX 记录：name 使用 @ 表示根域名，content 保持 FQDN 格式（带尾部点）
         payload = {'type': 'MX', 'name': '@', 'content': mail_server, 'priority': priority, 'ttl': mx_ttl}
-        logger.info("创建 MX 记录: zone_id=%s, name=%s (原始: %s), content=%s, priority=%s, ttl=%s", 
-                   zone_id[:16], '@', record_name, mail_server, priority, mx_ttl)
         records = data.get('result') or []
+        logger.info("查询到 %s 条 MX 记录: %s", len(records), [{'name': r.get('name'), 'content': r.get('content'), 'priority': r.get('priority')} for r in records])
+        logger.info("准备创建/更新 MX 记录: zone_id=%s, name=%s (原始: %s), content=%s, priority=%s, ttl=%s", 
+                   zone_id[:16], '@', record_name, mail_server, priority, mx_ttl)
         for record in records:
             if record.get('content') == mail_server:
                 if record.get('priority') == priority:
@@ -223,9 +224,10 @@ class CloudflareService:
         txt_ttl = max(self.ttl, 60)
         # Cloudflare TXT 记录：name 使用 @ 表示根域名
         payload = {'type': 'TXT', 'name': '@', 'content': content, 'ttl': txt_ttl}
-        logger.info("创建 TXT 记录: zone_id=%s, name=%s (原始: %s), content=%s, ttl=%s", 
-                   zone_id[:16], '@', record_name, content[:50], txt_ttl)
         records = data.get('result') or []
+        logger.info("查询到 %s 条 TXT 记录: %s", len(records), [{'name': r.get('name'), 'content': r.get('content')[:50]} for r in records])
+        logger.info("准备创建/更新 TXT 记录: zone_id=%s, name=%s (原始: %s), content=%s, ttl=%s", 
+                   zone_id[:16], '@', record_name, content[:50], txt_ttl)
         if records:
             record = records[0]
             if record.get('content') == content:
