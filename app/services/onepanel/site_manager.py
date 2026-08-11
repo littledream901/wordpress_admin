@@ -93,30 +93,6 @@ class OnePanelSiteManager:
             raise OnePanelError("delete site", detail=str(msg), status_code=None)
         time.sleep(self.delete_sleep)
 
-    def _ensure_website_group(self) -> None:
-        """确保网站分组存在，如果不存在则尝试创建"""
-        # 尝试查询所有分组（某些 1Panel 版本可能不支持此 API）
-        ok, groups_data = self.api.post('/websites/group/search', {'page': 1, 'pageSize': 100})
-        if ok and isinstance(groups_data, dict):
-            items = groups_data.get('items') or []
-            for group in items:
-                if int(group.get('id', 0)) == self.website_group_id:
-                    _log.info("网站分组已存在: group_id=%s name=%s", self.website_group_id, group.get('name'))
-                    return
-            # 分组不存在，尝试创建新分组
-            _log.warning("网站分组 %s 不存在，尝试创建", self.website_group_id)
-            ok_create, result = self.api.post('/websites/group', {'name': 'Auto Sites', 'default': False})
-            if ok_create and isinstance(result, dict):
-                new_group_id = int(result.get('id', 0))
-                if new_group_id > 0:
-                    _log.info("网站分组创建成功: group_id=%s", new_group_id)
-                    self.website_group_id = new_group_id
-                    return
-            _log.warning("网站分组创建失败，将使用默认 group_id=%s: %s", self.website_group_id, result)
-        else:
-            # API 不支持或返回错误，跳过验证，使用配置的 group_id
-            _log.warning("网站分组 API 不支持或返回错误，跳过验证，使用配置的 group_id=%s", self.website_group_id)
-
     def resolve_wp_app(self) -> Dict[str, Any]:
         if self._wp_app_detail_cache:
             return self._wp_app_detail_cache
@@ -295,8 +271,6 @@ class OnePanelSiteManager:
             domain, self.website_group_id, wp_app['app_id'], wp_app['app_detail_id'],
             wp_app['app_type'], wp_app['app_key'], wp_app['version'],
         )
-        # 验证并确保网站分组存在
-        self._ensure_website_group()
         alias = safe_alias(domain)
         app_port = random.randint(10000, 60000)
         db_suffix = hashlib.md5(f'{domain}-{time.time()}'.encode('utf-8')).hexdigest()[:8]
