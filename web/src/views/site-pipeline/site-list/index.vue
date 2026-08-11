@@ -119,18 +119,11 @@
           </n-form-item>
         </template>
         <template v-if="currentBatchAction === 'assign-proxy'">
-          <n-form-item label="代理来源" label-placement="left">
-            <n-radio-group v-model:value="batchProxyUseDefault">
-              <n-space vertical>
-                <n-radio :value="true">使用 HubStudio 默认代理</n-radio>
-                <n-radio :value="false">从代理管理中分配</n-radio>
-              </n-space>
-            </n-radio-group>
-          </n-form-item>
-          <n-alert type="info" :bordered="false" style="margin-top: 8px">
-            {{ batchProxyUseDefault
-              ? '将清除站点绑定的代理，更新环境时沿用 HubStudio 环境自带的默认代理'
-              : `将从代理管理中为每个站点分配一条未被占用的代理，当前可用 ${availableProxyCount} 条` }}
+          <n-alert type="info" :bordered="false" style="margin-bottom: 12px">
+            从代理管理中为每个站点分配一条未被占用的代理，当前可用 {{ availableProxyCount }} 条
+          </n-alert>
+          <n-alert type="warning" :bordered="false">
+            未分配代理的站点在更新环境时将使用 HubStudio Provider 默认代理，届时会再次提示确认
           </n-alert>
         </template>
       </n-modal>
@@ -665,6 +658,16 @@ function providerTypeLabel(type) {
   return map[type] || type
 }
 
+function proxyStatusLabel(status) {
+  const map = { active: '激活', disabled: '禁用', testing: '测试' }
+  return map[status] || status
+}
+
+function proxyStatusType(status) {
+  const map = { active: 'success', disabled: 'error', testing: 'warning' }
+  return map[status] || 'default'
+}
+
 const gmailFullAddress = computed(() => {
   const g = detail.value?.gmail
   if (!g) return '-'
@@ -1012,7 +1015,7 @@ const columns = [
       })
     },
   },
-  { title: 'Gmail', key: 'gmail_username', width: 70, render: (r) => r.gmail_username ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
+  { title: '代理', key: 'proxy_config_id', width: 70, render: (r) => r.proxy_config_id ? h(NTag, { type: 'success', size: 'small' }, { default: () => '已分配' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未分配' }), align: 'center' },
   { title: 'Hub 状态', key: 'hub_status', width: 120, render: (r) => statusTag(r.hub_status), align: 'center' },
   { title: 'GMC', key: 'gmc_status', width: 80, render: (r) => statusTag(r.gmc_status), align: 'center' },
   { title: '重定向', key: 'pipeline_status', width: 80, render: (r) => statusTag(redirectLabel(r)), align: 'center' },
@@ -1111,7 +1114,6 @@ const batchExtraTargetUrl = ref('')
 const batchGatewayUrl = ref('https://gateway.foxfingerlab.com')
 const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
-const batchProxyUseDefault = ref(true)
 const availableProxyCount = ref(0)
 
 // 批量分配弹窗：用户选项与所选部门联动，排除 admin
@@ -1175,6 +1177,7 @@ const batchActionLabelMap = {
   'gateway-defense': '批量网关防御',
   'assign-gmail': '批量分配Gmail',
   'assign-proxy': '批量分配代理',
+  'unassign-proxy': '批量取消代理',
   assign: '批量分配用户',
   delete: '批量删除',
 }
@@ -1187,6 +1190,7 @@ const batchActions = [
   { label: '批量网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
   { label: '批量分配代理', key: 'assign-proxy', icon: 'mdi:ip-network', permission: 'post/api/v1/hubstudio-proxy/batch-assign-sites' },
+  { label: '批量取消代理', key: 'unassign-proxy', icon: 'mdi:ip-network-outline', permission: 'post/api/v1/hubstudio-proxy/batch-unassign' },
   { label: '批量分配用户', key: 'assign', icon: 'mdi:account-arrow-right', permission: 'post/api/v1/site-pipeline/site/batch-assign' },
   { label: '批量删除', key: 'delete', icon: 'mdi:delete', permission: 'post/api/v1/site-pipeline/site/batch-delete' },
 ]
@@ -1204,7 +1208,6 @@ function handleBatchActionSelect(key) {
   batchExtraTargetUrl.value = ''
   batchAssignDeptId.value = null
   batchAssignTo.value = null
-  batchProxyUseDefault.value = true
   if (key === 'assign-proxy') loadAvailableProxyCount()
   showBatchConfirm.value = true
 }
@@ -1215,7 +1218,6 @@ function cancelBatchAction() {
   batchExtraTargetUrl.value = ''
   batchAssignDeptId.value = null
   batchAssignTo.value = null
-  batchProxyUseDefault.value = true
   showBatchConfirm.value = false
 }
 
@@ -1323,7 +1325,10 @@ async function executeBatchAction() {
     } else if (action === 'assign-proxy') {
       res = await proxyApi.batchAssignSites({
         site_ids: ids,
-        use_default: batchProxyUseDefault.value,
+      })
+    } else if (action === 'unassign-proxy') {
+      res = await proxyApi.batchUnassign({
+        site_ids: ids,
       })
     } else if (action === 'delete') {
       res = await api.batchDeleteSites(ids)
@@ -1337,9 +1342,27 @@ async function executeBatchAction() {
       reload()
     } else if (action === 'assign-proxy') {
       const d = res?.data ?? {}
-      message.success(d.message || `已更新 ${d.updated ?? 0} 个站点`)
+      notification.create({
+        type: 'success',
+        title: '批量分配代理成功',
+        content: () => h('div', { style: 'line-height: 1.8' }, [
+          `已为 ${d.updated ?? 0} 个站点分配代理`,
+          h('br'),
+          h('a', { 
+            href: '#/site-pipeline/proxy-config', 
+            style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' 
+          }, '前往代理管理查看分配情况'),
+        ]),
+        duration: 8000,
+        closable: true,
+      })
       showBatchConfirm.value = false
       loadAvailableProxyCount()
+      reload()
+    } else if (action === 'unassign-proxy') {
+      const d = res?.data ?? {}
+      message.success(`已取消 ${d.updated ?? 0} 个站点的代理分配`)
+      showBatchConfirm.value = false
       reload()
     } else {
       batchResultActionType.value = action
@@ -1934,7 +1957,7 @@ async function loadAvailableProxyCount() {
     const allProxies = res?.data || []
     
     // 获取已分配的代理ID（排除当前选中的站点，它们占用的代理视为可回收）
-    const assignedRes = await api.getList({ page: 1, page_size: 10000 })
+    const assignedRes = await api.getSiteList({ page: 1, page_size: 10000 })
     const sites = assignedRes?.data || []
     const selectedIds = new Set(checkedRowKeys.value)
     const occupiedProxyIds = new Set(

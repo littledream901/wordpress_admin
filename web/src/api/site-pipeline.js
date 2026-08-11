@@ -50,7 +50,7 @@ export default {
   // HubStudio Site 快捷入口
   triggerHubEnv: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-env`, { provider_id: providerId, execute_now: executeNow }),
   triggerHubAccount: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-account`, { provider_id: providerId, execute_now: executeNow }),
-  triggerHubUpdate: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-update`, { provider_id: providerId, execute_now: executeNow }),
+  triggerHubUpdate: (siteId, providerId = 0, executeNow = false, confirmDefaultProxy = false) => request.post(`/site-pipeline/site/${siteId}/hub-update`, { provider_id: providerId, execute_now: executeNow, confirm_default_proxy: confirmDefaultProxy }),
   triggerHubControl: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-control`, { provider_id: providerId, execute_now: executeNow }),
   triggerHubGmcCheck: (siteId, providerId = 0, executeNow = false) => request.post(`/site-pipeline/site/${siteId}/hub-gmc-check`, { provider_id: providerId, execute_now: executeNow }),
   triggerHubOpenEnv: (siteId, providerId = 0) => request.post(`/site-pipeline/site/${siteId}/hub-open-env`, { provider_id: providerId }),

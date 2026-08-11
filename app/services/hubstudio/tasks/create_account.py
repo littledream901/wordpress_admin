@@ -127,6 +127,14 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         f"[create_account] 开始: domain={domain}, env_id={hub_env_id}, "
         f"gmail={gmail_username or '(无)'}, login_url={login_url or '(无)'}"
     )
+    
+    # 调试：打印 payload 中的关键字段
+    executor.logger.info(
+        f"[create_account] Payload 关键字段: "
+        f"workspace_username={payload.get('workspace_username', '(无)')}, "
+        f"personal_gmail_username={payload.get('personal_gmail_username', '(无)')}, "
+        f"improvmx_username={payload.get('improvmx_username', '(无)')}"
+    )
 
     if not executor.rt.is_port_open():
         executor.logger.warning("[create_account] Connector 端口不可达，尝试启动...")
@@ -135,50 +143,89 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
     results = {}
     env_id_int = int(hub_env_id)
 
-    # ── 1. 创建 Gmail 主账号 ──
-    if gmail_username and gmail_password:
-        gmail_data = {
-            "containerCode": env_id_int,
-            "accountName": gmail_username,
-            "accountPassword": gmail_password,
-            "siteName": "Gmail",
-            "name": "gmc",
-        }
-        if gmail_2fa_key:
-            gmail_data["otpSecret"] = gmail_2fa_key
+    def create_platform_account(
+        result_key: str,
+        account_label: str,
+        account_name: str,
+        account_password: str,
+        site_name: str,
+        domain_name: str = "",
+        otp_secret: str = "",
+        max_retries: int = 5,
+    ) -> None:
+        if not account_name or not account_password:
+            executor.logger.warning(f"[create_account] 无 {account_label} 凭证，跳过")
+            return
 
-        executor.logger.info(f"[create_account] 创建 Gmail 账号: {gmail_username}")
+        account_data = {
+            "containerCode": env_id_int,
+            "accountName": account_name,
+            "accountPassword": account_password,
+            "siteName": site_name,
+            "name": account_label,
+        }
+        if domain_name:
+            account_data["domainName"] = domain_name
+        if otp_secret:
+            account_data["otpSecret"] = otp_secret
+
+        executor.logger.info(f"[create_account] 创建 {account_label} 账号: {account_name}")
         try:
-            resp = call_add_account_direct(executor, gmail_data)
-            results["gmail_account"] = {"ok": True, "resp": resp}
-            executor.logger.info(f"[create_account] Gmail 账号创建成功")
+            resp = call_add_account_direct(executor, account_data, max_retries=max_retries)
+            results[result_key] = {"ok": True, "resp": resp}
+            executor.logger.info(f"[create_account] {account_label} 账号创建成功")
             time.sleep(1.0)
         except Exception as e:
             err_msg = str(e)
             if "账号已存在" in err_msg:
-                results["gmail_account"] = {"ok": True, "resp": {}, "existed": True}
-                executor.logger.info(f"[create_account] Gmail 账号已存在（HubStudio 中已创建）: {gmail_username}")
+                results[result_key] = {"ok": True, "resp": {}, "existed": True}
+                executor.logger.info(f"[create_account] {account_label} 账号已存在: {account_name}")
             elif "无效的API接口" in err_msg or "add-account" in err_msg:
-                executor.logger.warning("[create_account] add-account 直连不可用，回退到 httpx 客户端")
+                executor.logger.warning(f"[create_account] {account_label} 回退到 httpx 客户端")
                 try:
-                    client = executor.rt.ensure_client()
-                    resp = client.add_container_account(**gmail_data)
-                    results["gmail_account"] = {"ok": True, "resp": resp, "fallback": True}
-                    executor.logger.info(f"[create_account] Gmail 账号创建成功（httpx 客户端）")
+                    resp = executor.rt.ensure_client().add_container_account(**account_data)
+                    results[result_key] = {"ok": True, "resp": resp, "fallback": True}
+                    executor.logger.info(f"[create_account] {account_label} 账号创建成功（httpx 客户端）")
                     time.sleep(1.0)
-                except Exception as e2:
-                    results["gmail_account"] = {"ok": False, "error": str(e2)}
-                    executor.logger.warning(f"[create_account] Gmail 账号创建失败: {e2}")
-            elif is_retryable_error(e):
-                results["gmail_account"] = {"ok": False, "error": str(e)[:200]}
-                executor.logger.error(f"[create_account] Gmail 账号创建失败（可重试）: {e}")
+                except Exception as fallback_error:
+                    results[result_key] = {"ok": False, "error": str(fallback_error)[:200]}
+                    executor.logger.warning(f"[create_account] {account_label} 账号创建失败: {fallback_error}")
             else:
-                results["gmail_account"] = {"ok": False, "error": str(e)[:200]}
-                executor.logger.error(f"[create_account] Gmail 账号创建失败: {e}")
-    else:
-        executor.logger.warning("[create_account] 无 Gmail 凭证，跳过 Gmail 账号创建")
+                results[result_key] = {"ok": False, "error": str(e)[:200]}
+                executor.logger.error(f"[create_account] {account_label} 账号创建失败: {e}")
 
-    # ── 2. 创建 WordPress 后台管理员账号 ──
+    # ── 1. 创建 ImprovMX 账号 ──
+    create_platform_account(
+        "improvmx_account",
+        "ImprovMX",
+        payload.get("improvmx_username", ""),
+        payload.get("improvmx_password", ""),
+        "自定义平台",
+        "https://app.improvmx.com/signup",
+    )
+
+    # ── 2. 创建 Gmail Workspace 账号 ──
+    create_platform_account(
+        "gmail_workspace_account",
+        "Gmail Workspace",
+        payload.get("workspace_username", ""),
+        payload.get("workspace_password", ""),
+        "自定义平台",
+        "https://workspace.google.com/essentials/signup/verify/emailstart",
+    )
+
+    # ── 3. 创建 Gmail 个人账号 ──
+    create_platform_account(
+        "gmail_account",
+        "Gmail",
+        payload.get("personal_gmail_username", gmail_username),
+        payload.get("personal_gmail_password", gmail_password),
+        "Gmail",
+        "https://mail.google.com",
+        payload.get("personal_gmail_2fa_key", gmail_2fa_key),
+    )
+
+    # ── 4. 创建 WordPress 后台管理员账号 ──
     if login_url:
         admin_data = {
             "containerCode": env_id_int,
@@ -234,28 +281,6 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
                 results["account"] = {"ok": False, "error": str(e)[:200]}
                 executor.logger.error(f"[create_account] 基础账号创建失败: {e}")
 
-    # ── 3. 写备注 ──
-    remark_fields = payload.get("remark_fields", {})
-    if remark_fields and any(v for v in remark_fields.values()):
-        from ._common import build_remark, build_container_name
-
-        remark_text = build_remark(payload)
-        if remark_text:
-            container_name = build_container_name(domain)
-            executor.logger.info(f"[create_account] 写备注: {remark_text[:80]}...")
-            try:
-                client = executor.rt.ensure_client()
-                client.update_env(
-                    containerCode=env_id_int,
-                    containerName=container_name,
-                    remark=remark_text,
-                )
-                results["remark"] = "ok"
-                executor.logger.info(f"[create_account] 备注写入成功")
-            except Exception as e:
-                results["remark"] = f"failed: {str(e)[:100]}"
-                executor.logger.warning(f"[create_account] 备注写入失败: {e}")
-
     # ── 汇总结果 ──
     task_results = {k: v for k, v in results.items() if isinstance(v, dict)}
     ok_count = sum(1 for v in task_results.values() if v.get("ok"))
@@ -292,6 +317,63 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         f"[create_account] 完成: status={status}, {summary}"
         + (f", errors={errors}" if errors else "")
     )
+
+    # ── 汇总四类账号凭证信息 ──
+    accounts_info = {}
+
+    # 1. ImprovMX 账号
+    improvmx_username = payload.get("improvmx_username", "")
+    improvmx_password = payload.get("improvmx_password", "")
+    if improvmx_username and improvmx_password:
+        accounts_info["improvmx"] = {
+            "login_url": "https://app.improvmx.com/signup",
+            "username": improvmx_username,
+            "password": improvmx_password,
+            "note": "邮件转发管理后台",
+        }
+
+    # 2. Gmail Workspace 账号
+    workspace_username = payload.get("workspace_username", "")
+    workspace_password = payload.get("workspace_password", "")
+    if workspace_username and workspace_password:
+        accounts_info["gmail_workspace"] = {
+            "login_url": "https://workspace.google.com/essentials/signup/verify/emailstart",
+            "username": workspace_username,
+            "password": workspace_password,
+            "note": "Google Workspace 管理控制台",
+        }
+
+    # 3. Gmail 个人账号
+    personal_gmail_username = payload.get("personal_gmail_username", gmail_username)
+    personal_gmail_password = payload.get("personal_gmail_password", gmail_password)
+    personal_gmail_2fa_key = payload.get("personal_gmail_2fa_key", gmail_2fa_key)
+    if personal_gmail_username and personal_gmail_password:
+        accounts_info["gmail"] = {
+            "login_url": "https://mail.google.com",
+            "username": personal_gmail_username,
+            "password": personal_gmail_password,
+            "two_fa_key": personal_gmail_2fa_key,
+            "note": "Gmail 邮箱",
+        }
+
+    # 4. WordPress 后台账号
+    if login_url:
+        accounts_info["wordpress"] = {
+            "login_url": login_url,
+            "username": executor.admin_account_name,
+            "password": executor.admin_account_password,
+            "note": "WordPress 后台管理",
+        }
+    elif results.get("account"):
+        accounts_info["wordpress"] = {
+            "login_url": "(需手动配置)",
+            "username": executor.admin_account_name,
+            "password": executor.admin_account_password,
+            "note": "WordPress 后台管理（基础账号）",
+        }
+
+    executor.logger.info(f"[create_account] 账号凭证汇总: {list(accounts_info.keys())}")
+
     return {
         "status": status,
         "summary": summary,
@@ -299,4 +381,5 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         "domain": domain,
         "errors": errors,
         "results": results,
+        "accounts": accounts_info,
     }

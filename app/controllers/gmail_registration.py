@@ -5,6 +5,7 @@
 - 流程编排：创建转发 → 创建环境 → 获取号码 → 等待 SMS → 确认完成
 - 批量操作：批量生成、批量执行步骤、批量分配环境
 """
+import asyncio
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +13,7 @@ from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from app.core.crud import CRUDBase
+from app.log import logger
 from app.models.gmail_registration import GmailRegistration
 from app.models.site_pipeline import Site
 from app.models.gmail_account import GmailAccount
@@ -22,6 +24,9 @@ from app.settings.config import settings
 
 # Outlook 账号可用状态（只有该状态可被分配）
 OUTLOOK_AVAILABLE_STATUS = '正常'
+
+# SMS 等待并发数（轮询为纯等待，可并发以缩短总耗时）
+SMS_WAIT_CONCURRENCY = 5
 
 # 从 Outlook 账号同步到注册记录的身份字段映射
 _OUTLOOK_IDENTITY_FIELDS = (
@@ -234,32 +239,16 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
     # ── 流程步骤（单条） ──
 
     async def create_forwarding(self, registration_id: int) -> dict:
-        """步骤1：创建 ImprovMX 转发别名"""
+        """步骤1：创建 ImprovMX 转发别名（已废弃，直接使用 HubStudio 创建账号）"""
         reg = await self.get(id=registration_id)
         if not reg:
             return {"success": False, "error": "注册记录不存在"}
         
-        if reg.improvmx_status == "success":
-            return {"success": True, "message": "转发已创建", "registration": await reg.to_dict()}
-        
-        # 调用 ImprovMX
-        forward_to = reg.forward_to or reg.recovery_email or f"{reg.alias}@{reg.domain}"
-        result = gmail_registration_service.create_forwarding_email(
-            domain=reg.domain,
-            alias=reg.alias,
-            forward=forward_to,
-        )
-        
-        if result.get("success"):
-            reg.improvmx_alias_id = result.get("improvmx_alias_id", "")
-            reg.improvmx_status = "success"
-            reg.registration_status = "forwarding_created"
-        else:
-            reg.improvmx_status = "failed"
-            reg.improvmx_error = result.get("error", "Unknown error")
-        
-        await reg.save()
-        return {"success": result.get("success"), "registration": await reg.to_dict()}
+        return {
+            "success": False,
+            "error": "ImprovMX 转发步骤已废弃，请直接创建环境后通过 HubStudio 创建账号",
+            "registration": await reg.to_dict()
+        }
 
     async def create_environment(self, registration_id: int) -> dict:
         """步骤2：创建 HubStudio 环境"""
@@ -267,11 +256,33 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
         if not reg:
             return {"success": False, "error": "注册记录不存在"}
         
-        if reg.env_status == "success":
+        if reg.env_status == "success" and reg.env_id:
             return {"success": True, "message": "环境已创建", "registration": await reg.to_dict()}
         
-        # 关联站点（有则复用站点派发链路，可继承 provider 与代理配置）
-        site = await Site.filter(domain=reg.domain, is_deleted=False).first()
+        # 关联站点（优先使用保存的 site_id，其次按域名查询）
+        site = None
+        if reg.site_id:
+            site = await Site.filter(id=reg.site_id, is_deleted=False).first()
+        if not site:
+            site = await Site.filter(domain=reg.domain, is_deleted=False).first()
+            # 找到站点时保存 site_id，后续操作可直接复用
+            if site:
+                reg.site_id = site.id
+                await reg.save(update_fields=['site_id'])
+
+        # 如果站点已有环境，直接复用（避免重复创建）
+        if site and site.hub_env_id:
+            reg.env_id = site.hub_env_id
+            reg.env_name = site.hub_env_name or ""
+            reg.env_status = "success"
+            reg.registration_status = "env_created"
+            await reg.save()
+            return {
+                "success": True,
+                "message": "已复用站点环境",
+                "action": "reused",
+                "registration": await reg.to_dict()
+            }
 
         # 调用 HubStudio
         result = await gmail_registration_service.create_environment(
@@ -280,6 +291,8 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
             full_name=reg.full_name,
             site_id=site.id if site else 0,
             extra_payload={
+                "last_name": reg.last_name,
+                "first_name": reg.first_name,
                 "recovery_email": reg.recovery_email,
                 "country": reg.country,
                 "province_state": reg.province_state,
@@ -288,19 +301,35 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
                 "shipping_address_1": reg.shipping_address_1,
                 "shipping_address_2": reg.shipping_address_2,
                 "phone": reg.phone,
+                "api_url": reg.api_url,
             },
         )
         
         if result.get("success"):
-            reg.env_id = result.get("env_id", "")
-            reg.env_name = result.get("container_name", "")
+            env_id = result.get("env_id", "")
+            env_name = result.get("container_name", "")
+            
+            reg.env_id = env_id
+            reg.env_name = env_name
             reg.env_status = "success"
             reg.registration_status = "env_created"
+            await reg.save()
+            
+            # 自动同步环境到站点（如果站点存在且未分配环境）
+            if site and not site.hub_env_id:
+                site.hub_env_id = env_id
+                site.hub_env_name = env_name
+                site.hub_status = "success"
+                site.hub_last_action = "create_gmail_env"
+                site.pipeline_status = "hubstudio:success"
+                site.pipeline_log = (site.pipeline_log or "") + f"\n[gmail_reg] 自动分配环境 env_id={env_id}"
+                await site.save()
+                logger.info(f"[gmail_reg] 环境已自动同步到站点: site_id={site.id} env_id={env_id}")
         else:
             reg.env_status = "failed"
             reg.env_error = result.get("error", "Unknown error")
+            await reg.save()
         
-        await reg.save()
         return {"success": result.get("success"), "registration": await reg.to_dict()}
 
     async def get_phone_number(
@@ -391,75 +420,57 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
 
     # ── 批量操作 ──
 
+    async def _run_batch(self, ids: list[int], step, concurrency: int = 1) -> dict:
+        """批量执行单条流程步骤
+
+        Args:
+            ids: 注册记录 ID 列表
+            step: 单条执行协程，签名为 async (registration_id) -> dict
+            concurrency: 并发数，1 表示串行（第三方接口限流场景）
+
+        Returns:
+            {"ok": N, "fail": N, "errors": [...]}
+        """
+        semaphore = asyncio.Semaphore(max(concurrency, 1))
+
+        async def _run_one(rid: int) -> tuple[bool, str]:
+            async with semaphore:
+                try:
+                    result = await step(rid)
+                    if result.get("success"):
+                        return True, ''
+                    return False, f"[ID {rid}] {result.get('error') or '执行失败'}"
+                except Exception as e:
+                    logger.error(f"[gmail_reg] 批量步骤失败: id={rid} err={e}")
+                    return False, f"[ID {rid}] {e}"
+
+        results = await asyncio.gather(*[_run_one(rid) for rid in ids])
+        errors = [msg for success, msg in results if not success]
+        ok = len(results) - len(errors)
+        return {"ok": ok, "fail": len(errors), "errors": errors[:20]}
+
     async def batch_create_forwarding(self, ids: list[int]) -> dict:
-        """批量创建转发"""
-        ok, fail = 0, 0
-        for rid in ids:
-            try:
-                result = await self.create_forwarding(rid)
-                if result.get("success"):
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        return {"ok": ok, "fail": fail}
+        """批量创建转发（已废弃）"""
+        return {"ok": 0, "fail": len(ids), "errors": ["ImprovMX 转发步骤已废弃"]}
 
     async def batch_create_env(self, ids: list[int]) -> dict:
-        """批量创建环境"""
-        ok, fail = 0, 0
-        for rid in ids:
-            try:
-                result = await self.create_environment(rid)
-                if result.get("success"):
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        return {"ok": ok, "fail": fail}
+        """批量创建环境（HubStudio Connector 为单实例，串行执行）"""
+        return await self._run_batch(ids, self.create_environment)
 
     async def batch_get_phone(self, ids: list[int]) -> dict:
         """批量获取号码"""
-        ok, fail = 0, 0
-        for rid in ids:
-            try:
-                result = await self.get_phone_number(rid)
-                if result.get("success"):
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        return {"ok": ok, "fail": fail}
+        return await self._run_batch(ids, self.get_phone_number)
 
     async def batch_wait_sms(self, ids: list[int], timeout: int = 300) -> dict:
-        """批量等待短信"""
-        ok, fail = 0, 0
-        for rid in ids:
-            try:
-                result = await self.wait_for_sms(rid, timeout=timeout)
-                if result.get("success"):
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        return {"ok": ok, "fail": fail}
+        """批量等待短信（轮询为纯等待，可并发以缩短总耗时）"""
+        async def _wait(rid: int) -> dict:
+            return await self.wait_for_sms(rid, timeout=timeout)
+
+        return await self._run_batch(ids, _wait, concurrency=SMS_WAIT_CONCURRENCY)
 
     async def batch_confirm_sms(self, ids: list[int]) -> dict:
         """批量确认完成"""
-        ok, fail = 0, 0
-        for rid in ids:
-            try:
-                result = await self.confirm_sms(rid)
-                if result.get("success"):
-                    ok += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
-        return {"ok": ok, "fail": fail}
+        return await self._run_batch(ids, self.confirm_sms)
 
     # ── 批量获取待注册站点 ──
 
@@ -510,10 +521,18 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
         ).values_list('assigned_site_id', flat=True)
         assigned_site_ids = [i for i in assigned_site_ids if i]
 
+        # 查询未删除且未分配 Gmail 的站点（不过滤已有环境，允许为已建站点创建 Gmail）
         query = Site.filter(is_deleted=False)
         if assigned_site_ids:
             query = query.exclude(id__in=assigned_site_ids)
         sites = await query.only('id', 'domain').order_by('id')
+
+        # 一次性查出所有已存在的注册记录（避免循环查询）
+        domains = [s.domain for s in sites if s.domain]
+        existed_map = {
+            reg.domain: reg
+            for reg in await self.model.filter(alias=alias, domain__in=domains)
+        }
 
         created, revived, skipped, failed = 0, 0, 0, 0
         skip_reasons: list[str] = []
@@ -524,8 +543,8 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
                 skip_reasons.append(f"[站点#{site.id}] 域名为空")
                 continue
             try:
-                # 唯一约束 (alias, domain) 含软删除记录，需按全量查询
-                existed = await self.get_by_alias_domain(alias, site.domain)
+                # 从缓存中查找已存在记录
+                existed = existed_map.get(site.domain)
                 if existed and not existed.is_deleted:
                     skipped += 1
                     continue
@@ -533,6 +552,7 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
                 if existed:
                     # 回收站中的同名记录：复活为干净的待注册状态
                     self._reset_to_pending(existed)
+                    existed.site_id = site.id  # 绑定站点 ID
                     await existed.save()
                     revived += 1
                     continue
@@ -540,6 +560,7 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
                 await self.model.create(
                     alias=alias,
                     domain=site.domain,
+                    site_id=site.id,  # 创建时直接绑定站点 ID
                     forward_to='',
                     recovery_email='',
                     registration_status='pending',
@@ -557,10 +578,12 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
             "skip_reasons": skip_reasons[:20],
         }
 
-    # ── 批量分配环境到站点 ──
+    # ── 批量分配环境到站点（数据修复工具，不在前端 UI 暴露）──
 
     async def batch_assign_env_to_sites(self, ids: list[int]) -> dict:
-        """将已完成注册的记录，自动分配给未分配 Gmail 且未创建环境的站点
+        """将已完成注册的记录环境手动同步到站点（数据修复工具）
+
+        注意：正常流程中，创建环境时会自动同步到站点，此方法仅用于修复历史数据。
 
         Args:
             ids: 注册记录 ID 列表

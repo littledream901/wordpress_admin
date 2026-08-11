@@ -35,9 +35,18 @@ class ShopifyCollectService:
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         ),
-        "Accept": "application/json,text/html,*/*",
+        "Accept": "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "DNT": "1",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
     }
 
     def __init__(self, timeout: int = None, max_retries: int = None, retry_base_delay: float = None):
@@ -127,6 +136,18 @@ class ShopifyCollectService:
             try:
                 resp = await self.session.get(api_url, timeout=httpx.Timeout(self.timeout))
 
+                # 401/403 无需重试，直接报错
+                if resp.status_code == 401:
+                    raise ExternalAPIError(
+                        "Shopify", "fetch products",
+                        detail="访问被拒绝 (401)，该店铺需要认证",
+                    )
+                if resp.status_code == 403:
+                    raise ExternalAPIError(
+                        "Shopify", "fetch products",
+                        detail="访问被禁止 (403)，可能原因：店铺开启了密码保护、IP 被封禁或地区限制",
+                    )
+
                 # 429 限流：有剩余重试次数则退避重试，否则直接报错
                 if resp.status_code == 429:
                     if attempt < self.max_retries:
@@ -149,8 +170,14 @@ class ShopifyCollectService:
                 # 非 429 错误
                 resp.raise_for_status()
                 try:
-                    return resp.json()
-                except ValueError as exc:
+                    # 优先用 bytes 直接解析，让 json 库自动处理编码
+                    # 若 UTF-8 解码失败则尝试 latin-1（兼容任意单字节编码）
+                    content = resp.content
+                    try:
+                        return json.loads(content)
+                    except UnicodeDecodeError:
+                        return json.loads(content.decode("latin-1"))
+                except (ValueError, Exception) as exc:
                     raise ExternalAPIError(
                         "Shopify", "parse products",
                         detail=f"响应非 JSON (status={resp.status_code}): {str(exc)[:200]}",

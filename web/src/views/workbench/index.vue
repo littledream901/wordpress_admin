@@ -28,7 +28,7 @@
         <n-grid-item v-for="card in statCards" :key="card.label">
           <n-card class="stat-card" :bordered="false" hoverable @click="card.link && $router.push(card.link)">
             <div flex flex-col gap-6>
-              <div flex items-center justify-between>
+                            <div flex items-center justify-between>
                 <span text-13 op-50>{{ card.label }}</span>
                 <TheIcon :icon="card.icon" :size="22" :color="card.color" />
               </div>
@@ -51,7 +51,7 @@
             <n-card size="small" hoverable class="shortcut-card" @click="$router.push(item.path)">
               <div flex items-center gap-12>
                 <div class="shortcut-icon" :style="{ background: item.bg }">
-                  <TheIcon :icon="item.icon" size="24" :color="item.color" />
+                  <TheIcon :icon="item.icon" :size="24" :color="item.color" />
                 </div>
                 <div>
                   <p text-15 font-semibold>{{ item.title }}</p>

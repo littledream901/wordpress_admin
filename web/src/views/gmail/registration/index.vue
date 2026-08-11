@@ -78,17 +78,6 @@
             </template>
             <n-button-group vertical size="small" style="text-align: left">
               <n-button
-                v-permission="'post/api/v1/gmail/registration/batch-create-forwarding'"
-                @click="showBatchMenu = false; handleBatchOp('createForwarding')"
-                :loading="batchLoading === 'createForwarding'"
-                style="justify-content: flex-start"
-              >
-                <template #icon>
-                  <TheIcon icon="mdi:email-fast-outline" :size="18" />
-                </template>
-                批量创建转发
-              </n-button>
-              <n-button
                 v-permission="'post/api/v1/gmail/registration/batch-create-env'"
                 @click="showBatchMenu = false; handleBatchOp('createEnv')"
                 :loading="batchLoading === 'createEnv'"
@@ -142,16 +131,6 @@
                   <TheIcon icon="mdi:email-multiple-outline" :size="18" />
                 </template>
                 批量分配 Outlook
-              </n-button>
-              <n-button
-                v-permission="'post/api/v1/gmail/registration/batch-assign-env'"
-                @click="showBatchMenu = false; showBatchAssignEnvModal = true"
-                style="justify-content: flex-start"
-              >
-                <template #icon>
-                  <TheIcon icon="mdi:monitor-share" :size="18" />
-                </template>
-                批量分配环境
               </n-button>
               <n-button
                 v-permission="'post/api/v1/gmail/registration/batch-delete'"
@@ -366,24 +345,7 @@
       </n-text>
     </n-modal>
 
-    <!-- 批量分配环境 -->
-    <n-modal
-      v-model:show="showBatchAssignEnvModal"
-      preset="dialog"
-      title="批量分配环境到站点"
-      positive-text="确认分配"
-      :loading="batchAssignEnvLoading"
-      @positive-click="handleBatchAssignEnv"
-      @negative-click="showBatchAssignEnvModal = false"
-    >
-      <p>
-        将已选 <b>{{ checkedRowKeys.length }}</b> 条已完成注册的记录，自动匹配分配给<br />
-        没有 Gmail 且没有环境的站点。
-      </p>
-      <n-text depth="3" style="font-size: 13px">
-        系统将自动查找未分配 Gmail 且未创建环境的站点，依次分配。
-      </n-text>
-    </n-modal>
+
 
 
     <!-- 详情弹窗 -->
@@ -495,10 +457,6 @@ function handleDetail(row) {
   detailData.value = row
   showDetailModal.value = true
 }
-
-// ── 批量分配环境 ──
-const showBatchAssignEnvModal = ref(false)
-const batchAssignEnvLoading = ref(false)
 
 // ── Outlook 分配 ──
 const showBatchAssignOutlookModal = ref(false)
@@ -720,10 +678,6 @@ async function confirmAction() {
   const row = actionTargetRow.value
   try {
     switch (actionType.value) {
-      case 'createForwarding':
-        await api.regCreateForwarding({ registration_id: row.id })
-        message.success('转发邮箱创建成功')
-        break
       case 'createEnv':
         await api.regCreateEnv({ registration_id: row.id })
         message.success('环境创建成功')
@@ -749,7 +703,8 @@ async function confirmAction() {
     showActionModal.value = false
     $table.value?.handleSearch()
   } catch (e) {
-    message.error(e?.response?.data?.msg || '操作失败')
+    const errorMsg = e?.response?.data?.msg || e?.message || '操作失败'
+    message.error(errorMsg)
   } finally {
     actionModalLoading.value = false
   }
@@ -774,7 +729,6 @@ async function handleDeleteSingle(id) {
 // ── 统一批量操作 ──
 
 const batchOpMap = {
-  createForwarding: { api: 'regBatchCreateForwarding', label: '创建转发' },
   createEnv: { api: 'regBatchCreateEnv', label: '创建环境' },
   getPhone: { api: 'regBatchGetPhone', label: '获取号码' },
   waitSms: { api: 'regBatchWaitSms', label: '等待短信' },
@@ -788,11 +742,19 @@ async function handleBatchOp(op) {
   try {
     const res = await api[apiMethod](checkedRowKeys.value)
     const data = res.data || {}
-    message.success(`${label}：成功 ${data.ok || 0} 条，失败 ${data.fail || 0} 条`)
+    const successMsg = `${label}：成功 ${data.ok || 0} 条，失败 ${data.fail || 0} 条`
+    message.success(successMsg)
+    
+    // 显示部分错误详情（最多 3 条）
+    if (data.errors && data.errors.length > 0) {
+      data.errors.slice(0, 3).forEach((err) => message.warning(err, { duration: 5000 }))
+    }
+    
     checkedRowKeys.value = []
     $table.value?.handleSearch()
   } catch (e) {
-    message.error(e?.response?.data?.msg || `${label}失败`)
+    const errorMsg = e?.response?.data?.msg || e?.message || `${label}失败`
+    message.error(errorMsg)
     throw e
   } finally {
     batchLoading.value = null
@@ -813,35 +775,6 @@ async function handleBatchDelete() {
     throw e
   } finally {
     batchDeleteLoading.value = false
-  }
-}
-
-async function handleBatchAssignEnv() {
-  if (!checkedRowKeys.value.length) return
-  batchAssignEnvLoading.value = true
-  try {
-    const res = await api.regBatchAssignEnv({
-      ids: checkedRowKeys.value,
-    })
-    const data = res.data || {}
-    const reasons = data.skip_reasons || []
-    if ((data.assigned || 0) > 0) {
-      message.success(`已分配 ${data.assigned} 条`)
-    }
-    if ((data.skipped || 0) > 0 || (data.no_site || 0) > 0) {
-      message.warning(`跳过 ${data.skipped || 0} 条，无可用站点 ${data.no_site || 0} 条`)
-    }
-    if (reasons.length > 0) {
-      reasons.forEach((r) => message.info(r))
-    }
-    checkedRowKeys.value = []
-    showBatchAssignEnvModal.value = false
-    $table.value?.handleSearch()
-  } catch (e) {
-    message.error(e?.response?.data?.msg || '分配失败')
-    throw e
-  } finally {
-    batchAssignEnvLoading.value = false
   }
 }
 
@@ -1043,25 +976,19 @@ const columns = [
     render: (row) => {
       const isCompleted = row.registration_status === 'completed'
       const hasEnv = !!row.env_id
-      const hasForwarding = row.improvmx_status === 'success'
+      const envFailed = row.env_status === 'failed'
       const hasPhone = row.sms_status === 'acquired'
       const hasCode = row.sms_status === 'code_received'
 
-      return h(NSpace, { size: 'small', justify: 'center' }, {
+      return h(NSpace, { size: 'small', justify: 'start' }, {
         default: () => [
           h(NButton, { size: 'tiny', onClick: () => handleDetail(row) }, { default: () => '详情' }),
           h(NButton, {
             size: 'tiny',
-            type: hasForwarding ? 'default' : 'primary',
-            disabled: isCompleted || hasForwarding,
-            onClick: () => openActionModal('createForwarding', row, '创建转发邮箱'),
-          }, { default: () => hasForwarding ? '已转发' : '创建转发' }),
-          h(NButton, {
-            size: 'tiny',
-            type: hasEnv ? 'default' : 'primary',
-            disabled: isCompleted || hasEnv,
-            onClick: () => openActionModal('createEnv', row, '创建环境'),
-          }, { default: () => hasEnv ? '已建环境' : '创建环境' }),
+            type: envFailed ? 'warning' : (hasEnv ? 'default' : 'primary'),
+            disabled: isCompleted || (hasEnv && !envFailed),
+            onClick: () => openActionModal('createEnv', row, envFailed ? '重试创建环境' : '创建环境'),
+          }, { default: () => envFailed ? '环境失败' : (hasEnv ? '已建环境' : '创建环境') }),
           h(NButton, {
             size: 'tiny',
             type: hasPhone ? 'default' : 'warning',

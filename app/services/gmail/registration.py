@@ -46,15 +46,34 @@ class GmailRegistrationService:
         复用 hubstudio_service 的派发链路，统一 provider 配置、Connector 探活、
         任务记录与结果回报，避免在此处重复实现执行器构建逻辑。
         """
-        from app.services.hubstudio_service import hubstudio_service
+        from app.controllers.site_pipeline import hubstudio_service
 
+        # 构建 remark_fields（与 Hub 分发链路保持一致）
+        remark_fields = {}
+        if extra_payload:
+            field_map = {
+                "LastName": extra_payload.get("last_name", ""),
+                "FirstName": extra_payload.get("first_name", ""),
+                "ShippingAddress_1": extra_payload.get("shipping_address_1", ""),
+                "City": extra_payload.get("city", ""),
+                "Province/State": extra_payload.get("province_state", ""),
+                "Zip_code": extra_payload.get("zip_code", ""),
+                "Country": extra_payload.get("country", ""),
+                "Recovery_Email": extra_payload.get("recovery_email", ""),
+                "API_URL": extra_payload.get("api_url", ""),
+            }
+            for key, val in field_map.items():
+                v = str(val).strip() if val else ""
+                if v:
+                    remark_fields[key] = v
+        
         payload: Dict[str, Any] = {
             "alias": alias,
             "domain": domain,
             "full_name": full_name,
         }
-        if extra_payload:
-            payload.update(extra_payload)
+        if remark_fields:
+            payload["remark_fields"] = remark_fields
 
         try:
             if site_id:

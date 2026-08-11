@@ -54,7 +54,8 @@ RUN rm -f /etc/nginx/sites-enabled/default \
 
 # 启动脚本
 COPY deploy/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i "s/\r$//" /entrypoint.sh \
+    && chmod +x /entrypoint.sh
 
 # 数据目录
 RUN mkdir -p /opt/wordpress-admin/data /opt/wordpress-admin/logs

@@ -139,6 +139,16 @@ async def check_proxy(
     return Success(data=data.dict(), msg='检测完成')
 
 
+@router.post('/batch-unassign', summary='批量取消代理分配')
+async def batch_unassign_proxies(
+    payload: ProxyBatchDelete,
+    current_user: User = Depends(AuthControl.is_authed),
+):
+    """批量取消代理分配，将站点的代理配置清空"""
+    data = await hubstudio_proxy_controller.batch_unassign(payload)
+    return Success(data=data, msg=f"取消完成：成功 {data['success_count']} 条，失败 {data['failed_count']} 条")
+
+
 @router.get('/assigned-sites', summary='获取代理分配的站点列表')
 async def get_assigned_sites(
     proxy_id: int = Query(..., description='代理配置ID'),

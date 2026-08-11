@@ -3,7 +3,8 @@
 
 独立的执行器层，不依赖 API 层（site_pipeline.py）。
 
-流程步骤（12 步，结合单脚本逻辑与生产环境 Cloudflare 需求）：
+流程步骤（13 步，结合单脚本逻辑与生产环境 Cloudflare 需求）：
+  0. dns_check           - DNS 解析检查（确保域名已解析到服务器）
   1. create_site         - 创建 WordPress 网站
   2. apply_ssl           - 申请/绑定 SSL 证书（Cloudflare 代理必须先有 SSL）
   3. restore_db          - 恢复数据库
@@ -84,6 +85,51 @@ class ProvisionTaskRunner(TaskRunner):
             await job.save()
             return
         try:
+            # Step 0: DNS 就绪检查（快速检查 Zone 状态，不轮询等待）
+            await self._update_step(job, "dns_check")
+            if site.server_ip:
+                from app.services.cloudflare_service import CloudflareService
+                
+                cf_service = CloudflareService()
+                
+                # 获取 zone_id
+                _log.info(f"站点 {site.domain} 正在获取 Cloudflare Zone ID")
+                zone_id_result = await self._exec(
+                    lambda: cf_service.get_or_create_zone(site.domain),
+                    timeout=30
+                )
+                zone_id = zone_id_result[0] if zone_id_result else None
+                
+                if not zone_id:
+                    error_msg = "无法获取 Cloudflare Zone ID，请先执行 DNS 配置"
+                    _log.error(f"站点 {site.domain} (ID={site.id}) {error_msg}")
+                    site.status = '建站失败'
+                    site.onepanel_status = 'DNS 配置缺失'
+                    site.pipeline_status = 'dns:no_zone'
+                    await site.save()
+                    await self._complete_job(job, ok=False, error=error_msg, site=site)
+                    return
+                
+                # 快速检查 DNS 就绪状态（Zone active + A 记录正确）
+                _log.info(f"站点 {site.domain} 正在检查 DNS 就绪状态 (zone_id={zone_id})")
+                dns_result = await self._exec(
+                    lambda: cf_service.check_dns_ready_for_ssl(zone_id, site.domain, site.server_ip),
+                    timeout=30
+                )
+                
+                if not dns_result.get('ok'):
+                    error_msg = f"DNS 未就绪: {dns_result.get('error', '未知错误')}"
+                    _log.error(f"站点 {site.domain} (ID={site.id}) {error_msg}")
+                    site.status = '建站失败'
+                    site.onepanel_status = 'DNS 未就绪'
+                    site.pipeline_status = f"dns:{dns_result.get('zone_status', 'unknown')}"
+                    await site.save()
+                    await self._complete_job(job, ok=False, error=error_msg, site=site)
+                    return
+                
+                proxied = dns_result.get('proxied', False)
+                _log.info(f"站点 {site.domain} DNS 就绪: zone=active, A={site.server_ip}, proxied={proxied}")
+            
             api = OnePanelAPI()
             files = OnePanelFileManager(api)
             site_manager = OnePanelSiteManager(api, file_manager=files)

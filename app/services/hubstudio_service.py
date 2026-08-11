@@ -529,18 +529,20 @@ class HubStudioOrchestrationService:
                         payload["hub_env_id"] = site.hub_env_id
                         need_update = True
                         logger.info(f"任务 [{job.id}] payload.hub_env_id 已刷新: {site.hub_env_id}")
+                    
+                    # create_account: 重新填充账号凭证（支持 env_created 状态）
                     if job.job_type == "create_account":
-                        from app.models.gmail_account import GmailAccount
-                        if not payload.get("gmail_username"):
-                            gmail = await GmailAccount.filter(assigned_site_id=job.site_id).first()
-                            if not gmail:
-                                gmail, _ = await gmail_account_controller.auto_assign_to_site(job.site_id)
-                            if gmail and gmail.username and gmail.password:
-                                payload["gmail_username"] = gmail.username
-                                payload["gmail_password"] = gmail.password
-                                payload["gmail_2fa_key"] = gmail.two_fa_key or ""
-                                need_update = True
-                                logger.info(f"任务 [{job.id}] Gmail 凭证已刷新: {gmail.username}")
+                        # 重新调用凭证填充方法，确保使用最新的账号信息
+                        enriched_payload = await self._enrich_create_account_payload(payload, site)
+                        payload.update(enriched_payload)
+                        need_update = True
+                        logger.info(
+                            f"任务 [{job.id}] 账号凭证已刷新: "
+                            f"improvmx={bool(payload.get('improvmx_username'))}, "
+                            f"workspace={bool(payload.get('workspace_username'))}, "
+                            f"personal_gmail={bool(payload.get('personal_gmail_username'))}"
+                        )
+                    
                     if need_update:
                         new_payload_json = json.dumps(payload, ensure_ascii=False)
                 except Exception:
@@ -641,7 +643,33 @@ class HubStudioOrchestrationService:
         return await self.dispatch_for_site(site_id, "create_account", provider_id=provider_id, execute_now=execute_now)
 
     async def trigger_hub_update(self, site_id: int, provider_id: int = 0,
-                                  execute_now: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
+                                  execute_now: bool = False, confirm_default_proxy: bool = False) -> Tuple[HubStudioJob, Optional[dict]]:
+        """触发 Hub 环境更新
+        
+        Args:
+            site_id: 站点ID
+            provider_id: Provider ID
+            execute_now: 是否同步执行
+            confirm_default_proxy: 用户是否已确认使用默认代理（未分配代理时必填）
+        """
+        from app.models.site_pipeline import Site
+        
+        site = await Site.get_or_none(id=site_id)
+        if not site:
+            raise ValueError(f"站点不存在: site_id={site_id}")
+        
+        # 检查站点是否分配了代理
+        if not site.proxy_config_id:
+            if not confirm_default_proxy:
+                raise ValueError(
+                    "该站点未分配代理，将使用 HubStudio Provider 默认代理。"
+                    "请确认后重新提交（confirm_default_proxy=true）"
+                )
+            logger.warning(
+                f"[trigger_hub_update] 用户已确认使用 Provider 默认代理: "
+                f"site_id={site_id}, domain={site.domain}"
+            )
+        
         return await self.dispatch_for_site(site_id, "update_env", provider_id=provider_id, execute_now=execute_now)
 
     async def trigger_hub_control(self, site_id: int, provider_id: int = 0,
@@ -677,8 +705,10 @@ class HubStudioOrchestrationService:
     async def _enrich_update_env_payload(self, payload: dict, site_id: int) -> dict:
         """为 update_env 任务补充站点绑定的代理配置
 
-        站点未绑定代理（proxy_config_id=0）时不下发 proxy_config，
-        由 HubStudio 侧沿用环境自身的默认代理。
+        逻辑优先级：
+        1. 优先使用站点已分配的代理配置（proxy_config_id > 0）
+        2. 未分配代理时（proxy_config_id = 0），不下发 proxy_config，
+           由 HubStudio 侧沿用环境自身的 Provider 默认代理
         """
         if payload.get("proxy_config"):
             return payload  # 已有代理配置，不覆盖
@@ -690,7 +720,9 @@ class HubStudioOrchestrationService:
 
         site = await Site.get_or_none(id=site_id)
         if not site or not site.proxy_config_id:
-            logger.info(f"[update_env] 站点未绑定代理，使用 HubStudio 默认代理: site_id={site_id}")
+            logger.info(
+                f"[update_env] 站点未分配代理，将使用 HubStudio Provider 默认代理: site_id={site_id}"
+            )
             return payload
 
         proxy = await HubStudioProxyConfig.get_or_none(
@@ -698,14 +730,14 @@ class HubStudioOrchestrationService:
         )
         if not proxy:
             logger.warning(
-                f"[update_env] 站点绑定的代理不存在、已禁用或已删除: site_id={site_id}, "
-                f"proxy_config_id={site.proxy_config_id}"
+                f"[update_env] 站点绑定的代理不存在、已禁用或已删除，将使用 HubStudio Provider 默认代理: "
+                f"site_id={site_id}, proxy_config_id={site.proxy_config_id}"
             )
             return payload
 
         payload["proxy_config"] = proxy.to_api_params()
         logger.info(
-            f"[update_env] 已加载代理配置: site_id={site_id}, proxy_id={proxy.id}, "
+            f"[update_env] 已加载站点分配的代理配置: site_id={site_id}, proxy_id={proxy.id}, "
             f"host={proxy.proxy_host}:{proxy.proxy_port}"
         )
 
@@ -734,12 +766,15 @@ class HubStudioOrchestrationService:
 
         remark_fields = {}
         field_map = {
+            "LastName": getattr(gmail, "last_name", "") or "",
+            "FirstName": getattr(gmail, "first_name", "") or "",
             "ShippingAddress_1": getattr(gmail, "shipping_address_1", "") or "",
             "City": getattr(gmail, "city", "") or "",
             "Province/State": getattr(gmail, "province_state", "") or "",
             "Zip_code": getattr(gmail, "zip_code", "") or "",
             "Country": getattr(gmail, "country", "") or "",
             "Recovery_Email": getattr(gmail, "recovery_email", "") or "",
+            "API_URL": getattr(gmail, "api_url", "") or "",
         }
         for key, val in field_map.items():
             v = str(val).strip() if val else ""
@@ -758,48 +793,116 @@ class HubStudioOrchestrationService:
     _enrich_update_env_remark = _enrich_remark_from_gmail
 
     async def _enrich_create_account_payload(self, payload: dict, site: Site) -> dict:
-        """为 create_account 任务自动分配 Gmail 并写入凭证 + 备注字段
-
-        确保 Agent/executor 能拿到 Gmail 账号密码，在 HubStudio 中创建 Gmail 平台账号，
-        并在创建账号后写备注（地址/邮箱）。
+        """为 create_account 任务注入四类账号凭证。
+        
+        支持 env_created 和 completed 两种状态的注册记录。
+        对于 env_created 状态（未完成 Gmail 注册但已创建环境），
+        仍可使用 Outlook 账号创建 ImprovMX / Workspace 账号。
         """
-        if payload.get("gmail_username") and payload.get("gmail_password"):
-            return payload  # 已有 Gmail 凭证，不覆盖
-
         from app.models.gmail_account import GmailAccount
+        from app.models.gmail_registration import GmailRegistration
+        from app.models.outlook_account import OutlookAccount
 
-        # 先查站点已有分配的 Gmail
+        registration = await GmailRegistration.filter(
+            site_id=site.id,
+            registration_status__in=["env_created", "completed"],
+            is_deleted=False,
+        ).order_by("-id").first()
+        if not registration:
+            registration = await GmailRegistration.filter(
+                domain=site.domain,
+                registration_status__in=["env_created", "completed"],
+                is_deleted=False,
+            ).order_by("-id").first()
+
+        outlook_username = ""
+        outlook_password = ""
+        if registration and registration.outlook_account_id:
+            outlook = await OutlookAccount.filter(
+                id=registration.outlook_account_id,
+                is_deleted=False,
+            ).first()
+            if outlook:
+                outlook_username = outlook.username or ""
+                outlook_password = outlook.password or ""
+        elif registration and registration.outlook_account_username:
+            # 兼容旧数据：直接使用冗余字段
+            outlook_username = registration.outlook_account_username or ""
+            outlook_password = registration.password or ""
+
         gmail = await GmailAccount.filter(assigned_site_id=site.id).first()
-        if not gmail:
-            # 自动分配
-            gmail, _ = await gmail_account_controller.auto_assign_to_site(site.id)
 
+        personal_username = ""
+        personal_password = ""
+        personal_2fa_key = ""
+        workspace_username = ""
+        workspace_password = ""
+        
+        # 优先使用已分配的 GmailAccount
         if gmail and gmail.username and gmail.password:
-            payload["gmail_username"] = gmail.username
-            payload["gmail_password"] = gmail.password
-            payload["gmail_2fa_key"] = gmail.two_fa_key or ""
-            logger.info(f"[create_account] Gmail 凭证已注入: {gmail.username}")
+            personal_username = gmail.username
+            personal_password = gmail.password
+            personal_2fa_key = gmail.two_fa_key or ""
+        
+        # Gmail Workspace 和个人 Gmail 账号：支持 env_created 和 completed 状态
+        if registration:
+            # completed 状态：使用注册成功的 Gmail 凭证
+            if registration.registration_status == "completed" and registration.registration_email and registration.password:
+                workspace_username = registration.registration_email
+                workspace_password = registration.password
+                # 如果没有分配 GmailAccount，使用注册邮箱作为个人 Gmail
+                if not personal_username:
+                    personal_username = registration.registration_email
+                    personal_password = registration.password
+                    personal_2fa_key = registration.two_fa_key or ""
+            # env_created 状态：使用 alias@domain 构造 Gmail 凭证
+            elif registration.registration_status == "env_created" and registration.alias and registration.domain and registration.password:
+                # Gmail Workspace 和个人账号都使用 alias@domain
+                workspace_username = f"{registration.alias}@{registration.domain}"
+                workspace_password = registration.password
+                if not personal_username:
+                    personal_username = f"{registration.alias}@{registration.domain}"
+                    personal_password = registration.password
+                    personal_2fa_key = registration.two_fa_key or ""
 
-            # 同时写入备注字段，供 executor 创建账号后更新环境备注
-            if not payload.get("remark_fields"):
-                remark_fields = {}
-                field_map = {
-                    "ShippingAddress_1": getattr(gmail, "shipping_address_1", "") or "",
-                    "City": getattr(gmail, "city", "") or "",
-                    "Province/State": getattr(gmail, "province_state", "") or "",
-                    "Zip_code": getattr(gmail, "zip_code", "") or "",
-                    "Country": getattr(gmail, "country", "") or "",
-                    "Recovery_Email": getattr(gmail, "recovery_email", "") or "",
-                }
-                for key, val in field_map.items():
-                    v = str(val).strip() if val else ""
-                    if v:
-                        remark_fields[key] = v
-                if remark_fields:
-                    payload["remark_fields"] = remark_fields
-        else:
-            logger.warning(f"[create_account] 无可用 Gmail 凭证，将只创建 WordPress 后台账号")
+        payload.update({
+            "improvmx_username": outlook_username,
+            "improvmx_password": outlook_password,
+            "workspace_username": workspace_username,
+            "workspace_password": workspace_password,
+            "personal_gmail_username": personal_username,
+            "personal_gmail_password": personal_password,
+            "personal_gmail_2fa_key": personal_2fa_key,
+            # 兼容旧任务字段
+            "gmail_username": personal_username,
+            "gmail_password": personal_password,
+            "gmail_2fa_key": personal_2fa_key,
+        })
 
+        account = gmail or registration
+        if account and not payload.get("remark_fields"):
+            field_map = {
+                "LastName": getattr(account, "last_name", "") or "",
+                "FirstName": getattr(account, "first_name", "") or "",
+                "ShippingAddress_1": getattr(account, "shipping_address_1", "") or "",
+                "City": getattr(account, "city", "") or "",
+                "Province/State": getattr(account, "province_state", "") or "",
+                "Zip_code": getattr(account, "zip_code", "") or "",
+                "Country": getattr(account, "country", "") or "",
+                "Recovery_Email": getattr(account, "recovery_email", "") or "",
+            }
+            payload["remark_fields"] = {
+                key: str(value).strip()
+                for key, value in field_map.items()
+                if str(value).strip()
+            }
+
+        logger.info(
+            "[create_account] 账号凭证已组装: "
+            f"improvmx={'是' if outlook_username and outlook_password else '否'}, "
+            f"workspace={'是' if registration else '否'}, "
+            f"gmail={'是' if personal_username and personal_password else '否'}"
+        )
         return payload
 
     async def _enrich_wp_login_payload(self, payload: dict, site: Site) -> dict:
@@ -889,6 +992,21 @@ class HubStudioOrchestrationService:
                     env_name = result.get("containerName")
                     if env_name:
                         site.hub_env_name = str(env_name)
+                    
+                    # 反向同步到 Gmail 注册记录（如果存在同域名的注册记录且未分配环境）
+                    from app.models.gmail_registration import GmailRegistration
+                    gmail_reg = await GmailRegistration.filter(
+                        domain=site.domain, 
+                        env_id="",
+                        is_deleted=False
+                    ).first()
+                    if gmail_reg and env_id:
+                        gmail_reg.env_id = str(env_id)
+                        gmail_reg.env_name = str(env_name) if env_name else ""
+                        gmail_reg.env_status = "success"
+                        gmail_reg.registration_status = "env_created"
+                        await gmail_reg.save()
+                        logger.info(f"[create_env] 环境已反向同步到 Gmail 注册: registration_id={gmail_reg.id} env_id={env_id}")
                 elif job.job_type == "create_account":
                     account_id = result.get("account_id") or result.get("accountId")
                     if account_id:

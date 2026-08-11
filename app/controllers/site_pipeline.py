@@ -216,9 +216,9 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
     if platform == 'shopify':
         SHOPIFY_IP = '23.227.38.65'
         SHOPIFY_CNAME = 'shops.myshopify.com.'
-        zone_id, ns, status = cf.get_or_create_zone(domain)
+        zone_id, ns, status, zone_err = cf.get_or_create_zone(domain)
         if not zone_id:
-            return {'ok': False, 'error': f'Shopify zone 创建失败: domain={domain}'}
+            return {'ok': False, 'error': f'Shopify zone 创建失败: domain={domain}, cf_error={zone_err}'}
 
         # Cloudflare 记录先执行，然后更新 Dynadot NS（串行，避免 API 限流）
         cf_results = _setup_cf_records(cf, zone_id, domain,
@@ -233,6 +233,7 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
                 dynadot_result = {"success": False, "error": str(e)}
 
         return {
+            'ok': True,
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': cf_results.get('root_ok', False),
             'www_ok': cf_results.get('www_ok', False),
@@ -242,9 +243,9 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
             'dynadot_result': dynadot_result,
         }
     else:
-        zone_id, ns, status = cf.get_or_create_zone(domain)
+        zone_id, ns, status, zone_err = cf.get_or_create_zone(domain)
         if not zone_id:
-            return {'ok': False, 'error': f'Zone 创建失败: domain={domain}'}
+            return {'ok': False, 'error': f'Zone 创建失败: domain={domain}, cf_error={zone_err}'}
 
         # Cloudflare 记录先执行，然后更新 Dynadot NS（串行，避免 API 限流）
         cf_results = _setup_cf_records(cf, zone_id, domain,
@@ -259,6 +260,7 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
                 dynadot_result = {"success": False, "error": str(e)}
 
         return {
+            'ok': True,
             'zone_id': zone_id, 'zone_status': status, 'name_servers': ns,
             'root_ok': cf_results.get('root_ok', False),
             'www_ok': cf_results.get('www_ok', False),
@@ -270,18 +272,28 @@ def _run_dns_sync(domain: str, platform: str, server_ip: str):
 
 
 def _setup_cf_records(cf, zone_id, domain, root_type, root_value, www_type, www_value, www_name=None):
-    """在 ThreadPoolExecutor 中执行的 Cloudflare 记录设置（同步）"""
+    """在 ThreadPoolExecutor 中执行的 Cloudflare 记录设置（同步）
+    
+    优化说明：
+    - 去掉先删除再创建的逻辑，直接使用 add_or_update_* 幂等更新
+    - 避免 DNS 解析中断，减少 API 调用次数
+    - 保留 AAAA 清理以确保只使用 IPv4
+    """
     if www_name is None:
         www_name = f'www.{domain}'
-    cf.delete_records_by_type(zone_id, root_type)
-    time.sleep(0.3)
+    
+    # 清理 IPv6 记录，确保只使用 IPv4 解析
     cf.delete_records_by_type(zone_id, 'AAAA')
     time.sleep(0.3)
+    
+    # 直接更新 root 记录（幂等操作，存在则更新，不存在则创建）
     if root_type == 'CNAME':
         root_ok = cf.add_or_update_cname_record(zone_id, domain, root_value)
     else:
         root_ok = cf.add_or_update_a_record(zone_id, domain, root_value)
     time.sleep(0.3)
+    
+    # 直接更新 www 记录
     if www_type == 'CNAME':
         www_ok = cf.add_or_update_cname_record(zone_id, 'www', www_value)
     else:
@@ -485,7 +497,7 @@ class SitePipelineController:
         return {"total": total, "data": data, "page": page, "page_size": page_size}
 
     async def get_site_detail(self, site_id: int) -> dict:
-        """获取站点详情，附带部门/用户/Gmail/Provider 绑定信息"""
+        """获取站点详情，附带部门/用户/Gmail/Provider 绑定信息/代理信息"""
         obj = await site_controller.get(id=site_id)
         site_dict = await obj.to_dict()
         dept_id = getattr(obj, 'dept_id', None)
@@ -505,6 +517,14 @@ class SitePipelineController:
         except Exception:
             _log.warning("GmailAccount 详情查询失败（字段可能未迁移）")
             gmail = None
+
+        # 获取代理信息
+        proxy_info = None
+        if obj.proxy_config_id:
+            from app.models.hubstudio_proxy import HubStudioProxyConfig
+            proxy = await HubStudioProxyConfig.get_or_none(id=obj.proxy_config_id)
+            if proxy:
+                proxy_info = await proxy.to_dict()
 
         CORE_TYPES = ['cloudflare', 'dynadot', 'onepanel', 'hubstudio'] if obj.platform != 'shopify' \
                      else ['cloudflare', 'dynadot', 'hubstudio', 'shopify']
@@ -557,6 +577,7 @@ class SitePipelineController:
             'site': site_dict,
             'gmail': await gmail.to_dict() if gmail else None,
             'providers': providers,
+            'proxy': proxy_info,
         }
 
     async def create_site_with_permission(self, site_in: SiteCreate, current_user) -> dict:
@@ -895,9 +916,10 @@ class SitePipelineController:
         blocked = await self._check_provision_blocked(site_id)
         if blocked:
             return {"ok": False, "error": "该站点已有建站任务执行中", "code": 400}
-        job = await self._create_job(site_id, site.domain, "provision", total_steps=12)
+        
+        job = await self._create_job(site_id, site.domain, "provision", total_steps=13)
         asyncio.create_task(self._run_provision_bg(job, site))
-        return {"ok": True, "data": {"job_id": job.id, "step": "create_site", "total_steps": 12}}
+        return {"ok": True, "data": {"job_id": job.id, "step": "dns_check", "total_steps": 13}}
 
     async def _run_provision_bg(self, job: OperationJob, site):
         async with _get_provision_semaphore():
@@ -923,7 +945,7 @@ class SitePipelineController:
             if blocked:
                 results.append({"site_id": site_id, "domain": site.domain, "ok": False, "error": "已有建站任务执行中"})
                 continue
-            job = await self._create_job(site_id, site.domain, "provision", batch_id=batch_id, total_steps=10)
+            job = await self._create_job(site_id, site.domain, "provision", batch_id=batch_id, total_steps=13)
             asyncio.create_task(self._run_provision_bg(job, site))
             results.append({"site_id": site_id, "domain": site.domain, "ok": True, "job_id": job.id, "status": "running"})
         return {"ok": True, "data": {"batch_id": batch_id, "results": results, "total": len(results),
@@ -947,9 +969,11 @@ class SitePipelineController:
         try:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, _run_dns_sync, site.domain, site.platform, site.server_ip)
+            ok = result.get('ok', True)  # 默认 True 兼容老代码，但失败时必须显式返回 ok=False
+            error_msg = result.get('error', '')
             _apply_dns_result_to_site(site, result)
             await site.save()
-            await self._complete_job(job, ok=True, result=result, site=site)
+            await self._complete_job(job, ok=ok, result=result, error=error_msg, site=site)
         except Exception as e:
             await self._complete_job(job, ok=False, error=str(e), site=site)
 

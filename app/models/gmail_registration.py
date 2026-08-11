@@ -1,9 +1,9 @@
 """Gmail 企业邮箱注册模型
 
-流程状态机：
-  pending → forwarding_created → env_created → registering → completed
-                                                          ↓
-                                                       failed
+流程状态机（已移除 ImprovMX 转发步骤）：
+  pending → env_created → registering → completed
+                                    ↓
+                                 failed
 """
 from tortoise import fields
 
@@ -16,6 +16,10 @@ class GmailRegistration(BaseModel, SoftDeleteMixin, TimestampMixin):
     # ── 基础信息 ──
     alias = fields.CharField(max_length=100, description='邮箱别名（Gmail 前缀）', db_index=True)
     domain = fields.CharField(max_length=255, description='站点域名', db_index=True)
+    
+    # 关联站点（批量获取时自动绑定，便于复用站点配置）
+    site_id = fields.IntField(null=True, description='关联站点ID', db_index=True)
+    
     full_name = fields.CharField(max_length=200, default='', description='完整姓名')
     first_name = fields.CharField(max_length=100, default='', description='名')
     last_name = fields.CharField(max_length=100, default='', description='姓')
@@ -33,6 +37,7 @@ class GmailRegistration(BaseModel, SoftDeleteMixin, TimestampMixin):
     # ── 转发配置 ──
     forward_to = fields.CharField(max_length=255, default='', description='ImprovMX 转发目标邮箱')
     recovery_email = fields.CharField(max_length=255, default='', description='恢复邮箱（自动生成：alias@domain）')
+    api_url = fields.CharField(max_length=500, default='', description='API URL')
     two_fa_key = fields.CharField(max_length=255, default='', description='2FA Key')
 
     # ── ImprovMX 转发结果 ──

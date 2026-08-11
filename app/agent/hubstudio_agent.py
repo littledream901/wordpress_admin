@@ -195,7 +195,14 @@ class HubStudioAgent:
         return config
 
     def _apply_agent_config(self):
-        """将 Agent 级配置应用到执行器"""
+        """将 Agent 级配置应用到执行器和 runtime"""
+        # 同步敏感凭证到 runtime（必须在 connector 启动前更新）
+        for key in ("app_id", "app_secret", "group_code"):
+            value = self.config.get(key)
+            if value is not None:
+                setattr(self.runtime, key, value)
+        
+        # 同步执行器配置
         _CONFIG_ATTR_MAP = {
             "default_proxy_type_name": "default_proxy_type",
             "default_ui_language": "default_ui_language",

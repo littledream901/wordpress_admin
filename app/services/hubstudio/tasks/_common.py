@@ -2,12 +2,15 @@
 
 # ── 备注来源字段 ──
 REMARK_FIELD_MAP = [
+    ("LastName", "LastName"),
+    ("FirstName", "FirstName"),
     ("Address", "ShippingAddress_1"),
     ("City", "City"),
     ("State", "Province/State"),
     ("Zip", "Zip_code"),
     ("Country", "Country"),
     ("Email", "Recovery_Email"),
+    ("API_URL", "API_URL"),
 ]
 
 

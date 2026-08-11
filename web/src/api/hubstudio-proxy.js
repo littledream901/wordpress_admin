@@ -26,5 +26,7 @@ export default {
   getOptions: () => request.get('/hubstudio-proxy/options'),
   // 站点批量分配代理
   batchAssignSites: (data) => request.post('/hubstudio-proxy/batch-assign-sites', data),
+  // 批量取消代理分配
+  batchUnassign: (proxyIds) => request.post('/hubstudio-proxy/batch-unassign', { proxy_ids: proxyIds }),
 }
 

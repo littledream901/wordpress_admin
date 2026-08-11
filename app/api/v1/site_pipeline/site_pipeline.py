@@ -445,8 +445,12 @@ async def trigger_hub_account(site_id: int, provider_id: int = Body(0, embed=Tru
 
 @router.post('/site/{site_id}/hub-update', summary='触发 Hub 环境更新')
 async def trigger_hub_update(site_id: int, provider_id: int = Body(0, embed=True),
-                              execute_now: bool = Body(False, embed=True)):
-    job, result = await hubstudio_service.trigger_hub_update(site_id, provider_id=provider_id, execute_now=execute_now)
+                              execute_now: bool = Body(False, embed=True),
+                              confirm_default_proxy: bool = Body(False, embed=True)):
+    job, result = await hubstudio_service.trigger_hub_update(
+        site_id, provider_id=provider_id, execute_now=execute_now, 
+        confirm_default_proxy=confirm_default_proxy
+    )
     return Success(data={"job": await job.to_dict(), "result": result,
                          "mode": "sync" if execute_now else "async"},
                    msg='Hub 环境更新已执行' if execute_now else 'Hub 环境更新任务已派发（等待 Agent）')

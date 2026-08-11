@@ -23,6 +23,7 @@ class CloudflareRedirectService:
         self.base = 'https://api.cloudflare.com/client/v4'
         self._session = None
         self._config_loaded = False
+        self._last_token = None
 
     def _ensure_config(self):
         if self._config_loaded:
@@ -32,15 +33,19 @@ class CloudflareRedirectService:
 
     @property
     def session(self):
-        if self._session is None:
-            self._ensure_config()
-            token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+        """每次调用重新读取 Token，防止 Token 更新后缓存失效"""
+        self._ensure_config()
+        token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+        if self._session is None or self._last_token != token:
+            if self._session is not None:
+                self._session.close()
             s = httpx.Client(http2=True)
             s.headers.update({
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
             })
             self._session = s
+            self._last_token = token
         return self._session
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, **params) -> Dict[str, Any]:

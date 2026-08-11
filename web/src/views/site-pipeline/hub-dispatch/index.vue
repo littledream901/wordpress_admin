@@ -274,13 +274,43 @@ async function confirmDispatch() {
   try {
     const fn = fnMap[dispatchJobType.value]
     if (fn) {
-      await fn(row.id, 0, dispatchExecuteNow.value)
+      // update_env 需要特殊处理代理确认
+      if (dispatchJobType.value === 'update_env') {
+        await fn(row.id, 0, dispatchExecuteNow.value, false)
+      } else {
+        await fn(row.id, 0, dispatchExecuteNow.value)
+      }
       message.success(`站点 ${row.domain} 的 ${dispatchJobType.value} 已派发`)
       showDispatch.value = false
       reload()
     }
   } catch (e) {
-    message.error(`派发失败: ${e}`)
+    const errMsg = e?.response?.data?.message || e?.message || String(e)
+    // 检测未分配代理的错误
+    if (dispatchJobType.value === 'update_env' && errMsg.includes('未分配代理') && errMsg.includes('confirm_default_proxy')) {
+      const confirmed = await new Promise((resolve) => {
+        window.$dialog?.warning({
+          title: '代理确认',
+          content: `站点 ${row.domain} 未分配代理，将使用 HubStudio Provider 默认代理。是否继续？`,
+          positiveText: '确认使用默认代理',
+          negativeText: '取消',
+          onPositiveClick: () => resolve(true),
+          onNegativeClick: () => resolve(false),
+        })
+      })
+      if (confirmed) {
+        try {
+          await api.triggerHubUpdate(row.id, 0, dispatchExecuteNow.value, true)
+          message.success(`站点 ${row.domain} 的 update_env 已派发`)
+          showDispatch.value = false
+          reload()
+        } catch (retryErr) {
+          message.error(`派发失败: ${retryErr}`)
+        }
+      }
+    } else {
+      message.error(`派发失败: ${errMsg}`)
+    }
   }
 }
 
@@ -303,11 +333,27 @@ async function batchDispatch() {
       let ok = 0, fail = 0
       for (const siteId of checkedRowKeys.value) {
         try {
-          await fn(siteId, 0, true)
+          if (batchJobType.value === 'update_env') {
+            // update_env 批量时，遇到未分配代理直接跳过，不弹窗
+            await fn(siteId, 0, true, false)
+          } else {
+            await fn(siteId, 0, true)
+          }
           ok++
-        } catch (_) { fail++ }
+        } catch (e) {
+          const errMsg = e?.response?.data?.message || e?.message || String(e)
+          if (batchJobType.value === 'update_env' && errMsg.includes('未分配代理')) {
+            // 批量场景下，未分配代理的站点静默跳过
+            console.warn(`站点 ${siteId} 未分配代理，已跳过`)
+          }
+          fail++
+        }
       }
-      message.success(`批量同步执行完成: 成功 ${ok}, 失败 ${fail}`)
+      if (batchJobType.value === 'update_env' && fail > 0) {
+        message.warning(`批量同步执行完成: 成功 ${ok}, 失败 ${fail}（部分站点未分配代理已跳过）`)
+      } else {
+        message.success(`批量同步执行完成: 成功 ${ok}, 失败 ${fail}`)
+      }
     } else {
       const res = await api.batchHubDispatch(checkedRowKeys.value, batchJobType.value)
       const r = res.data || res

@@ -21,6 +21,7 @@ class OutlookAccount(BaseModel, SoftDeleteMixin, TimestampMixin):
     two_fa_code = fields.CharField(max_length=16, default='', description='2FA 验证码')
     link_to_generate_login_code = fields.CharField(max_length=500, default='', description='Link To Generate Login Code from 2FA Key')
     recovery_email = fields.CharField(max_length=255, default='', description='Recovery Email')
+    api_url = fields.CharField(max_length=500, default='', description='接码地址')
     status = fields.CharField(max_length=64, default='正常', description='健康状态', db_index=True)
     assigned_site_id = fields.IntField(null=True, description='分配站点ID', db_index=True)
     assigned_site_domain = fields.CharField(max_length=255, default='', description='分配站点域名')

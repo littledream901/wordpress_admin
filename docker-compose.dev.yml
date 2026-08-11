@@ -1,0 +1,88 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: wordpress-admin-db-dev
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_PORT:-127.0.0.1:3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-secret-change-me}
+      MYSQL_DATABASE: ${DB_NAME:-vue_fastapi_admin}
+      MYSQL_USER: ${DB_USER:-admin}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-Hell0world!}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-ssl
+    volumes:
+      - mysql-data-dev:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root-secret-change-me}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network-dev
+
+  redis:
+    image: redis:7-alpine
+    container_name: wordpress-admin-redis-dev
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-127.0.0.1:6379}:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-Hell0world!}
+    volumes:
+      - redis-data-dev:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network-dev
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: wordpress-admin-clickhouse-dev
+    restart: unless-stopped
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-127.0.0.1:8123}:8123"
+      - "${CLICKHOUSE_NATIVE_PORT:-127.0.0.1:9000}:9000"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-default}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-Hell0world!}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      TZ: Asia/Shanghai
+    volumes:
+      - clickhouse-data-dev:/var/lib/clickhouse
+      - clickhouse-logs-dev:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network-dev
+
+volumes:
+  mysql-data-dev:
+    driver: local
+  redis-data-dev:
+    driver: local
+  clickhouse-data-dev:
+    driver: local
+  clickhouse-logs-dev:
+    driver: local
+
+networks:
+  app-network-dev:
+    driver: bridge

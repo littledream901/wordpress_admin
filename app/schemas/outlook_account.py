@@ -21,6 +21,7 @@ class OutlookAccountCreate(BaseModel):
     two_fa_code: str = ''
     link_to_generate_login_code: str = ''
     recovery_email: str = ''
+    api_url: str = ''
 
 
 class OutlookAccountUpdate(BaseModel):
@@ -41,6 +42,7 @@ class OutlookAccountUpdate(BaseModel):
     two_fa_code: Optional[str] = ''
     link_to_generate_login_code: Optional[str] = ''
     recovery_email: Optional[str] = ''
+    api_url: Optional[str] = ''
     status: Optional[str] = ''
     assigned_site_id: Optional[int] = None
     assigned_site_domain: Optional[str] = ''

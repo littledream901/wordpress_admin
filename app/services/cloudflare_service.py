@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,6 +22,7 @@ class CloudflareService:
         self.base = 'https://api.cloudflare.com/client/v4'
         self._session = None
         self._config_loaded = False
+        self._last_token = None
 
     def _ensure_config(self):
         """延迟加载配置（首次 API 调用时触发）"""
@@ -35,15 +37,19 @@ class CloudflareService:
 
     @property
     def session(self):
-        if self._session is None:
-            self._ensure_config()
-            token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+        """每次调用重新读取 Token，防止 Token 更新后缓存失效"""
+        self._ensure_config()
+        token = ProviderResolver.sync_get_config('cloudflare', 'api_token', '')
+        if self._session is None or self._last_token != token:
+            if self._session is not None:
+                self._session.close()
             s = httpx.Client(http2=True)
             s.headers.update({
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
             })
             self._session = s
+            self._last_token = token
         return self._session
 
     def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None, **params) -> Dict[str, Any]:
@@ -85,11 +91,20 @@ class CloudflareService:
     def _put(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._request("PUT", path, payload=payload)
 
-    def get_or_create_zone(self, root_domain: str) -> Tuple[Optional[str], List[str], str]:
+    def get_or_create_zone(self, root_domain: str) -> Tuple[Optional[str], List[str], str, str]:
+        """获取或创建 Cloudflare Zone
+        
+        Returns:
+            Tuple[zone_id, name_servers, status, error_message]
+            - zone_id: Zone ID，失败时为 None
+            - name_servers: NS 列表
+            - status: Zone 状态（active/pending/invalid_nameservers 等）
+            - error_message: 错误信息，成功时为空字符串
+        """
         data = self._get('/zones', name=root_domain)
         if data.get('success') and data.get('result'):
             z = data['result'][0]
-            return z['id'], z.get('name_servers') or [], z.get('status') or 'active'
+            return z['id'], z.get('name_servers') or [], z.get('status') or 'active', ''
         # 记录 GET 失败详情
         if not data.get('success'):
             err_msgs = [e.get('message', str(e)) for e in data.get('errors', [])]
@@ -98,13 +113,14 @@ class CloudflareService:
         data = self._post('/zones', payload)
         if data.get('success'):
             z = data['result']
-            return z['id'], z.get('name_servers') or [], 'pending'
-        # 记录 POST 失败详情
+            return z['id'], z.get('name_servers') or [], 'pending', ''
+        # 记录 POST 失败详情并返回错误
         err_msgs = [e.get('message', str(e)) for e in data.get('errors', [])]
+        error_detail = '; '.join(err_msgs) if err_msgs else str(data)
         logger.warning("Cloudflare POST zones 失败 (domain=%s, account_id=%s): %s",
                        root_domain, self.account_id[:8] + '...' if self.account_id else '(empty)',
-                       '; '.join(err_msgs) or data)
-        return None, [], ''
+                       error_detail)
+        return None, [], '', error_detail
 
     def delete_records_by_type(self, zone_id: str, record_type: str) -> int:
         """删除 Zone 下指定类型的所有 DNS 记录，返回删除数量"""
@@ -182,6 +198,64 @@ class CloudflareService:
         data = self._post(f'/zones/{zone_id}/dns_records', payload)
         return bool(data.get('success'))
 
+    def check_dns_ready_for_ssl(self, zone_id: str, domain: str, expected_ip: str) -> Dict[str, Any]:
+        """检查 DNS 是否就绪可以申请 SSL 证书（快速检查，不轮询等待）
+
+        检查两个条件：
+        1. Zone 状态为 active（NS 已生效）
+        2. A 记录指向正确的源站 IP
+
+        Args:
+            zone_id: Cloudflare Zone ID
+            domain: 域名
+            expected_ip: 期望的源站 IP
+
+        Returns:
+            {"ok": bool, "zone_status": str, "proxied": bool, "error": str}
+        """
+        try:
+            # 检查 Zone 状态
+            zone_data = self._get(f'/zones/{zone_id}')
+            if not zone_data.get('success'):
+                return {"ok": False, "zone_status": "unknown", "proxied": False, "error": "Zone 查询失败"}
+
+            zone_status = zone_data.get('result', {}).get('status', '')
+            if zone_status != 'active':
+                return {
+                    "ok": False,
+                    "zone_status": zone_status,
+                    "proxied": False,
+                    "error": f"Zone 状态为 {zone_status!r}，NS 尚未生效。请等待 NS 传播完成后再建站（通常需要几分钟到几小时）"
+                }
+
+            # Zone active 后，检查 A 记录
+            record_data = self._get(f'/zones/{zone_id}/dns_records', name=domain, type='A')
+            if not record_data.get('success') or not record_data.get('result'):
+                return {
+                    "ok": False,
+                    "zone_status": zone_status,
+                    "proxied": False,
+                    "error": "Zone 已 active 但 A 记录不存在，请先执行 DNS 配置"
+                }
+
+            for record in record_data['result']:
+                if record.get('content') == expected_ip:
+                    proxied = record.get('proxied', False)
+                    logger.info(f"DNS 就绪: {domain} zone=active, A={expected_ip}, proxied={proxied}")
+                    return {"ok": True, "zone_status": zone_status, "proxied": proxied, "error": ""}
+
+            actual_ips = [r.get('content') for r in record_data['result']]
+            return {
+                "ok": False,
+                "zone_status": zone_status,
+                "proxied": False,
+                "error": f"A 记录 IP 不匹配: 实际={actual_ips}, 期望={expected_ip}"
+            }
+
+        except Exception as e:
+            logger.warning(f"{domain} DNS 检查异常: {str(e)}")
+            return {"ok": False, "zone_status": "error", "proxied": False, "error": f"检查异常: {str(e)}"}
+
     async def provision_dns(self, site: Site) -> Dict[str, Any]:
         """DNS + NS 一起运行：
         1. 获取/创建 Cloudflare Zone
@@ -189,9 +263,9 @@ class CloudflareService:
         3. 添加根域名 + www 的 A 记录
         """
         started = datetime.now()
-        zone_id, ns, status = self.get_or_create_zone(site.domain)
+        zone_id, ns, status, error_msg = self.get_or_create_zone(site.domain)
         if not zone_id:
-            raise CloudflareError("create zone", detail=f"domain={site.domain}")
+            raise CloudflareError("create zone", detail=f"domain={site.domain}, error={error_msg}")
 
         # DNS + NS 一起运行：新Zone或NS异常时，自动修改Dynadot NS
         dynadot_result = None
@@ -285,9 +359,9 @@ class CloudflareService:
         SHOPIFY_CNAME = 'shops.myshopify.com.'
 
         started = datetime.now()
-        zone_id, ns, status = self.get_or_create_zone(site.domain)
+        zone_id, ns, status, error_msg = self.get_or_create_zone(site.domain)
         if not zone_id:
-            raise CloudflareError("create zone", detail=f"domain={site.domain}")
+            raise CloudflareError("create zone", detail=f"domain={site.domain}, error={error_msg}")
 
         dynadot_result = None
         if status == 'pending' or status == 'invalid_nameservers':
