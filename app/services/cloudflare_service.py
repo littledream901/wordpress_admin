@@ -186,9 +186,10 @@ class CloudflareService:
 
     def add_or_update_mx_record(self, zone_id: str, record_name: str, mail_server: str, priority: int = 10) -> bool:
         """添加或更新 MX 记录"""
-        data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='MX')
+        # Cloudflare MX 记录：根域名使用 @ 而不是完整域名
+        data = self._get(f'/zones/{zone_id}/dns_records', name='@', type='MX')
         if not data.get('success'):
-            logger.error("MX 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
+            logger.error("MX 记录查询失败: name=@, errors=%s", data.get('errors', []))
             return False
         # MX 记录不支持 proxied，TTL 最小值为 60 秒（Cloudflare 限制）
         mx_ttl = max(self.ttl, 60)
@@ -213,9 +214,10 @@ class CloudflareService:
 
     def add_or_update_txt_record(self, zone_id: str, record_name: str, content: str) -> bool:
         """添加或更新 TXT 记录（用于 SPF、DKIM 等）"""
-        data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='TXT')
+        # Cloudflare TXT 记录：根域名使用 @ 而不是完整域名
+        data = self._get(f'/zones/{zone_id}/dns_records', name='@', type='TXT')
         if not data.get('success'):
-            logger.error("TXT 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
+            logger.error("TXT 记录查询失败: name=@, errors=%s", data.get('errors', []))
             return False
         # TXT 记录 TTL 最小值为 60 秒（Cloudflare 限制）
         txt_ttl = max(self.ttl, 60)
