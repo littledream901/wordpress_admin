@@ -107,17 +107,17 @@ def _extract_server_name(config_content: str) -> Optional[str]:
     return None
 
 
-def _real_ip_config_path(domain: str) -> str:
+def _real_ip_config_path(service_name: str) -> str:
     """生成 Real-IP 配置文件路径（与 defense.lua 同目录）"""
-    return f"/www/sites/{domain}/lua/fangyu_real_ip.conf"
+    return f"/www/sites/{service_name}/lua/fangyu_real_ip.conf"
 
 
-def _real_ip_block(domain: str) -> str:
+def _real_ip_block(service_name: str) -> str:
     """生成 Real-IP include 块（指向站点 lua 目录）"""
-    return f"    include {_real_ip_config_path(domain)};"
+    return f"    include {_real_ip_config_path(service_name)};"
 
 
-def _validate_nginx_config_logic(config_content: str, domain: str) -> Tuple[bool, List[str]]:
+def _validate_nginx_config_logic(config_content: str, service_name: str) -> Tuple[bool, List[str]]:
     """逻辑校验 Nginx 配置（检查 Fangyu 必需变量与指令是否存在）
     
     Returns:
@@ -139,16 +139,20 @@ def _validate_nginx_config_logic(config_content: str, domain: str) -> Tuple[bool
     # 检查必需指令
     if 'access_by_lua_file' not in config_content:
         errors.append('缺少 access_by_lua_file 指令')
-    elif f'/www/sites/{domain}/lua/defense.lua' not in config_content:
+    elif f'/www/sites/{service_name}/lua/defense.lua' not in config_content:
         errors.append('access_by_lua_file 路径不正确')
     
     if 'body_filter_by_lua_block' not in config_content:
         errors.append('缺少 body_filter_by_lua_block 指令')
     
     # 检查 Real-IP 配置引用
-    real_ip_path = _real_ip_config_path(domain)
+    real_ip_path = _real_ip_config_path(service_name)
     if real_ip_path not in config_content:
         errors.append(f'缺少 Real-IP 配置引用: {real_ip_path}')
+    
+    # 检查 DNS resolver 配置（Lua HTTP 请求必需）
+    if 'resolver' not in config_content:
+        errors.append('缺少 DNS resolver 配置（Lua HTTP 请求需要）')
     
     return len(errors) == 0, errors
 
@@ -189,15 +193,19 @@ real_ip_recursive on;
 """
 
 
-def _render_blocks(domain: str, site_id: str, site_key: str, site_secret: str, gateway_url: str) -> Tuple[str, str, str]:
+def _render_blocks(service_name: str, site_id: str, site_key: str, site_secret: str, gateway_url: str) -> Tuple[str, str, str]:
     """生成 Fangyu 配置的三个块：变量块、access 块、body_filter 块"""
-    domain = _clean_value(domain)
+    service_name = _clean_value(service_name)
     site_id = _clean_value(site_id)
     site_key = _clean_value(site_key)
     site_secret = _clean_value(site_secret)
     gateway_url = _clean_value(gateway_url)
     variables = f"""
-{_real_ip_block(domain)}
+{_real_ip_block(service_name)}
+
+    # DNS resolver 配置（Lua HTTP 请求需要）
+    resolver 8.8.8.8 8.8.4.4 valid=300s;
+    resolver_timeout 5s;
 
     # Fangyu Defense 配置
     set $fangyu_gateway_url  "{gateway_url}";
@@ -210,7 +218,7 @@ def _render_blocks(domain: str, site_id: str, site_key: str, site_secret: str, g
     set $fangyu_challenge_url "/challenge";
     set $fy_sdk_snippet      "";
     set $fy_server_token     "";"""
-    access = f'''        access_by_lua_file /www/sites/{domain}/lua/defense.lua;
+    access = f'''        access_by_lua_file /www/sites/{service_name}/lua/defense.lua;
         proxy_set_header Accept-Encoding "";
         proxy_hide_header Content-Encoding;'''
     body_filter = '''        body_filter_by_lua_block {
@@ -436,12 +444,60 @@ class OnePanelAPIClient:
         )
         return resp.status_code == 200 and resp.json().get("code") == 200
 
+    def reload_website(self, website_id: int) -> bool:
+        """重载网站配置（通过 operate API）"""
+        resp = self.session.post(
+            f"{self.panel_url}/api/v2/websites/operate",
+            headers=self._get_headers(),
+            json={"id": website_id, "operate": "reload"},
+            timeout=30,
+            verify=False,
+        )
+        return resp.status_code == 200 and resp.json().get("code") == 200
+
     def check_file_exists(self, container_id: str, file_path: str) -> bool:
         success, stdout, _ = self.exec_container_command(
             container_id,
             f"test -f {shlex.quote(file_path)} && echo 'exists' || echo 'not_found'"
         )
         return success and 'exists' in stdout
+
+    def get(self, endpoint: str) -> Tuple[bool, Any]:
+        """通用 GET 请求"""
+        try:
+            resp = self.session.get(
+                f"{self.panel_url}/api/v2{endpoint}",
+                headers=self._get_headers(),
+                timeout=10,
+                verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 200:
+                    return True, data.get("data", {})
+            return False, None
+        except Exception as e:
+            logger.error(f"GET {endpoint} 失败: {str(e)}")
+            return False, None
+
+    def post(self, endpoint: str, payload: Dict) -> Tuple[bool, Any]:
+        """通用 POST 请求"""
+        try:
+            resp = self.session.post(
+                f"{self.panel_url}/api/v2{endpoint}",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=10,
+                verify=False,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 200:
+                    return True, data.get("data", {})
+            return False, None
+        except Exception as e:
+            logger.error(f"POST {endpoint} 失败: {str(e)}")
+            return False, None
 
     def search_websites(self, domain: str, page_size: int = 50, max_pages: int = 100) -> List[Dict]:
         all_websites = []
@@ -586,9 +642,9 @@ class FangyuInstaller:
             self._log_step('配置nginx.conf', False, str(e)[:200])
             return False
 
-    def deploy_real_ip_config(self, domain: str, container_id: str) -> bool:
+    def deploy_real_ip_config(self, service_name: str, container_id: str) -> bool:
         """部署 Real-IP 配置到站点 lua 目录"""
-        target_dir = f"/www/sites/{domain}/lua"
+        target_dir = f"/www/sites/{service_name}/lua"
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
                 tmp_file = Path(tmp_dir) / "fangyu_real_ip.conf"
@@ -605,14 +661,14 @@ class FangyuInstaller:
             self._log_step('部署Real-IP配置', False, str(e)[:200])
             return False
 
-    def deploy_defense_lua(self, domain: str, container_id: str) -> bool:
+    def deploy_defense_lua(self, service_name: str, container_id: str) -> bool:
         """部署 defense.lua 到容器"""
         lua_path = Path(self.lua_source)
         if not lua_path.exists():
             self._log_step('部署defense.lua', False, f'源文件不存在: {self.lua_source}')
             raise FileNotFoundError(f"Lua 源文件不存在: {self.lua_source}")
 
-        target_dir = f"/www/sites/{domain}/lua"
+        target_dir = f"/www/sites/{service_name}/lua"
         ok = self.api_client.upload_file_to_container(
             container_id, str(lua_path), target_dir
         )
@@ -641,6 +697,7 @@ class FangyuInstaller:
     def update_website_config(
         self,
         domain: str,
+        service_name: str,
         site_id: str,
         site_key: str,
         site_secret: str,
@@ -677,9 +734,9 @@ class FangyuInstaller:
             or domain
         )
 
-        # 生成并注入配置
+        # 生成并注入配置（使用 service_name 而不是 domain）
         vars_block, access_lua, body_filter = _render_blocks(
-            config_domain, site_id, site_key, site_secret, gateway_url
+            service_name, site_id, site_key, site_secret, gateway_url
         )
         modified_config = _remove_old_fangyu_config(current_config)
         modified_config = _inject_variables(modified_config, vars_block)
@@ -687,7 +744,7 @@ class FangyuInstaller:
         modified_config = _inject_body_filter(modified_config, body_filter)
 
         # 写入前做逻辑校验（注入失败时不下发，避免留下半截配置）
-        valid, errors = _validate_nginx_config_logic(modified_config, config_domain)
+        valid, errors = _validate_nginx_config_logic(modified_config, service_name)
         if not valid:
             err = '; '.join(errors)
             self._log_step('更新站点配置', False, f'配置校验失败: {err}'[:300])
@@ -699,18 +756,31 @@ class FangyuInstaller:
             return False, "通过 1Panel API 更新配置失败"
         self._log_step('更新站点配置', True, '已注入 Fangyu 变量与指令')
 
-        # 测试 Nginx 配置语法（失败不阻断部署）
-        syntax_ok, _, _ = self.api_client.exec_container_command(container_id, "nginx -t")
+        # 测试 Nginx 配置语法（容错处理）
+        syntax_ok, stdout, stderr = self.api_client.exec_container_command(container_id, "nginx -t")
         if syntax_ok:
             self._log_step('测试Nginx语法', True, 'nginx -t 通过')
         else:
-            self._log_step('测试Nginx语法', False, '语法检查失败（已跳过）')
+            # 如果 exec 接口不可用，记录但不阻断
+            if "API 调用失败" in stderr or not stderr:
+                self._log_step('测试Nginx语法', True, 'exec 接口不可用，跳过语法检查')
+            else:
+                error_msg = (stderr or stdout or '语法检查失败').strip()[:200]
+                self._log_step('测试Nginx语法', False, error_msg)
+                return False, f"Nginx 配置语法错误: {error_msg}"
+
+        # 通过 1Panel API 重载网站配置
+        if not self.api_client.reload_website(int(website_info['id'])):
+            self._log_step('重载站点配置', False, '通过 1Panel API 重载失败')
+            return False, "重载站点配置失败"
+        self._log_step('重载站点配置', True, '配置已生效')
 
         return True, config_path
 
     def install(
         self,
         domain: str,
+        service_name: str,
         site_id: str,
         site_key: str,
         site_secret: str,
@@ -727,7 +797,7 @@ class FangyuInstaller:
         """
         started_at = datetime.now()
         self.site_id = str(site_id)
-        self._log_step('部署开始', True, f'域名={domain} 站点ID={site_id} 网关={gateway_url}')
+        self._log_step('部署开始', True, f'域名={domain} service_name={service_name} 站点ID={site_id} 网关={gateway_url}')
         try:
             # 步骤1: 查找容器
             container_id = self.find_openresty_container()
@@ -738,23 +808,23 @@ class FangyuInstaller:
             self.ensure_lua_config(container_id)
 
             # 步骤3: 部署 Real-IP 配置
-            if not self.deploy_real_ip_config(domain, container_id):
+            if not self.deploy_real_ip_config(service_name, container_id):
                 return self._fail_result('Real-IP 配置部署失败', started_at, domain, container_id)
 
             # 步骤4: 部署 defense.lua
-            if not self.deploy_defense_lua(domain, container_id):
+            if not self.deploy_defense_lua(service_name, container_id):
                 return self._fail_result('defense.lua 部署失败', started_at, domain, container_id)
 
             # 步骤5: 更新站点配置
             ok, config_path_or_err = self.update_website_config(
-                domain, site_id, site_key, site_secret, gateway_url, container_id
+                domain, service_name, site_id, site_key, site_secret, gateway_url, container_id
             )
             if not ok:
                 return self._fail_result(config_path_or_err, started_at, domain, container_id)
 
             # 步骤6: 自检验证
             verify_result = self.verify_installation(
-                domain, container_id, config_path_or_err
+                service_name, container_id, config_path_or_err
             )
 
             duration_ms = int((datetime.now() - started_at).total_seconds() * 1000)
@@ -770,6 +840,7 @@ class FangyuInstaller:
             return {
                 'ok': verify_result['ok'],
                 'domain': domain,
+                'service_name': service_name,
                 'container_id': container_id,
                 'config_path': config_path_or_err,
                 'verify': verify_result,
@@ -807,7 +878,7 @@ class FangyuInstaller:
 
     def verify_installation(
         self,
-        domain: str,
+        service_name: str,
         container_id: str,
         config_path: str,
     ) -> Dict[str, Any]:
@@ -834,7 +905,7 @@ class FangyuInstaller:
             self._log_step(f'自检-{name}', ok, msg)
 
         # 1. defense.lua 存在性
-        lua_path = f"/www/sites/{domain}/lua/defense.lua"
+        lua_path = f"/www/sites/{service_name}/lua/defense.lua"
         lua_content = self.api_client.get_container_file_content(container_id, lua_path)
         if not lua_content:
             _add('defense.lua 存在', False, f'无法读取 {lua_path}')
@@ -844,7 +915,7 @@ class FangyuInstaller:
             _add('defense.lua 存在', True, f'{len(lua_content)} 字节')
 
         # 2. Real-IP 配置
-        real_ip_path = _real_ip_config_path(domain)
+        real_ip_path = _real_ip_config_path(service_name)
         real_ip_content = self.api_client.get_container_file_content(container_id, real_ip_path)
         if not real_ip_content:
             _add('Real-IP 配置存在', False, f'无法读取 {real_ip_path}')
@@ -880,13 +951,33 @@ class FangyuInstaller:
             else:
                 _add('Real-IP include', True, '')
 
-            expected_lua = f"/www/sites/{domain}/lua/defense.lua"
+            expected_lua = f"/www/sites/{service_name}/lua/defense.lua"
             if expected_lua not in current_config:
                 _add('defense.lua 路径匹配', False, f'期望路径 {expected_lua} 未出现在配置中')
             else:
                 _add('defense.lua 路径匹配', True, '')
 
-        # 4. Nginx 语法检查
+            # 检查 DNS resolver 配置
+            if 'resolver' not in current_config:
+                _add('DNS resolver 配置', False, 'Lua HTTP 请求需要 resolver 配置')
+            else:
+                _add('DNS resolver 配置', True, '')
+
+        # 4. 检查 lua-resty-http 模块
+        http_check_ok, http_stdout, http_stderr = self.api_client.exec_container_command(
+            container_id, "ls /usr/local/openresty/site/lualib/resty/http.lua"
+        )
+        if http_check_ok:
+            _add('lua-resty-http 模块', True, '已安装')
+        else:
+            # 如果 API 不支持 exec，跳过检查
+            if http_stderr and 'API 调用失败' in http_stderr:
+                _add('lua-resty-http 模块', True, '容器 exec 接口不可用，已跳过')
+            else:
+                _add('lua-resty-http 模块', False, 
+                     f'模块未安装。请手动安装: docker exec -it {container_id[:12]} opm get pintsized/lua-resty-http')
+
+        # 5. Nginx 语法检查
         syntax_ok, _stdout, stderr = self.api_client.exec_container_command(
             container_id, "nginx -t"
         )
@@ -997,6 +1088,87 @@ class NginxLuaDefenseService(GatewayDefenseService):
 
         return panel_url, panel_key, provider_id
 
+    async def _get_service_name(self, site, panel_url: str, panel_key: str) -> Optional[str]:
+        """
+        从 1Panel API 获取站点的 service_name
+        
+        策略：
+        1. 从 /websites/search 获取站点的 appInstallId
+        2. 从 /apps/installed/search 查询应用信息
+        3. 提取 serviceName 字段
+        
+        Args:
+            site: 站点对象
+            panel_url: 1Panel URL
+            panel_key: 1Panel API Key
+            
+        Returns:
+            service_name，失败返回 None
+        """
+        try:
+            api_client = OnePanelAPIClient(panel_url, panel_key)
+            
+            # 步骤1: 查询站点信息获取 appInstallId
+            app_install_id = None
+            site_id = site.onepanel_site_id
+            
+            if not site_id:
+                # 如果没有 onepanel_site_id，通过 domain 查询
+                ok, data = api_client.post('/websites/search', {
+                    'page': 1,
+                    'pageSize': 200,
+                    'OrderBy': 'created_at',
+                    'Order': 'descending'
+                })
+                if ok and isinstance(data, dict):
+                    for item in (data.get('items') or []):
+                        if item.get('primaryDomain') == site.domain:
+                            app_install_id = item.get('appInstallId')
+                            site_id = int(item['id'])
+                            break
+            else:
+                # 通过 site_id 查询（注意：1Panel 可能没有 GET /websites/{id} 接口）
+                ok, data = api_client.post('/websites/search', {
+                    'page': 1,
+                    'pageSize': 200,
+                    'OrderBy': 'created_at',
+                    'Order': 'descending'
+                })
+                if ok and isinstance(data, dict):
+                    for item in (data.get('items') or []):
+                        if int(item.get('id', 0)) == site_id:
+                            app_install_id = item.get('appInstallId')
+                            break
+            
+            if not app_install_id:
+                logger.warning(f"无法找到站点 {site.domain} 的 appInstallId（site_id={site_id}）")
+                return None
+            
+            # 步骤2: 查询应用信息获取 serviceName
+            ok, data = api_client.post('/apps/installed/search', {
+                'page': 1,
+                'pageSize': 200,
+                'sync': True
+            })
+            
+            if ok and isinstance(data, dict):
+                for item in (data.get('items') or []):
+                    if int(item.get('id', 0)) == app_install_id:
+                        service_name = item.get('serviceName') or item.get('name') or ''
+                        if service_name:
+                            logger.info(f"从 1Panel 获取到站点 {site.domain} 的 service_name: {service_name} (appInstallId={app_install_id})")
+                            return service_name
+                        else:
+                            logger.warning(f"应用 {app_install_id} 中没有 serviceName 字段")
+                            return None
+            
+            logger.warning(f"无法从 /apps/installed/search 查询到应用 {app_install_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取站点 {site.domain} 的 service_name 失败: {str(e)}")
+            return None
+
     async def deploy(
         self,
         site,
@@ -1015,13 +1187,14 @@ class NginxLuaDefenseService(GatewayDefenseService):
         2. 验证站点密钥已配置（必须外部提供）
         3. 验证网关侧站点标识已配置（必须外部提供，非本项目主键）
         4. 获取站点绑定的 1Panel Provider 配置
-        5. 执行安装流程：
+        5. 从 1Panel API 获取 service_name
+        6. 执行安装流程：
            - 查找 OpenResty 容器
            - 配置 nginx.conf 的 Lua 模块和 DNS resolver
            - 部署 Real-IP 配置文件
            - 上传 defense.lua
            - 更新站点 Nginx 配置
-        6. 更新站点状态和配置
+        7. 更新站点状态和配置
         """
         try:
             # 步骤1: 验证 Lua 源文件
@@ -1051,12 +1224,21 @@ class NginxLuaDefenseService(GatewayDefenseService):
             # 步骤4: 获取 1Panel 配置
             panel_url, panel_key, provider_id = await self._get_onepanel_config(site.id)
 
-            # 步骤5: 执行安装（在线程池中执行，避免阻塞）
+            # 步骤5: 从 1Panel API 获取 service_name（用于路径构建）
+            service_name = await self._get_service_name(site, panel_url, panel_key)
+            if not service_name:
+                return {
+                    'ok': False,
+                    'error': f'无法从 1Panel 获取站点 {site.domain} 的 service_name（站点可能不存在或未正确创建）',
+                }
+
+            # 步骤6: 执行安装（在线程池中执行，避免阻塞）
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 self._install_sync,
                 site.domain,
+                service_name,
                 gateway_site_id,
                 site_key,
                 site_secret,
@@ -1065,7 +1247,7 @@ class NginxLuaDefenseService(GatewayDefenseService):
                 panel_key,
             )
 
-            # 步骤5: 更新站点状态
+            # 步骤7: 更新站点状态
             if result['ok']:
                 site.gateway_defense_status = 'deployed'
                 site.gateway_defense_type = 'nginx_lua'
@@ -1075,6 +1257,7 @@ class NginxLuaDefenseService(GatewayDefenseService):
                 site.gateway_config_json = json.dumps({
                     'gateway_url': gateway_url,
                     'gateway_site_id': gateway_site_id,
+                    'service_name': service_name,
                     'fail_mode': fail_mode,
                     'sdk_inject': sdk_inject,
                     'provider_id': provider_id,
@@ -1109,6 +1292,7 @@ class NginxLuaDefenseService(GatewayDefenseService):
     def _install_sync(
         self,
         domain: str,
+        service_name: str,
         site_id: str,
         site_key: str,
         site_secret: str,
@@ -1119,7 +1303,7 @@ class NginxLuaDefenseService(GatewayDefenseService):
         """同步执行安装（在线程池中执行）"""
         api_client = OnePanelAPIClient(panel_url, panel_key)
         installer = FangyuInstaller(api_client, self.lua_source, task_log=self.task_log)
-        return installer.install(domain, site_id, site_key, site_secret, gateway_url)
+        return installer.install(domain, service_name, site_id, site_key, site_secret, gateway_url)
 
     async def undeploy(self, site) -> Dict[str, Any]:
         """

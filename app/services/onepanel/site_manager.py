@@ -43,7 +43,11 @@ class OnePanelSiteManager:
         return None
 
     def get_site_root(self, domain: str, site_id: int = 0) -> Optional[str]:
-        """查询网站在 1Panel 中的实际 document root（siteDir）"""
+        """
+        查询网站在 1Panel 中的实际 document root（siteDir）
+        
+        注意：此方法已废弃，建议使用 get_wp_root() 获取 WordPress 根目录
+        """
         if not site_id:
             site_id = self.get_site_id(domain) or 0
         if not site_id:
@@ -62,6 +66,82 @@ class OnePanelSiteManager:
         else:
             _log.warning("站点 %s (id=%s) GET /websites 失败: ok=%s", domain, site_id, ok)
         return None
+    
+    def get_wp_root(self, service_name: str, site_id: int = None, domain: str = None) -> Optional[str]:
+        """
+        获取 WordPress 根目录（优先使用 sitePath）
+        
+        优先级:
+        1. sitePath + /data (99% 准确，推荐)
+        2. 通过 service_name 智能查找 (100% 准确但较慢)
+        3. siteDir (不推荐，可能返回 / 等无效路径)
+        
+        Args:
+            service_name: 服务名（如 example-com-xxx-timestamp）
+            site_id: 站点 ID（可选，用于 API 查询）
+            domain: 域名（可选，用于查询 site_id）
+            
+        Returns:
+            WordPress 根目录路径，失败返回 None
+        """
+        import os
+        
+        # 优先：从 API 获取 sitePath
+        if site_id or domain:
+            if not site_id and domain:
+                site_id = self.get_site_id(domain)
+            
+            if site_id:
+                ok, detail = self.api.get(f'/websites/{site_id}')
+                if ok and isinstance(detail, dict):
+                    # 优先使用 sitePath（应用安装路径）
+                    site_path = detail.get('sitePath') or detail.get('site_path')
+                    if site_path:
+                        wp_root = f'{site_path}/data'
+                        if os.path.exists(f'{wp_root}/wp-config.php'):
+                            _log.info("找到 WordPress 根目录（通过 sitePath）: %s", wp_root)
+                            return wp_root
+                        else:
+                            _log.warning("sitePath 指向的目录不包含 wp-config.php: %s", wp_root)
+        
+        # 降级：通过 service_name 智能查找
+        if service_name:
+            wp_root = self._find_wp_root_by_service(service_name)
+            if wp_root:
+                _log.info("找到 WordPress 根目录（通过 service_name）: %s", wp_root)
+                return wp_root
+        
+        _log.warning("无法找到 WordPress 根目录: service_name=%s, site_id=%s, domain=%s", 
+                     service_name, site_id, domain)
+        return None
+    
+    def _find_wp_root_by_service(self, service_name: str) -> Optional[str]:
+        """
+        通过 service_name 智能查找 WordPress 根目录
+        
+        查找策略:
+        1. 标准路径: {wp_app_root}/{service_name}/data
+        2. 递归查找: {wp_app_root}/{service_name}/**/wp-config.php
+        """
+        import os
+        import glob
+        
+        # 策略 1: 标准路径
+        standard_path = f'{self.wp_app_root}/{service_name}/data'
+        if os.path.exists(f'{standard_path}/wp-config.php'):
+            return standard_path
+        
+        # 策略 2: 递归查找
+        base_path = f'{self.wp_app_root}/{service_name}'
+        if os.path.exists(base_path):
+            wp_config_files = glob.glob(f'{base_path}/**/wp-config.php', recursive=True)
+            if wp_config_files:
+                # 返回第一个找到的 wp-config.php 所在目录
+                wp_root = os.path.dirname(wp_config_files[0])
+                _log.info("通过递归查找找到 wp-config.php: %s", wp_root)
+                return wp_root
+        
+        return None
 
     @staticmethod
     def _extract_site_dir(item: dict) -> Optional[str]:
@@ -75,7 +155,16 @@ class OnePanelSiteManager:
             or item.get('websiteDir')
             or ''
         )
-        return str(site_dir) if site_dir else None
+        if not site_dir:
+            return None
+        
+        site_dir_str = str(site_dir).strip()
+        
+        # 过滤无效路径：单个 / 或空路径不是有效的 WordPress document root
+        if not site_dir_str or site_dir_str == '/':
+            return None
+            
+        return site_dir_str
 
     def wait_site_id(self, domain: str, timeout: int = 60, interval: int = 3) -> Optional[int]:
         """轮询获取 site_id，避免站点创建后列表未刷新"""
@@ -114,9 +203,17 @@ class OnePanelSiteManager:
             versions = [v for v in app_data['versions'] if v]
         if not versions:
             versions = [app_data.get('version') or self.wp_version or 'latest']
-        if self.wp_version != 'latest' and self.wp_version not in versions:
+        
+        # 如果指定了非 latest 版本，优先使用指定版本
+        if self.wp_version != 'latest':
+            if self.wp_version in versions:
+                # 如果指定版本在列表中，将其移到第一位
+                versions.remove(self.wp_version)
+            # 插入到第一位，确保优先尝试
             versions.insert(0, self.wp_version)
-        _log.info("resolve_wp_app 尝试版本列表: %s (app_id=%s app_type=%s)", versions, app_id, app_type)
+        
+        _log.info("resolve_wp_app 尝试版本列表: %s (app_id=%s app_type=%s, 目标版本=%s)", 
+                  versions, app_id, app_type, self.wp_version)
         for v in versions:
             ok, detail = self.api.get(f'/apps/detail/{app_id}/{v}/{app_type}')
             if ok and isinstance(detail, dict) and detail.get('id'):

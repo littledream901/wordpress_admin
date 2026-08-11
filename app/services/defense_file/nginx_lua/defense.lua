@@ -577,6 +577,9 @@ if repeat_val and repeat_val ~= "" then
   context.fingerprint = repeat_val
   context.repeatKey   = "_sd_0000"
   context.repeatValue = repeat_val
+else
+  -- 首次访问没有 Cookie，生成匿名指纹以便记录访问日志
+  context.fingerprint = "anon_" .. ngx.var.remote_addr .. "_" .. ngx.time()
 end
 
 -- DEBUG: 开始决策调用
@@ -609,6 +612,7 @@ if payload and payload.mechanism ~= "pass" then
 end
 
 -- 决策完成后异步上报心跳（使用 ngx.timer.at 避免阻塞主流程）
+-- 现在无论是否有 Cookie 都会上报访问日志
 if context.fingerprint then
   local ok, err = ngx.timer.at(0, function(premature)
     if not premature then
@@ -620,6 +624,7 @@ if context.fingerprint then
   end
 end
 
+local server_token = payload and payload.serverToken or ""
 
 -- 第一层 pass（或网关不可达）→ 注入 SDK 到响应 HTML
 -- 使用 header_filter + body_filter 阶段实现；

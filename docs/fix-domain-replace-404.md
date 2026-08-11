@@ -38,35 +38,6 @@ find /opt/1panel/apps/wordpress -name "domain-replace.php"
 4. `inject_domain_replace_script` → 使用**旧** service_name 写入脚本到错误目录 ❌
 5. Nginx 已经指向**新** service_name → 404 错误 ❌
 
-### 技术细节：Docker Volume 映射
-
-1Panel WordPress 使用 Docker 容器部署，架构如下：
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Nginx (宿主机)                                               │
-│ - 配置: /opt/1panel/www/conf.d/{service_name}.conf         │
-│ - 反向代理到: http://127.0.0.1:36990                        │
-└─────────────────────────────────────────────────────────────┘
-                         ↓ proxy_pass
-┌─────────────────────────────────────────────────────────────┐
-│ WordPress 容器                                               │
-│ - 端口: 36990                                                │
-│ - 容器内路径: /usr/share/nginx/html                         │
-│ - Docker Volume 映射:                                        │
-│   /opt/1panel/apps/wordpress/{service}/data                 │
-│   → /usr/share/nginx/html                                   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**当 service_name 不同步时**：
-```
-脚本写入   → /opt/1panel/apps/wordpress/...1786463503656/data/domain-replace.php
-Docker 映射 → /opt/1panel/apps/wordpress/...1786464583871/data/ → 容器内
-容器访问   → /usr/share/nginx/html/domain-replace.php ❌ 找不到！
-HTTP 请求  → 404 Not Found ❌
-```
-
 ## 修复方案
 
 ### 核心修复：rebuild_app 返回最新的 service_name
@@ -229,3 +200,238 @@ cat /opt/1panel/www/conf.d/{site}.conf | grep root
 5. ✅ 详细的日志记录便于排查
 
 下次建站时，系统会自动使用正确的 service_name，避免 404 错误。
+
+## 问题 3: WooCommerce 类加载失败（2026-08-12 01:16）
+
+### 现象
+```json
+{
+  "woo_in_active_plugins": true,        // ✅ 已在激活列表
+  "woo_class_exists": false,            // ❌ 类不存在
+  "woo_function_exists": false,         // ❌ 函数不存在
+  "woo_main_file": "/var/www/html/wp-content/plugins/woocommerce/woocommerce.php"
+}
+```
+
+错误：`WordPress get woo key 失败: 业务返回失败: WooCommerce class/function not loaded in current bootstrap context`
+
+### 根本原因
+
+**第二次 rebuild 导致 WooCommerce 插件文件丢失。**
+
+建站流程：
+1. Step 3-4: 恢复数据库 + 文件（并行）✅
+2. Step 5: 第一次 rebuild ✅
+3. Step 6: 域名替换 ✅
+4. Step 7-8: 注入 woo/ctx 脚本 ✅
+5. **Step 9: 第二次 rebuild** ⚠️ **容器重建，插件文件丢失**
+6. Step 10: 获取 WooCommerce Key ❌ **文件不存在，类无法加载**
+
+日志证据：
+```
+rebuild 后 service_name 已变更: qciqcgsi-shop-038745-1786468430537 → qciqcgsi-shop-038745-1786463503656
+```
+
+service_name 变更说明容器被重建，可能回滚到了初始状态，导致：
+- ✅ 数据库中 `active_plugins` 仍包含 WooCommerce（数据持久化）
+- ❌ 插件文件丢失（容器重建）
+- ❌ PHP 无法加载 WooCommerce 类
+
+### 修复方案
+
+在获取 WooCommerce Key 之前，检查插件文件是否存在，如果不存在则重新恢复文件。
+
+#### 1. 添加文件检查方法
+
+**文件：** `app/services/onepanel/wp_restorer.py`
+
+```python
+def check_woo_file_exists(self, service_name: str) -> bool:
+    """检查 WooCommerce 主文件是否存在（用于检测 rebuild 后文件是否丢失）"""
+    data_dir = self._data_root(service_name)
+    woo_main = f'{data_dir}/wp-content/plugins/woocommerce/woocommerce.php'
+    exists = self.file_manager.exists(woo_main)
+    _log.info("检查 WooCommerce 文件: %s -> %s", woo_main, "存在" if exists else "不存在")
+    return exists
+```
+
+#### 2. 在建站流程中添加检查和恢复逻辑
+
+**文件：** `app/services/tasks/provision.py`
+
+```python
+# Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
+# ⚠️ 重要：第二次 rebuild 可能导致插件文件丢失，先检查并恢复
+await self._update_step(job, "verify_and_restore_woo")
+woo_file_exists = await self._exec(
+    lambda: wp_restorer.check_woo_file_exists(service_name),
+    timeout=30,
+)
+if not woo_file_exists:
+    _log.warning("第二次 rebuild 后 WooCommerce 文件丢失，重新恢复文件")
+    await self._exec(lambda: wp_restorer.restore_files(service_name), timeout=300)
+    # 恢复后需要再次 rebuild
+    await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+
+await self._update_step(job, "fetch_woo_keys")
+woo_ck, woo_cs = await self._exec(
+    lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol),
+    timeout=45,
+)
+```
+
+#### 3. 增强 PHP 脚本诊断信息
+
+**文件：** `app/services/onepanel/php_client.py`
+
+```python
+class PHPClientResponseError(PHPClientError):
+    """PHP 业务逻辑返回失败"""
+    def __init__(self, message: str = "", response_data: dict | None = None):
+        super().__init__(message)
+        self.response_data = response_data or {}
+```
+
+**文件：** `app/services/onepanel/wp_restorer.py`
+
+```python
+except PHPClientResponseError as e:
+    msg = str(e)
+    if e.response_data:
+        import json
+        _log.error("WooCommerce Key 生成失败，错误详情: %s", msg)
+        _log.error("PHP 诊断信息: %s", json.dumps(e.response_data, indent=2, ensure_ascii=False))
+    else:
+        _log.error("WooCommerce Key 生成失败（无诊断信息）: %s", msg)
+    raise WordPressOperationError("get woo key", detail=msg)
+```
+
+### 修复效果
+
+**修复前：**
+```
+第二次 rebuild → 插件文件丢失 → WooCommerce 类加载失败 → 建站失败 ❌
+```
+
+**修复后：**
+```
+第二次 rebuild → 检查文件 → 发现丢失 → 重新恢复文件 → 再次 rebuild → WooCommerce 类加载成功 → 建站成功 ✅
+```
+
+### 相关文件
+
+- `app/services/tasks/provision.py:273-285` - 添加验证和恢复逻辑
+- `app/services/onepanel/wp_restorer.py:282-290` - 添加文件检查方法
+- `app/services/onepanel/php_client.py:49-55` - 增强异常类
+- `app/services/onepanel/php_client.py:242-252` - 传递诊断数据
+- `app/services/onepanel/wp_restorer.py:715-727` - 记录完整诊断信息
+
+---
+
+## 2026-08-12 补充修复：过滤无效的 site_root
+
+### 新问题
+
+在实际运行中发现，`get_site_root()` 可能返回 `/`（根目录），这是 1Panel API 返回的 Nginx root，但不是 WordPress 的实际安装路径。
+
+**错误日志：**
+```
+2026-08-12 00:44:11.986 | INFO | 站点 qciqcgsi.shop (id=6) Nginx root: / 
+2026-08-12 00:44:11.988 | INFO | 使用指定的目标目录: 
+2026-08-12 00:44:12.250 | INFO | domain-replace.php 已写入 /domain-replace.php 
+2026-08-12 00:44:14.237 | ERROR | WordPress domain replace 失败: HTTP 404
+```
+
+脚本被写入到 `/domain-replace.php`（系统根目录），而不是 WordPress 的安装目录。
+
+### 修复方案
+
+#### 1. 在 `_extract_site_dir` 中过滤无效路径
+
+**文件：** [site_manager.py](file:///e:/Python/vue-fastapi-admin-main/app/services/onepanel/site_manager.py#L66-L88)
+
+```python
+@staticmethod
+def _extract_site_dir(item: dict) -> Optional[str]:
+    """从 1Panel 返回的网站 item 中提取 document root"""
+    site_dir = (
+        item.get('siteDir')
+        or item.get('site_dir')
+        or item.get('SiteDir')
+        or item.get('path')
+        or item.get('rootDir')
+        or item.get('websiteDir')
+        or ''
+    )
+    if not site_dir:
+        return None
+    
+    site_dir_str = str(site_dir).strip()
+    
+    # 过滤无效路径：单个 / 或空路径不是有效的 WordPress document root
+    if not site_dir_str or site_dir_str == '/':
+        return None
+        
+    return site_dir_str
+```
+
+#### 2. 在 `_resolve_target_dir` 中验证路径有效性
+
+**文件：** [wp_restorer.py](file:///e:/Python/vue-fastapi-admin-main/app/services/onepanel/wp_restorer.py#L101-L127)
+
+```python
+def _resolve_target_dir(self, service_name: str, target_dir: str = "") -> str:
+    if target_dir:
+        resolved = target_dir.rstrip('/')
+        # 验证目录是否真的包含 WordPress（检查 wp-config.php）
+        wp_config_path = f'{resolved}/wp-config.php'
+        if self.file_manager and self.file_manager.exists(wp_config_path):
+            _log.info("使用指定的目标目录: %s", resolved)
+            return resolved
+        else:
+            _log.warning(
+                "指定的目标目录 %s 不包含 wp-config.php，将使用智能查找",
+                resolved
+            )
+    
+    # 智能查找：在候选路径中找到 wp-config.php 所在目录
+    # ...
+```
+
+### 修复效果
+
+**修复前：**
+```
+get_site_root() → "/" 
+_resolve_target_dir() → "/" (无验证)
+脚本写入 → /domain-replace.php ❌
+HTTP 访问 → 404 ❌
+```
+
+**修复后：**
+```
+get_site_root() → None (过滤掉 "/")
+_resolve_target_dir() → 智能查找 wp-config.php
+脚本写入 → /opt/1panel/apps/wordpress/.../data/domain-replace.php ✅
+HTTP 访问 → 200 OK ✅
+```
+
+### 关键改进
+
+1. ✅ `_extract_site_dir` 过滤无效路径（`/`、空字符串）
+2. ✅ `_resolve_target_dir` 验证路径是否包含 `wp-config.php`
+3. ✅ 当 API 返回值无效时，自动降级到智能查找
+4. ✅ 详细的警告日志便于诊断
+
+### 测试验证
+
+```bash
+# 检查 1Panel API 返回的 siteDir
+curl -H "Authorization: Bearer $TOKEN" http://localhost:9999/api/v1/websites/6
+
+# 确认脚本写入到正确位置
+find /opt/1panel/apps/wordpress -name "domain-replace.php"
+
+# 验证智能查找日志
+grep "_resolve_target_dir\|wp-config.php" /var/log/app.log
+```

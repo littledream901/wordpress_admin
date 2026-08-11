@@ -49,6 +49,10 @@ class PHPClientNetworkError(PHPClientError):
 
 class PHPClientResponseError(PHPClientError):
     """4xx / 非 JSON 响应 / 业务返回 failure → 不重试"""
+    
+    def __init__(self, message: str, url: str = "", step: str = "", response_data: dict = None):
+        super().__init__(message, url=url, step=step)
+        self.response_data = response_data or {}
 
 
 # ── 重试策略 ──
@@ -241,14 +245,14 @@ class PHPClient:
                     if not success_check(payload):
                         raise PHPClientResponseError(
                             f"业务返回失败: {payload.get('msg', payload.get('message', str(payload)[:200]))}",
-                            url=_mask_token(url), step=step,
+                            url=_mask_token(url), step=step, response_data=payload,
                         )
                 else:
                     # 默认：success: false 视为失败
                     if payload.get("success") is False:
                         raise PHPClientResponseError(
                             f"业务返回失败: {payload.get('message', payload.get('msg', ''))}",
-                            url=_mask_token(url), step=step,
+                            url=_mask_token(url), step=step, response_data=payload,
                         )
 
                 return payload

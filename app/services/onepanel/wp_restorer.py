@@ -110,8 +110,16 @@ class OnePanelWordPressRestorer:
         """
         if target_dir:
             resolved = target_dir.rstrip('/')
-            _log.info("使用指定的目标目录: %s", resolved)
-            return resolved
+            # 验证目录是否真的包含 WordPress（检查 wp-config.php）
+            wp_config_path = f'{resolved}/wp-config.php'
+            if self.file_manager and self.file_manager.exists(wp_config_path):
+                _log.info("使用指定的目标目录: %s", resolved)
+                return resolved
+            else:
+                _log.warning(
+                    "指定的目标目录 %s 不包含 wp-config.php，将使用智能查找",
+                    resolved
+                )
         
         # 智能查找：在候选路径中找到 wp-config.php 所在目录
         candidates = self._get_candidate_roots(service_name)
@@ -126,6 +134,61 @@ class OnePanelWordPressRestorer:
         _log.warning("未找到 wp-config.php，降级使用默认 data 目录: %s", fallback)
         return fallback
 
+    def check_woo_file_exists(self, service_name: str) -> bool:
+        """
+        检查 WooCommerce 主文件是否存在
+        
+        用于检测 rebuild 后插件文件是否丢失
+        
+        Args:
+            service_name: 服务名
+            
+        Returns:
+            True 如果文件存在，False 如果文件丢失
+        """
+        wp_root = self._data_root(service_name)
+        woo_main_file = f'{wp_root}/wp-content/plugins/woocommerce/woocommerce.php'
+        
+        if self.file_manager and self.file_manager.exists(woo_main_file):
+            return True
+        else:
+            _log.warning("WooCommerce 主文件不存在: %s", woo_main_file)
+            return False
+    
+    def verify_and_restore_files(self, service_name: str, required_files: List[str] = None) -> bool:
+        """
+        验证关键文件并自动恢复
+        
+        Args:
+            service_name: 服务名
+            required_files: 关键文件列表（相对于 wp_root），如果为 None 则使用默认列表
+            
+        Returns:
+            True 如果需要恢复（文件有丢失），False 如果所有文件完整
+        """
+        if required_files is None:
+            # 默认关键文件列表
+            required_files = [
+                'wp-content/plugins/woocommerce/woocommerce.php',
+                'wp-content/mu-plugins/woo-ctx.php',
+            ]
+        
+        wp_root = self._data_root(service_name)
+        missing_files = []
+        
+        for rel_path in required_files:
+            full_path = f'{wp_root}/{rel_path}'
+            if self.file_manager and not self.file_manager.exists(full_path):
+                missing_files.append(rel_path)
+        
+        if missing_files:
+            _log.warning("检测到 %d 个文件丢失: %s，开始恢复", len(missing_files), missing_files)
+            self.restore_files(service_name)
+            return True
+        
+        _log.info("所有关键文件完整，无需恢复")
+        return False
+    
     def _find_child_path(self, roots: List[str], target_name: str, max_depth: int = 8,
                          exclude_prefixes: Optional[List[str]] = None) -> Optional[str]:
         """在多个根目录下递归查找指定文件/目录名"""
@@ -270,6 +333,14 @@ class OnePanelWordPressRestorer:
             self.file_manager.chmod(f'{data_dir}/wp-content/uploads', mode=511, sub=True)
         except Exception:
             pass
+
+    def check_woo_file_exists(self, service_name: str) -> bool:
+        """检查 WooCommerce 主文件是否存在（用于检测 rebuild 后文件是否丢失）"""
+        data_dir = self._data_root(service_name)
+        woo_main = f'{data_dir}/wp-content/plugins/woocommerce/woocommerce.php'
+        exists = self.file_manager.exists(woo_main)
+        _log.info("检查 WooCommerce 文件: %s -> %s", woo_main, "存在" if exists else "不存在")
+        return exists
 
     # --- 域名替换 ---
 
@@ -590,8 +661,20 @@ $diag = [
     'woo_function_exists' => function_exists('wc_api_hash'),
 ];
 
+// 如果 WooCommerce 未激活但文件存在，自动激活
+if (!$diag['woo_in_active_plugins'] && !empty($diag['woo_main_file']) && file_exists($diag['woo_main_file'])) {{
+    $active_plugins = get_option('active_plugins', []);
+    if (!in_array('woocommerce/woocommerce.php', $active_plugins, true)) {{
+        $active_plugins[] = 'woocommerce/woocommerce.php';
+        update_option('active_plugins', $active_plugins);
+        $diag['woo_auto_activated'] = true;
+        $diag['woo_in_active_plugins'] = true;
+    }}
+}}
+
 // 如果 Woo 主类没加载，但插件文件存在，尝试手动加载一次
-if (!$diag['woo_class_exists'] && !empty($diag['woo_main_file']) && file_exists($diag['woo_main_file'])) {{
+$diag['woo_file_exists_check'] = !empty($diag['woo_main_file']) ? file_exists($diag['woo_main_file']) : false;
+if (!$diag['woo_class_exists'] && !empty($diag['woo_main_file']) && $diag['woo_file_exists_check']) {{
     try {{
         require_once $diag['woo_main_file'];
         $diag['woo_class_exists_after_require'] = class_exists('WooCommerce');
@@ -601,6 +684,12 @@ if (!$diag['woo_class_exists'] && !empty($diag['woo_main_file']) && file_exists(
     }}
     $diag['woo_class_exists'] = class_exists('WooCommerce');
     $diag['woo_function_exists'] = function_exists('wc_api_hash');
+}} else {{
+    $diag['woo_manual_load_skipped'] = [
+        'class_exists' => $diag['woo_class_exists'],
+        'file_empty' => empty($diag['woo_main_file']),
+        'file_exists' => $diag['woo_file_exists_check'],
+    ];
 }}
 
 // 最终判定
@@ -671,7 +760,12 @@ echo json_encode([
         self.file_manager.delete(f'{dir_path}/{self.woo_script}', is_dir=False)
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
-        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key（统一重试/错误处理）"""
+        """通过 HTTP 调用 PHP 脚本获取 WooCommerce API Key（统一重试/错误处理）
+        
+        Returns:
+            (consumer_key, consumer_secret) 如果成功
+            (None, None) 如果 WooCommerce 未安装/未激活（不抛异常）
+        """
         path = f"{self.woo_script}?token={token}"
         try:
             data = self.php_client.fetch_with_fallback(
@@ -688,6 +782,19 @@ echo json_encode([
                 data.get("code"), domain, data.get("debug"),
             )
             return data["consumer_key"], data["consumer_secret"]
+        except PHPClientResponseError as e:
+            msg = str(e)
+            # 记录详细的诊断信息，便于排查
+            _log.error("WooCommerce Key 生成失败，错误详情: %s", msg)
+            # 尝试解析响应中的诊断信息
+            try:
+                import json
+                if hasattr(e, 'response_data') and e.response_data:
+                    _log.error("PHP 诊断信息: %s", json.dumps(e.response_data, ensure_ascii=False, indent=2))
+            except Exception:
+                pass
+            # 真实错误应该抛出（WooCommerce 是必需的）
+            raise WordPressOperationError("get woo key", detail=msg)
         except PHPClientError as e:
             raise WordPressOperationError("get woo key", detail=str(e))
 

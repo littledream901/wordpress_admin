@@ -3,26 +3,26 @@
 
 独立的执行器层，不依赖 API 层（site_pipeline.py）。
 
-流程步骤（13 步，结合单脚本逻辑与生产环境 Cloudflare 需求）：
+流程步骤（13 步，优化后减少 rebuild 次数）：
   0. dns_check           - DNS 解析检查（确保域名已解析到服务器）
   1. create_site         - 创建 WordPress 网站
   2. apply_ssl           - 申请/绑定 SSL 证书（Cloudflare 代理必须先有 SSL）
-  3. restore_db          - 恢复数据库
-  4. restore_files       - 恢复模板文件
-  5. rebuild_after_files - 重建容器
+  3. restore_and_inject  - 恢复数据库+文件，注入 woo 和 ctx 脚本（4个并行）
+  4. rebuild_once        - 重建容器（一次性加载所有变更）
+  5. inject_mu_plugins   - 注入 mu-plugins（rebuild 后注入，避免文件丢失）
   6. replace_domain      - 域名替换
   7. patch_wp_config     - wp-config.php 配置
-  8. inject_woo_ctx      - 注入 WooCommerce + CTX + mu-plugins 脚本
-  9. rebuild_after_patch - 重建容器（脚本注入后 rebuild）
-  10. fetch_woo_keys     - 获取 WooCommerce API Key
-  11. health_check       - 健康检查
-  12. fetch_feed_link    - 获取 Feed 链接
+  8. verify_woo_files    - 验证 WooCommerce 文件完整性（如需要则恢复+rebuild）
+  9. fetch_woo_keys      - 获取 WooCommerce API Key
+  10. health_check       - 健康检查
+  11. fetch_feed_link    - 获取 Feed 链接
 """
 
 import asyncio
 import json
 import logging
 from datetime import datetime
+from typing import Optional
 
 from app.models.operation_job import OperationJob
 from app.models.site_pipeline import Site
@@ -46,6 +46,42 @@ _PROVISION_TIMEOUT_MINUTES = 30
 class ProvisionTaskRunner(TaskRunner):
     """1Panel 建站全流程执行器"""
 
+    def __init__(self):
+        super().__init__()
+        self._step_timings = {}  # 记录每个步骤的开始时间
+
+    async def _start_step(self, job: OperationJob, step: str):
+        """开始步骤并记录时间"""
+        self._step_timings[step] = datetime.now()
+        await self._update_step(job, step)
+        _log.info("步骤开始: %s (site_id=%s)", step, job.resource_id)
+
+    async def _end_step(self, job: OperationJob, step: str, site: Optional[Site] = None):
+        """结束步骤并记录耗时"""
+        if step in self._step_timings:
+            start_time = self._step_timings[step]
+            end_time = datetime.now()
+            duration_ms = int((end_time - start_time).total_seconds() * 1000)
+            _log.info("步骤完成: %s, 耗时: %d ms (site_id=%s)", step, duration_ms, job.resource_id)
+            
+            # 追加到站点日志
+            if site:
+                try:
+                    self._append_site_log(
+                        site,
+                        source=f"provision:{step}",
+                        data={"step": step, "duration_ms": duration_ms},
+                        action=step,
+                        status="success",
+                        started_at=start_time,
+                        completed_at=end_time,
+                    )
+                    await site.save(update_fields=["pipeline_log"])
+                except Exception as e:
+                    _log.warning("记录步骤日志失败: %s", e)
+            
+            del self._step_timings[step]
+
     async def execute(self, site_id: int) -> dict:
         """建站入口：校验 → 创建任务 → 后台执行"""
         from app.controllers.site_pipeline import site_controller
@@ -55,9 +91,9 @@ class ProvisionTaskRunner(TaskRunner):
         if blocked:
             return {"ok": False, "code": 400, "msg": "该站点已有建站任务执行中，请勿重复触发"}
 
-        job = await self._create_job(site_id, site.domain, "provision", total_steps=12)
+        job = await self._create_job(site_id, site.domain, "provision", total_steps=11)
         asyncio.create_task(self._run(job, site))
-        return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 12}
+        return {"ok": True, "job_id": job.id, "step": "create_site", "total_steps": 11}
 
     async def _run(self, job: OperationJob, site):
         # 从 onepanel Provider 读取 max_concurrent
@@ -86,7 +122,7 @@ class ProvisionTaskRunner(TaskRunner):
             return
         try:
             # Step 0: DNS 就绪检查（快速检查 Zone 状态，不轮询等待）
-            await self._update_step(job, "dns_check")
+            await self._start_step(job, "dns_check")
             if site.server_ip:
                 from app.services.cloudflare_service import CloudflareService
                 
@@ -130,6 +166,8 @@ class ProvisionTaskRunner(TaskRunner):
                 proxied = dns_result.get('proxied', False)
                 _log.info(f"站点 {site.domain} DNS 就绪: zone=active, A={site.server_ip}, proxied={proxied}")
             
+            await self._end_step(job, "dns_check", site)
+            
             api = OnePanelAPI()
             files = OnePanelFileManager(api)
             site_manager = OnePanelSiteManager(api, file_manager=files)
@@ -138,7 +176,7 @@ class ProvisionTaskRunner(TaskRunner):
             wp_restorer = OnePanelWordPressRestorer(api, files)
 
             # Step 1: create_site
-            await self._update_step(job, "create_site")
+            await self._start_step(job, "create_site")
             app_info = await self._exec(lambda: site_manager.create_wordpress_website(site.domain), timeout=300)
 
             app_id = int(app_info.get('app_id') or 0)
@@ -158,23 +196,32 @@ class ProvisionTaskRunner(TaskRunner):
             site.onepanel_status = '创建中'
             site.pipeline_status = 'onepanel:site_created'
             await site.save()
+            await self._end_step(job, "create_site", site)
 
             # Step 2: apply_ssl（Cloudflare 代理必须先申请 SSL，否则域名替换时 Cloudflare 无法连接源站）
-            await self._update_step(job, "apply_ssl")
+            await self._start_step(job, "apply_ssl")
             protocol = await self._exec(
                 lambda: ssl_manager.apply_and_bind(onepanel_site_id, site.domain),
                 timeout=120,
             )
+            await self._end_step(job, "apply_ssl", site)
 
-            # Step 3+4: restore_db + restore_files（无依赖，可并行）
-            await self._update_step(job, "restore_db_files")
-            await asyncio.gather(
+            # Step 3+4: restore_db + restore_files + inject_woo_ctx（并行操作）
+            # 优化：先恢复数据库和文件，注入 woo 和 ctx 脚本，mu-plugins 在 rebuild 后注入
+            await self._start_step(job, "restore_and_inject")
+            _, _, woo_token, ctx_refresh_url = await asyncio.gather(
                 self._exec(lambda: db_restorer.restore(db_name), timeout=300),
                 self._exec(lambda: wp_restorer.restore_files(service_name), timeout=300),
+                self._exec(lambda: wp_restorer.inject_woo_script(service_name), timeout=120),
+                self._exec(
+                    lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol),
+                    timeout=120,
+                ),
             )
+            await self._end_step(job, "restore_and_inject", site)
 
-            # Step 5: rebuild_after_files
-            await self._update_step(job, "rebuild_after_files")
+            # Step 5: rebuild_once（一次性 rebuild 加载数据库和文件变更）
+            await self._start_step(job, "rebuild_once")
             rebuild_result = await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
             
             # ⚠️ 重要：rebuild 可能会生成新的 service_name，必须更新
@@ -185,9 +232,15 @@ class ProvisionTaskRunner(TaskRunner):
                     service_name = new_service_name
                     site.onepanel_service_name = new_service_name
                     await site.save()
+            await self._end_step(job, "rebuild_once", site)
 
-            # Step 6: replace_domain
-            await self._update_step(job, "replace_domain")
+            # Step 6: inject_mu_plugins（rebuild 后注入 mu-plugins，避免文件丢失）
+            await self._start_step(job, "inject_mu_plugins")
+            await self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=120)
+            await self._end_step(job, "inject_mu_plugins", site)
+
+            # Step 7: replace_domain
+            await self._start_step(job, "replace_domain")
             # rebuild 后 Nginx config 可能异步 reload，稍等几秒
             await asyncio.sleep(5)
             old_domain = (
@@ -197,9 +250,13 @@ class ProvisionTaskRunner(TaskRunner):
             if not old_domain:
                 raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
             
-            # 获取实际的 Nginx document root
-            site_root = await self._exec(
-                lambda: site_manager.get_site_root(site.domain, onepanel_site_id),
+            # 获取 WordPress 根目录（优先使用 sitePath）
+            wp_root = await self._exec(
+                lambda: site_manager.get_wp_root(
+                    service_name=service_name,
+                    site_id=onepanel_site_id,
+                    domain=site.domain
+                ),
                 timeout=30,
             )
             
@@ -209,7 +266,7 @@ class ProvisionTaskRunner(TaskRunner):
                     lambda: wp_restorer.inject_domain_replace_script(
                         service_name=service_name, old_domain=old_domain,
                         new_domain=site.domain, target_protocol=protocol,
-                        target_dir=site_root or '',
+                        target_dir=wp_root or '',
                     ),
                     timeout=60,
                 )
@@ -241,59 +298,73 @@ class ProvisionTaskRunner(TaskRunner):
             finally:
                 if replace_token:
                     self._schedule_cleanup(lambda: wp_restorer.remove_domain_replace_script(service_name))
+            await self._end_step(job, "replace_domain", site)
 
-            # Step 7+8: patch_wp_config + inject_woo_ctx + inject_mu_plugins（无依赖，可并行）
-            await self._update_step(job, "patch_and_inject")
-            _, woo_token, ctx_refresh_url, _ = await asyncio.gather(
-                self._exec(
-                    lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol),
-                    timeout=120,
-                ),
-                self._exec(lambda: wp_restorer.inject_woo_script(service_name), timeout=120),
-                self._exec(
-                    lambda: wp_restorer.inject_ctx_script(service_name, site.domain, protocol),
-                    timeout=120,
-                ),
-                self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=120),
+            # Step 8: patch_wp_config（域名替换后更新配置）
+            await self._start_step(job, "patch_wp_config")
+            await self._exec(
+                lambda: wp_restorer.patch_wp_config(service_name, site.domain, protocol),
+                timeout=120,
             )
+            await self._end_step(job, "patch_wp_config", site)
 
-            # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）
-            await self._update_step(job, "rebuild_after_patch")
-            rebuild_result2 = await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+            # Step 9: verify_woo_files（验证 WooCommerce 插件文件完整性）
+            # 注意：mu-plugins 已在 rebuild 后注入，此处只验证 WooCommerce 核心文件
+            await self._start_step(job, "verify_woo_files")
+            needs_restore = await self._exec(
+                lambda: wp_restorer.verify_and_restore_files(
+                    service_name,
+                    required_files=['wp-content/plugins/woocommerce/woocommerce.php']
+                ),
+                timeout=330,  # 包含可能的文件恢复时间
+            )
+            if needs_restore:
+                _log.warning("rebuild 后 WooCommerce 文件丢失已自动恢复，需要再次 rebuild")
+                # 恢复后需要再次 rebuild
+                rebuild_result2 = await self._exec(
+                    lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain),
+                    timeout=180
+                )
+                # 更新 service_name（如果变更）
+                if rebuild_result2 and isinstance(rebuild_result2, dict):
+                    new_service_name = rebuild_result2.get('service_name', service_name)
+                    if new_service_name != service_name:
+                        _log.warning("第二次 rebuild 后 service_name 已变更: %s → %s", service_name, new_service_name)
+                        service_name = new_service_name
+                        site.onepanel_service_name = new_service_name
+                        await site.save()
+                # 第二次 rebuild 后，需要重新注入 mu-plugins
+                _log.info("第二次 rebuild 后，重新注入 mu-plugins")
+                await self._exec(lambda: wp_restorer.inject_mu_plugins(service_name), timeout=120)
+            await self._end_step(job, "verify_woo_files", site)
             
-            # ⚠️ 重要：第二次 rebuild 也可能改变 service_name
-            if rebuild_result2 and isinstance(rebuild_result2, dict):
-                new_service_name = rebuild_result2.get('service_name', service_name)
-                if new_service_name != service_name:
-                    _log.warning("第二次 rebuild 后 service_name 已变更: %s → %s", service_name, new_service_name)
-                    service_name = new_service_name
-                    site.onepanel_service_name = new_service_name
-                    await site.save()
-
-            # Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
-            await self._update_step(job, "fetch_woo_keys")
+            # Step 10: fetch_woo_keys
+            await self._start_step(job, "fetch_woo_keys")
             woo_ck, woo_cs = await self._exec(
                 lambda: wp_restorer.fetch_woo_keys(site.domain, woo_token, protocol),
                 timeout=45,
             )
             self._schedule_cleanup(lambda: wp_restorer.remove_woo_script(service_name))
+            await self._end_step(job, "fetch_woo_keys", site)
 
             # Step 11: health_check
-            await self._update_step(job, "health_check")
+            await self._start_step(job, "health_check")
             health_ok = await self._exec(
                 lambda: wp_restorer.health_check(site.domain, protocol),
                 timeout=60,
             )
             if not health_ok:
                 raise WordPressOperationError("health check", domain=site.domain, detail=f"协议={protocol}")
+            await self._end_step(job, "health_check", site)
 
             # Step 12: fetch_feed_link
-            await self._update_step(job, "fetch_feed_link")
+            await self._start_step(job, "fetch_feed_link")
             feed_link = await self._exec(
                 lambda: wp_restorer.fetch_last_feed_link(ctx_refresh_url),
                 timeout=30,
             ) or ''
             login_url = f'{protocol}://{site.domain}/wp-admin'
+            await self._end_step(job, "fetch_feed_link", site)
 
             site.status = '已创建'
             site.login_url = login_url

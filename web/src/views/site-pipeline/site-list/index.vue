@@ -784,7 +784,8 @@ function parseConfigSnippet() {
   for (const [key, regex] of Object.entries(patterns)) {
     const match = text.match(regex)
     if (match && match[1]) {
-      gatewayForm[key] = match[1]
+      // 清理提取的值：去除首尾空白、引号、反引号
+      gatewayForm[key] = match[1].trim().replace(/^[`"'\s]+|[`"'\s]+$/g, '')
       found++
     }
   }
