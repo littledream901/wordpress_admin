@@ -27,7 +27,7 @@ _TEMPLATE_HEADERS = {
     "outlook": ["Last name", "First name", "Full name", "Zip code",
                 "Shipping address 1", "Shipping address 2", "Country", "Province/State",
                 "City", "Phone", "Username", "Password", "2FA Key",
-                "Link To Generate Login Code from 2FA Key", "Recovery Email"],
+                "Link To Generate Login Code from 2FA Key", "Recovery Email", "API URL"],
     "shopify_sources": ["source_url", "source_type", "max_products", "remark"],
     "shopify_products": ["product_url", "handle", "title", "vendor", "product_type", "tags"],
 }
@@ -126,7 +126,7 @@ async def download_template(import_type: str):
                          "example@outlook.com", "password123",
                          "s6porf4qe2kmn7yl5izwp6lebkukij3d",
                          "https://2fa.dad/s6porf4qe2kmn7yl5izwp6lebkukij3d",
-                         "recovery@gmail.com"])
+                         "recovery@gmail.com", "https://api.example.com/sms"])
     elif import_type == "shopify_sources":
         writer.writerow(["https://example.myshopify.com/collections/all", "collection", "100", ""])
     elif import_type == "shopify_products":

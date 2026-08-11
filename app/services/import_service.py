@@ -46,10 +46,10 @@ FIELD_MAPS = {
     "outlook": {
         "username": "username", "Username": "username", "Email": "username",
         "password": "password", "Password": "password", "密码": "password",
-        "last_name": "last_name", "last name": "last_name",
-        "first_name": "first_name", "first name": "first_name",
-        "full_name": "full_name", "full name": "full_name",
-        "zip_code": "zip_code", "zip code": "zip_code", "zip": "zip_code",
+        "last_name": "last_name", "last name": "last_name", "Last name": "last_name",
+        "first_name": "first_name", "first name": "first_name", "First name": "first_name",
+        "full_name": "full_name", "full name": "full_name", "Full name": "full_name",
+        "zip_code": "zip_code", "zip code": "zip_code", "zip": "zip_code", "Zip code": "zip_code",
         "shipping_address_1": "shipping_address_1", "Shipping address 1": "shipping_address_1",
         "shipping_address_2": "shipping_address_2", "Shipping address 2": "shipping_address_2",
         "country": "country", "Country": "country", "国家": "country",
@@ -60,6 +60,7 @@ FIELD_MAPS = {
         "link_to_generate_login_code": "link_to_generate_login_code",
         "Link To Generate Login Code from 2FA Key": "link_to_generate_login_code",
         "recovery_email": "recovery_email", "Recovery Email": "recovery_email",
+        "api_url": "api_url", "API URL": "api_url", "api url": "api_url", "接码地址": "api_url",
     },
     "shopify_sources": {
         "source_url": "source_url", "url": "source_url", "shopify url": "source_url",
