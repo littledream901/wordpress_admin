@@ -83,6 +83,8 @@ class CloudflareService:
                     cf_errors = cf_body.get('errors', [])
                     if cf_errors:
                         err_detail = '; '.join(e.get('message', str(e)) for e in cf_errors)
+                    # 记录完整响应体用于调试
+                    logger.error("Cloudflare API 完整响应: %s", str(cf_body)[:500])
                 except Exception:
                     pass
             logger.error("Cloudflare API error: %s %s -> %s", method, path, err_detail)
@@ -190,7 +192,10 @@ class CloudflareService:
             return False
         # MX 记录不支持 proxied，TTL 最小值为 60 秒（Cloudflare 限制）
         mx_ttl = max(self.ttl, 60)
-        payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': mx_ttl}
+        # Cloudflare MX 记录：name 使用 @ 表示根域名，content 保持 FQDN 格式（带尾部点）
+        payload = {'type': 'MX', 'name': '@', 'content': mail_server, 'priority': priority, 'ttl': mx_ttl}
+        logger.info("创建 MX 记录: zone_id=%s, name=%s (原始: %s), content=%s, priority=%s, ttl=%s", 
+                   zone_id[:16], '@', record_name, mail_server, priority, mx_ttl)
         records = data.get('result') or []
         for record in records:
             if record.get('content') == mail_server:
@@ -214,7 +219,10 @@ class CloudflareService:
             return False
         # TXT 记录 TTL 最小值为 60 秒（Cloudflare 限制）
         txt_ttl = max(self.ttl, 60)
-        payload = {'type': 'TXT', 'name': record_name, 'content': content, 'ttl': txt_ttl}
+        # Cloudflare TXT 记录：name 使用 @ 表示根域名
+        payload = {'type': 'TXT', 'name': '@', 'content': content, 'ttl': txt_ttl}
+        logger.info("创建 TXT 记录: zone_id=%s, name=%s (原始: %s), content=%s, ttl=%s", 
+                   zone_id[:16], '@', record_name, content[:50], txt_ttl)
         records = data.get('result') or []
         if records:
             record = records[0]
