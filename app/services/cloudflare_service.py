@@ -186,6 +186,7 @@ class CloudflareService:
         """添加或更新 MX 记录"""
         data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='MX')
         if not data.get('success'):
+            logger.error("MX 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
             return False
         payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': self.ttl}
         records = data.get('result') or []
@@ -194,14 +195,20 @@ class CloudflareService:
                 if record.get('priority') == priority:
                     return True
                 data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
+                if not data.get('success'):
+                    logger.error("MX 记录更新失败: name=%s, content=%s, errors=%s", record_name, mail_server, data.get('errors', []))
                 return bool(data.get('success'))
         data = self._post(f'/zones/{zone_id}/dns_records', payload)
+        if not data.get('success'):
+            logger.error("MX 记录创建失败: name=%s, content=%s, priority=%s, payload=%s, errors=%s", 
+                        record_name, mail_server, priority, payload, data.get('errors', []))
         return bool(data.get('success'))
 
     def add_or_update_txt_record(self, zone_id: str, record_name: str, content: str) -> bool:
         """添加或更新 TXT 记录（用于 SPF、DKIM 等）"""
         data = self._get(f'/zones/{zone_id}/dns_records', name=record_name, type='TXT')
         if not data.get('success'):
+            logger.error("TXT 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
             return False
         payload = {'type': 'TXT', 'name': record_name, 'content': content, 'ttl': self.ttl}
         records = data.get('result') or []
@@ -210,8 +217,13 @@ class CloudflareService:
             if record.get('content') == content:
                 return True
             data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
+            if not data.get('success'):
+                logger.error("TXT 记录更新失败: name=%s, content=%s, errors=%s", record_name, content[:50], data.get('errors', []))
             return bool(data.get('success'))
         data = self._post(f'/zones/{zone_id}/dns_records', payload)
+        if not data.get('success'):
+            logger.error("TXT 记录创建失败: name=%s, content=%s, payload=%s, errors=%s", 
+                        record_name, content[:50], payload, data.get('errors', []))
         return bool(data.get('success'))
 
     def check_dns_ready_for_ssl(self, zone_id: str, domain: str, expected_ip: str) -> Dict[str, Any]:
