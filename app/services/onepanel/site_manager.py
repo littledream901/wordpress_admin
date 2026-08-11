@@ -220,21 +220,28 @@ class OnePanelSiteManager:
             time.sleep(8)
         raise TimeoutError(f'应用启动超时：{domain}')
 
-    def rebuild_app(self, app_id: int, wait: int = 60, service_name: str = '', domain: str = '') -> bool:
-        """重建应用容器（文件变更后需要重建才能生效），返回是否成功。
+    def rebuild_app(self, app_id: int, wait: int = 60, service_name: str = '', domain: str = '') -> dict[str, Any]:
+        """重建应用容器（文件变更后需要重建才能生效），返回应用信息（包含最新的 service_name）。
 
         若提供 service_name + domain，则通过 API 轮询容器状态直到 Running（最多 wait 秒）；
         否则仅触发重建后固定等待 wait 秒。
+        
+        返回：{'success': bool, 'service_name': str, 'app_info': dict | None}
         """
         ok, msg = self.api.post('/apps/installed/op', {'installId': app_id, 'operate': 'rebuild', 'taskID': str(uuid.uuid4())})
         if not ok:
             _log.warning("rebuild_app API 调用失败：%s", msg)
 
         if service_name and domain:
-            return self._wait_app_running(service_name, domain, timeout=wait) is not None
+            app_info = self._wait_app_running(service_name, domain, timeout=wait)
+            if app_info:
+                new_service_name = str(app_info.get('serviceName') or app_info.get('name') or service_name)
+                _log.info("rebuild 完成，service_name: %s → %s", service_name, new_service_name)
+                return {'success': True, 'service_name': new_service_name, 'app_info': app_info}
+            return {'success': False, 'service_name': service_name, 'app_info': None}
 
         time.sleep(wait)
-        return bool(ok)
+        return {'success': bool(ok), 'service_name': service_name, 'app_info': None}
 
     def _wait_app_running(self, service_name: str, domain: str, timeout: int = 120, interval: int = 5) -> Dict | None:
         """轮询 /apps/installed/search 等待应用状态变为 Running"""

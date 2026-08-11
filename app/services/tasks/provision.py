@@ -175,7 +175,16 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 5: rebuild_after_files
             await self._update_step(job, "rebuild_after_files")
-            await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+            rebuild_result = await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+            
+            # ⚠️ 重要：rebuild 可能会生成新的 service_name，必须更新
+            if rebuild_result and isinstance(rebuild_result, dict):
+                new_service_name = rebuild_result.get('service_name', service_name)
+                if new_service_name != service_name:
+                    _log.warning("rebuild 后 service_name 已变更: %s → %s", service_name, new_service_name)
+                    service_name = new_service_name
+                    site.onepanel_service_name = new_service_name
+                    await site.save()
 
             # Step 6: replace_domain
             await self._update_step(job, "replace_domain")
@@ -250,7 +259,16 @@ class ProvisionTaskRunner(TaskRunner):
 
             # Step 9: rebuild_after_patch（对齐单脚本：woo/ctx 注入后 rebuild，确保容器加载新脚本）
             await self._update_step(job, "rebuild_after_patch")
-            await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+            rebuild_result2 = await self._exec(lambda: site_manager.rebuild_app(app_id, service_name=service_name, domain=site.domain), timeout=180)
+            
+            # ⚠️ 重要：第二次 rebuild 也可能改变 service_name
+            if rebuild_result2 and isinstance(rebuild_result2, dict):
+                new_service_name = rebuild_result2.get('service_name', service_name)
+                if new_service_name != service_name:
+                    _log.warning("第二次 rebuild 后 service_name 已变更: %s → %s", service_name, new_service_name)
+                    service_name = new_service_name
+                    site.onepanel_service_name = new_service_name
+                    await site.save()
 
             # Step 10: fetch_woo_keys（对齐单脚本：rebuild 后获取 WooCommerce Key）
             await self._update_step(job, "fetch_woo_keys")
