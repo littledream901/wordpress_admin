@@ -82,8 +82,18 @@ def retry_request(
                     if attempt < max_retries:
                         time.sleep(delay)
                     continue
-                # 其他 4xx 不重试
-                raise RuntimeError(f"HTTP {status}")
+                # 其他 4xx 不重试，尝试提取详细错误信息
+                error_detail = f"HTTP {status}"
+                try:
+                    body = result.json()
+                    errors = body.get('errors', [])
+                    if errors:
+                        error_detail = f"HTTP {status}: " + '; '.join(
+                            f"{e.get('message', '')} (code: {e.get('code', '')})" for e in errors
+                        )
+                except Exception:
+                    pass
+                raise RuntimeError(error_detail)
             return result
         except RuntimeError:
             raise  # 不重试的错误直接抛
@@ -140,7 +150,18 @@ async def retry_request_async(
                     if attempt < max_retries:
                         await asyncio.sleep(delay)
                     continue
-                raise RuntimeError(f"HTTP {status}")
+                # 其他 4xx 不重试，尝试提取详细错误信息
+                error_detail = f"HTTP {status}"
+                try:
+                    body = result.json()
+                    errors = body.get('errors', [])
+                    if errors:
+                        error_detail = f"HTTP {status}: " + '; '.join(
+                            f"{e.get('message', '')} (code: {e.get('code', '')})" for e in errors
+                        )
+                except Exception:
+                    pass
+                raise RuntimeError(error_detail)
             return result
         except RuntimeError:
             raise
