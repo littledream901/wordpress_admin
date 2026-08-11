@@ -115,11 +115,17 @@ class CloudflareService:
             z = data['result']
             return z['id'], z.get('name_servers') or [], 'pending', ''
         # 记录 POST 失败详情并返回错误
-        err_msgs = [e.get('message', str(e)) for e in data.get('errors', [])]
+        errors = data.get('errors', [])
+        err_msgs = []
+        for e in errors:
+            msg = e.get('message', str(e))
+            code = e.get('code', '')
+            err_msgs.append(f"{msg} (code: {code})" if code else msg)
+        
         error_detail = '; '.join(err_msgs) if err_msgs else str(data)
-        logger.warning("Cloudflare POST zones 失败 (domain=%s, account_id=%s): %s",
+        logger.warning("Cloudflare POST zones 失败 (domain=%s, account_id=%s): %s | 完整响应: %s",
                        root_domain, self.account_id[:8] + '...' if self.account_id else '(empty)',
-                       error_detail)
+                       error_detail, str(data)[:500])
         return None, [], '', error_detail
 
     def delete_records_by_type(self, zone_id: str, record_type: str) -> int:
