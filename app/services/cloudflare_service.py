@@ -188,7 +188,9 @@ class CloudflareService:
         if not data.get('success'):
             logger.error("MX 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
             return False
-        payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': self.ttl}
+        # MX 记录 TTL 最小值为 60 秒（Cloudflare 限制），自动代理时使用 1 即可（表示 auto）
+        mx_ttl = 1 if self.proxied else max(self.ttl, 60)
+        payload = {'type': 'MX', 'name': record_name, 'content': mail_server, 'priority': priority, 'ttl': mx_ttl}
         records = data.get('result') or []
         for record in records:
             if record.get('content') == mail_server:
@@ -210,7 +212,9 @@ class CloudflareService:
         if not data.get('success'):
             logger.error("TXT 记录查询失败: name=%s, errors=%s", record_name, data.get('errors', []))
             return False
-        payload = {'type': 'TXT', 'name': record_name, 'content': content, 'ttl': self.ttl}
+        # TXT 记录 TTL 最小值为 60 秒（Cloudflare 限制）
+        txt_ttl = max(self.ttl, 60)
+        payload = {'type': 'TXT', 'name': record_name, 'content': content, 'ttl': txt_ttl}
         records = data.get('result') or []
         if records:
             record = records[0]
