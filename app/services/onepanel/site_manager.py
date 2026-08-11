@@ -93,6 +93,29 @@ class OnePanelSiteManager:
             raise OnePanelError("delete site", detail=str(msg), status_code=None)
         time.sleep(self.delete_sleep)
 
+    def _ensure_website_group(self) -> None:
+        """确保网站分组存在，如果不存在则创建"""
+        # 查询所有分组
+        ok, groups_data = self.api.post('/websites/group/search', {'page': 1, 'pageSize': 100})
+        if ok and isinstance(groups_data, dict):
+            items = groups_data.get('items') or []
+            for group in items:
+                if int(group.get('id', 0)) == self.website_group_id:
+                    _log.info("网站分组已存在: group_id=%s name=%s", self.website_group_id, group.get('name'))
+                    return
+        # 分组不存在，创建新分组
+        _log.warning("网站分组 %s 不存在，尝试创建", self.website_group_id)
+        ok, result = self.api.post('/websites/group', {'name': 'Auto Sites', 'default': False})
+        if ok and isinstance(result, dict):
+            new_group_id = int(result.get('id', 0))
+            if new_group_id > 0:
+                _log.info("网站分组创建成功: group_id=%s", new_group_id)
+                # 更新实例使用新的 group_id
+                self.website_group_id = new_group_id
+                return
+        _log.error("网站分组创建失败: %s", result)
+        raise OnePanelError("create website group", detail=str(result))
+
     def resolve_wp_app(self) -> Dict[str, Any]:
         if self._wp_app_detail_cache:
             return self._wp_app_detail_cache
@@ -271,6 +294,8 @@ class OnePanelSiteManager:
             domain, self.website_group_id, wp_app['app_id'], wp_app['app_detail_id'],
             wp_app['app_type'], wp_app['app_key'], wp_app['version'],
         )
+        # 验证并确保网站分组存在
+        self._ensure_website_group()
         alias = safe_alias(domain)
         app_port = random.randint(10000, 60000)
         db_suffix = hashlib.md5(f'{domain}-{time.time()}'.encode('utf-8')).hexdigest()[:8]
