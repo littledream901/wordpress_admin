@@ -187,12 +187,20 @@ class ProvisionTaskRunner(TaskRunner):
             )
             if not old_domain:
                 raise ProviderConfigError("onepanel", "old_source_domain", "建站缺少旧域名配置")
+            
+            # 获取实际的 Nginx document root
+            site_root = await self._exec(
+                lambda: site_manager.get_site_root(site.domain, onepanel_site_id),
+                timeout=30,
+            )
+            
             replace_token = ''
             try:
                 replace_token = await self._exec(
                     lambda: wp_restorer.inject_domain_replace_script(
                         service_name=service_name, old_domain=old_domain,
                         new_domain=site.domain, target_protocol=protocol,
+                        target_dir=site_root or '',
                     ),
                     timeout=60,
                 )

@@ -86,6 +86,45 @@ class OnePanelWordPressRestorer:
     def _data_root(self, service_name: str) -> str:
         """WordPress data 根目录（wp-config.php 和 PHP 脚本都在这里）"""
         return f'{self.wp_app_root}/{service_name}/data'
+    
+    def _get_candidate_roots(self, service_name: str) -> list[str]:
+        """获取可能的 WordPress 根目录候选路径（用于降级查找）"""
+        base = f'{self.wp_app_root}/{service_name}/data'
+        return [
+            base,
+            f'{base}/wordpress',
+            f'{base}/public',
+            f'{base}/public_html',
+            f'{base}/htdocs',
+        ]
+    
+    def _resolve_target_dir(self, service_name: str, target_dir: str = "") -> str:
+        """解析目标目录：优先使用指定目录，否则智能查找 wp-config.php 所在目录
+        
+        Args:
+            service_name: 1Panel 服务名
+            target_dir: 可选的目标目录（通常是从 1Panel API 获取的 Nginx document root）
+            
+        Returns:
+            解析后的目标目录路径
+        """
+        if target_dir:
+            resolved = target_dir.rstrip('/')
+            _log.info("使用指定的目标目录: %s", resolved)
+            return resolved
+        
+        # 智能查找：在候选路径中找到 wp-config.php 所在目录
+        candidates = self._get_candidate_roots(service_name)
+        for candidate in candidates:
+            wp_config_path = f'{candidate}/wp-config.php'
+            if self.file_manager and self.file_manager.exists(wp_config_path):
+                _log.info("找到 wp-config.php，使用目录: %s", candidate)
+                return candidate
+        
+        # 降级方案：使用默认 data 目录
+        fallback = self._data_root(service_name)
+        _log.warning("未找到 wp-config.php，降级使用默认 data 目录: %s", fallback)
+        return fallback
 
     def _find_child_path(self, roots: List[str], target_name: str, max_depth: int = 8,
                          exclude_prefixes: Optional[List[str]] = None) -> Optional[str]:
@@ -240,12 +279,14 @@ class OnePanelWordPressRestorer:
     ) -> str:
         """注入域名替换 PHP 脚本（处理 PHP serialize），返回 security token
 
-        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则智能查找 wp-config.php 所在目录
         """
         if not old_domain:
             old_domain = self.old_source_domain
         token = secrets.token_urlsafe(32)
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        
+        # 解析目标目录
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         path = f'{dir_path}/domain-replace.php'
         try:
             old_domain = normalize_domain(old_domain)
@@ -426,7 +467,7 @@ echo json_encode([
         return token
 
     def remove_domain_replace_script(self, service_name: str, target_dir: str = "") -> None:
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         self.file_manager.delete(f'{dir_path}/domain-replace.php', is_dir=False)
 
     def fetch_domain_replace(self, domain: str, token: str) -> dict:
@@ -462,9 +503,11 @@ echo json_encode([
                 raise WordPressOperationError(
                     "domain replace", detail=(
                         f"HTTP 404：domain-replace.php 不可访问 ({domain})。"
-                        "排查步骤：1) 文件是否写入到当前站点的 Nginx root 目录下？ "
-                        "2) 当前域名是否指向正确站点？ "
-                        "3) Nginx 是否已 reload？"
+                        "可能原因：脚本写入目录与 Nginx document root 不一致。"
+                        "排查步骤：1) 检查 1Panel 网站配置中的实际 siteDir/document root；"
+                        "2) 确认域名 DNS 已正确指向该站点；"
+                        "3) 检查 Nginx 配置是否已 reload；"
+                        "4) 尝试手动访问 http(s)://{domain}/domain-replace.php?token={token} 查看响应。"
                     )
                 )
             raise WordPressOperationError("domain replace", detail=msg)
@@ -511,10 +554,10 @@ echo json_encode([
     def inject_woo_script(self, service_name: str, target_dir: str = "") -> str:
         """注入 WooCommerce API Key 生成 PHP 脚本，返回 security token
 
-        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则智能查找 wp-config.php 所在目录
         """
         token = secrets.token_urlsafe(32)
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         path = f'{dir_path}/{self.woo_script}'
         php = rf'''<?php
 header('Content-Type: application/json; charset=utf-8');
@@ -624,7 +667,7 @@ echo json_encode([
         return token
 
     def remove_woo_script(self, service_name: str, target_dir: str = "") -> None:
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         self.file_manager.delete(f'{dir_path}/{self.woo_script}', is_dir=False)
 
     def fetch_woo_keys(self, domain: str, token: str, protocol: str) -> tuple:
@@ -653,10 +696,10 @@ echo json_encode([
     def inject_ctx_script(self, service_name: str, domain: str, protocol: str, target_dir: str = "") -> str:
         """注入 CTX 刷新 PHP 脚本，返回 CTX Refresh URL
 
-        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则使用 _data_root
+        target_dir: 可选，指定写入目录（Nginx 实际 document root）；为空则智能查找 wp-config.php 所在目录
         """
         token = secrets.token_urlsafe(32)
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         path = f'{dir_path}/{self.ctx_script}'
         php = rf'''<?php
 /**
@@ -779,7 +822,7 @@ echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
         return f'{protocol}://{domain}/{self.ctx_script}?token={token}'
 
     def remove_ctx_script(self, service_name: str, target_dir: str = "") -> None:
-        dir_path = target_dir.rstrip('/') if target_dir else self._data_root(service_name)
+        dir_path = self._resolve_target_dir(service_name, target_dir)
         self.file_manager.delete(f'{dir_path}/{self.ctx_script}', is_dir=False)
 
     def inject_mu_plugins(self, service_name: str) -> None:
