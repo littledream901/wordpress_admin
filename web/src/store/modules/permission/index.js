@@ -15,8 +15,19 @@ function getComponent(componentPath) {
   const flatKey = `/src/views${componentPath}.vue`
   const flatMod = vueModules[flatKey]
   if (flatMod) return flatMod
-  console.warn(`[Permission] Component not found in vueModules: ${key}`)
-  return { render: () => h('div', { style: 'padding:40px;text-align:center;color:#999' }, `组件 ${componentPath} 未加载`) }
+  console.error(`[Permission] 组件未找到: ${componentPath}`, { 
+    tried: [key, flatKey],
+    available: Object.keys(vueModules).filter(k => k.includes(componentPath.split('/').pop()))
+  })
+  return { 
+    render: () => h('div', { 
+      style: 'padding:40px;text-align:center;' 
+    }, [
+      h('div', { style: 'color:#f56c6c;font-size:16px;margin-bottom:12px' }, `⚠️ 组件加载失败`),
+      h('div', { style: 'color:#909399;font-size:14px' }, `路径: ${componentPath}`),
+      h('div', { style: 'color:#909399;font-size:12px;margin-top:8px' }, '请检查菜单配置或联系管理员')
+    ]) 
+  }
 }
 
 function buildRoutes(routes = []) {
