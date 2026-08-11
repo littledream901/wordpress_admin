@@ -200,9 +200,14 @@ class CloudflareService:
         logger.info("准备创建/更新 MX 记录: zone_id=%s, name=%s (原始: %s), content=%s, priority=%s, ttl=%s", 
                    zone_id[:16], '@', record_name, mail_server, priority, mx_ttl)
         for record in records:
-            if record.get('content') == mail_server:
+            # 归一化比较：去除尾部点后比较
+            existing_content = record.get('content', '').rstrip('.')
+            new_content = mail_server.rstrip('.')
+            if existing_content == new_content:
                 if record.get('priority') == priority:
+                    logger.info("MX 记录已存在且参数相同，跳过创建: content=%s, priority=%s", mail_server, priority)
                     return True
+                logger.info("MX 记录已存在但 priority 不同，执行更新: %s -> %s", record.get('priority'), priority)
                 data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
                 if not data.get('success'):
                     logger.error("MX 记录更新失败: name=%s, content=%s, errors=%s", record_name, mail_server, data.get('errors', []))
@@ -228,10 +233,15 @@ class CloudflareService:
         logger.info("查询到 %s 条 TXT 记录: %s", len(records), [{'name': r.get('name'), 'content': r.get('content')[:50]} for r in records])
         logger.info("准备创建/更新 TXT 记录: zone_id=%s, name=%s (原始: %s), content=%s, ttl=%s", 
                    zone_id[:16], '@', record_name, content[:50], txt_ttl)
+        # 查找匹配的 TXT 记录（SPF 记录）
+        for record in records:
+            if record.get('content') == content:
+                logger.info("TXT 记录已存在且内容相同，跳过创建: content=%s", content[:50])
+                return True
+        # 如果有记录但内容不同，更新第一条（通常是 SPF 记录）
         if records:
             record = records[0]
-            if record.get('content') == content:
-                return True
+            logger.info("TXT 记录已存在但内容不同，执行更新: %s -> %s", record.get('content')[:30], content[:30])
             data = self._put(f'/zones/{zone_id}/dns_records/{record["id"]}', payload)
             if not data.get('success'):
                 logger.error("TXT 记录更新失败: name=%s, content=%s, errors=%s", record_name, content[:50], data.get('errors', []))
