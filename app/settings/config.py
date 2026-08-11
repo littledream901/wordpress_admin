@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     """调试模式：True 时开启 /docs /redoc /openapi.json 文档和热重载；开发时请在 .env 中显式设置 DEBUG=true"""
 
     VERSION: str = "0.1.1"
+    """应用版本号，修改后重启会触发菜单/API/角色同步，建议在 .env 中配置"""
+    
     APP_TITLE: str = "Wordpress 管理"
     PROJECT_NAME: str = "Wordpress 管理"
     APP_DESCRIPTION: str = "Wordpress 站点管理平台"
