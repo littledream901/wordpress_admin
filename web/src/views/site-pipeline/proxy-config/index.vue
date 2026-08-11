@@ -26,6 +26,14 @@
           <TheIcon icon="material-symbols:network-check" :size="18" class="mr-5" />
           批量检测
         </n-button>
+        <n-button
+          type="default"
+          :disabled="!checkedRowKeys.length"
+          @click="handleBatchUnassign"
+        >
+          <TheIcon icon="material-symbols:link-off" :size="18" class="mr-5" />
+          批量取消代理
+        </n-button>
       </n-space>
     </template>
 
@@ -35,6 +43,7 @@
       :columns="columns"
       :get-data="api.getList"
       :scroll-x="1600"
+      :page-size="50"
     >
       <template #queryBar>
         <QueryBarItem label="状态" :label-width="50">
@@ -143,7 +152,7 @@
           <n-input v-model:value="editForm.proxy_account" placeholder="代理账号" />
         </n-form-item>
         <n-form-item label="密码">
-          <n-input v-model:value="editForm.proxy_password" type="password" placeholder="代理密码" />
+          <n-input v-model:value="editForm.proxy_password" type="password" show-password-on="click" placeholder="代理密码" />
         </n-form-item>
         <n-form-item label="代理类型">
           <n-select
@@ -183,37 +192,11 @@
       </template>
     </n-modal>
 
-    <!-- 分配站点详情弹窗 -->
-    <n-modal
-      v-model:show="showAssignedSites"
-      preset="card"
-      title="分配的站点列表"
-      class="w-700"
-      :segmented="{ content: 'soft', footer: 'soft' }"
-    >
-      <n-spin :show="loadingSites">
-        <n-empty v-if="!assignedSites.length" description="暂无分配站点" />
-        <n-list v-else bordered>
-          <n-list-item v-for="site in assignedSites" :key="site.id">
-            <n-thing :title="`[${site.id}] ${site.domain}`">
-              <template #description>
-                {{ site.shop_name || '无店铺名称' }}
-              </template>
-            </n-thing>
-          </n-list-item>
-        </n-list>
-      </n-spin>
-      <template #footer>
-        <n-space justify="end">
-          <n-button @click="showAssignedSites = false">关闭</n-button>
-        </n-space>
-      </template>
-    </n-modal>
   </CommonPage>
 </template>
 
 <script setup>
-import { h, onMounted, ref, computed } from 'vue'
+import { h, onMounted, onActivated, ref, computed } from 'vue'
 import { NButton, NSpace, NTag, NCheckbox, useMessage } from 'naive-ui'
 import api from '@/api/hubstudio-proxy'
 import { formatDateTime } from '@/utils'
@@ -277,32 +260,30 @@ const columns = [
     },
   },
   {
-    key: 'assigned_sites_count',
+    key: 'assigned_site',
     title: '分配站点',
-    width: 120,
+    width: 200,
     render: (row) => {
-      const count = row.assigned_sites_count || 0
-      if (count === 0) {
+      if (!row.assigned_site) {
         return h('span', { style: { color: '#999' } }, '未分配')
       }
-      return h(
-        NButton,
-        {
-          text: true,
-          type: 'primary',
-          size: 'small',
-          onClick: () => handleViewAssignedSites(row),
-        },
-        { default: () => `${count} 个站点` }
-      )
+      return h('div', [
+        h('div', { style: { fontWeight: 'bold' } }, row.assigned_site.domain),
+        h('div', { style: { fontSize: '12px', color: '#999' } }, `ID: ${row.assigned_site.id}`)
+      ])
     },
   },
-  { key: 'usage_count', title: '使用次数', width: 100 },
   {
-    key: 'last_used_at',
-    title: '最后使用',
-    width: 160,
-    render: (row) => (row.last_used_at ? formatDateTime(row.last_used_at) : '-'),
+    key: 'location',
+    title: '地理位置',
+    width: 180,
+    render: (row) => {
+      const parts = []
+      if (row.reference_country_code) parts.push(row.reference_country_code)
+      if (row.reference_region_code) parts.push(row.reference_region_code)
+      if (row.reference_city) parts.push(row.reference_city)
+      return parts.length > 0 ? parts.join(' / ') : '-'
+    },
   },
   {
     key: 'actions',
@@ -428,6 +409,38 @@ async function handleBatchCheck() {
   }
 }
 
+// 批量取消代理
+async function handleBatchUnassign() {
+  if (!checkedRowKeys.value.length) {
+    message.warning('请选择要取消分配的代理')
+    return
+  }
+  
+  window.$dialog.warning({
+    title: '批量取消代理确认',
+    content: `确定要取消选中的 ${checkedRowKeys.value.length} 条代理的站点分配吗？`,
+    positiveText: '确定',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      const loading = message.loading('正在取消分配，请稍候...', { duration: 0 })
+      try {
+        const res = await api.batchUnassign(checkedRowKeys.value)
+        const d = res.data
+        loading.destroy()
+        message.success(
+          `取消完成：成功 ${d.success_count} 条，失败 ${d.failed_count} 条`
+        )
+        checkedRowKeys.value = []
+        $table.value?.handleSearch()
+      }
+      catch (error) {
+        loading.destroy()
+        console.error('批量取消分配失败：', error)
+      }
+    },
+  })
+}
+
 // 单条检测
 async function handleCheckSingle(row) {
   const loading = message.loading(`正在检测代理 ${row.proxy_host}:${row.proxy_port}...`, { duration: 0 })
@@ -464,26 +477,6 @@ async function handleCheckSingle(row) {
 }
 
 // 查看分配的站点
-const showAssignedSites = ref(false)
-const loadingSites = ref(false)
-const assignedSites = ref([])
-
-async function handleViewAssignedSites(row) {
-  showAssignedSites.value = true
-  loadingSites.value = true
-  try {
-    const res = await api.getAssignedSites(row.id)
-    assignedSites.value = res.data.sites || []
-  }
-  catch (error) {
-    console.error('获取分配站点失败：', error)
-    assignedSites.value = []
-  }
-  finally {
-    loadingSites.value = false
-  }
-}
-
 // 新增/编辑
 const showEditModal = ref(false)
 const editId = ref(null)
@@ -584,6 +577,10 @@ async function handleDelete(row) {
 }
 
 onMounted(() => {
+  $table.value?.handleSearch()
+})
+
+onActivated(() => {
   $table.value?.handleSearch()
 })
 </script>

@@ -1,57 +1,31 @@
-"""更新环境：备注 + 代理 (update_env)"""
+"""更新环境：代理配置（已移除备注更新功能）
 
-from ._common import build_container_name, build_remark
+代理配置两级优先级：
+1. 任务级代理（payload.proxy_config）
+   - 来源：站点已分配的 HubStudioProxyConfig 记录
+   - 完整代理对象，包含所有必要字段
+   - 当站点有绑定代理时，通过 payload.proxy_config 传入
 
-# ── 默认固定代理配置（兜底，正常应从 HubStudioProxyConfig 表读取）──
-# 字段含义参考 HubStudio /api/v1/env/proxy/update：
-#   asDynamicType     0=关闭IP变更提醒 1=开启
-#   ipGetRuleType     1=IP失效时提取新IP 2=每次打开环境时提取（API提取代理时必填）
-#   ipDatabaseChannel 1=IP2Location 2=DB-IP 3=MaxMind
-#   ipProtocolType    1=速度优先 2=IPv4 3=IPv6
-# containerCode 为环境ID，由调用方单独传入，不属于代理配置
-DEFAULT_FIXED_PROXY_CONFIG = {
-    "proxyTypeName": "HTTP",
-    "asDynamicType": 0,
-    "ipGetRuleType": 1,
-    "proxyHost": "server.iphtml.biz",
-    "proxyPort": 15000,
-    "proxyAccount": "uid-27498-zone-hubstudio",
-    "proxyPassword": "",
-    "referenceCountryCode": "US",
-    "referenceCity": "New York",
-    "referenceRegionCode": "CA",
-    "ipDatabaseChannel": 1,
-    "ipProtocolType": 1,
-}
+2. 无代理配置
+   - 来源：未分配任何代理
+   - 不下发代理配置到 HubStudio API
+   - 环境使用 Provider 默认代理（需前端确认）
 
-# ── 代理字段映射：HubStudio API 字段 → payload 字段 ──
-PROXY_FIELD_MAP = {
-    "proxyTypeName": "proxy_type_name",
-    "asDynamicType": "as_dynamic_type",
-    "ipGetRuleType": "ip_get_rule_type",
-    "linkCode": "link_code",
-    "proxyHost": "proxy_host",
-    "proxyPort": "proxy_port",
-    "proxyAccount": "proxy_account",
-    "proxyPassword": "proxy_password",
-    "referenceCountryCode": "reference_country_code",
-    "referenceCity": "reference_city",
-    "referenceRegionCode": "reference_region_code",
-    "ipDatabaseChannel": "ip_database_channel",
-    "ipProtocolType": "ip_protocol_type",
-}
+注意：
+- 已移除 executor.fixed_proxy_config 兜底逻辑
+- 已移除散落字段代理（payload.proxy_type_name 等）构建逻辑
+"""
+
+from ._common import build_container_name
 
 
 def build_proxy_config(executor, payload: dict) -> dict:
     """从 payload 构建代理配置
 
     优先级：
-    1. payload.proxy_config — 任务级完整代理对象（最高）
-    2. payload.proxy_type_name 等散落字段 — 任务级逐字段
-    3. executor.fixed_proxy_config — 执行器级固定代理
-    4. 空 — 不更新代理
+    1. payload.proxy_config — 完整代理对象（从站点绑定的代理配置）
+    2. 空 — 不更新代理，使用 HubStudio Provider 默认代理
     """
-    # 方式 1: 完整 proxy_config 对象优先
     proxy_config = payload.get("proxy_config")
     if proxy_config and isinstance(proxy_config, dict) and proxy_config.get("proxyTypeName"):
         return {
@@ -59,32 +33,11 @@ def build_proxy_config(executor, payload: dict) -> dict:
             if v is not None and str(v).strip() != ""
         }
 
-    # 方式 2: 从散落字段构建
-    config = {}
-    for api_key, payload_key in PROXY_FIELD_MAP.items():
-        val = payload.get(payload_key)
-        if val is not None and str(val).strip() != "":
-            config[api_key] = str(val).strip()
-
-    if config.get("proxyTypeName") and config["proxyTypeName"] != "不使用代理":
-        return config
-
-    # 方式 3: 使用执行器级固定代理
-    if executor.use_fixed_proxy and executor.fixed_proxy_config:
-        config = {
-            k: v for k, v in executor.fixed_proxy_config.items()
-            if v is not None and str(v).strip() != ""
-        }
-        if config.get("proxyTypeName") and config["proxyTypeName"] != "不使用代理":
-            executor.logger.info(f"[update_env] 使用固定代理: type={config.get('proxyTypeName')}, "
-                               f"host={config.get('proxyHost')}")
-            return config
-
     return {}
 
 
 def execute_update_env(executor, job: dict, payload: dict) -> dict:
-    """更新环境：备注信息 + 代理配置"""
+    """更新环境：代理配置（已移除备注更新功能）"""
     domain = payload.get("domain", job.get("domain", ""))
     hub_env_id = payload.get("hub_env_id", "")
     server_ip = payload.get("server_ip", "")
@@ -99,36 +52,7 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
 
     result = {"status": "success", "env_id": hub_env_id, "domain": domain, "actions": {}}
 
-    # ── 步骤 1：获取当前容器名称 + 更新备注 ──
-    remark = build_remark(payload)
-
-    # 查询当前环境，获取 containerName（API 必填参数，原样传回不修改）
-    container_name = ""
-    try:
-        env_resp = client.get_env_list(current=1, size=1, containerCode=str(hub_env_id))
-        env_list = (env_resp.get("data", {}) or {}).get("list", []) or []
-        if env_list:
-            container_name = env_list[0].get("containerName", "")
-        executor.logger.info(f"[update_env] 当前容器名称: {container_name}")
-    except Exception as e:
-        executor.logger.warning(f"[update_env] 获取容器名称失败，将使用域名构造: {e}")
-        container_name = build_container_name(domain)
-
-    try:
-        update_params = {
-            "containerCode": int(hub_env_id),
-            "containerName": container_name,
-            "remark": remark,
-        }
-
-        resp = client.update_env(**update_params)
-        result["actions"]["remark"] = "ok"
-        executor.logger.info(f"[update_env] 备注更新成功: remark={remark}")
-    except Exception as e:
-        result["actions"]["remark"] = f"failed: {str(e)[:100]}"
-        executor.logger.warning(f"[update_env] 备注更新失败: {e}")
-
-    # ── 步骤 2：更新代理 ──
+    # ── 更新代理（优先使用已分配代理，未分配时使用 HubStudio Provider 默认代理）──
     proxy_config = build_proxy_config(executor, payload)
     if proxy_config and proxy_config.get("proxyTypeName", "不使用代理") != "不使用代理":
         try:
@@ -140,8 +64,8 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
             result["actions"]["proxy"] = f"failed: {str(e)[:100]}"
             executor.logger.warning(f"[update_env] 代理更新失败: {e}")
     else:
-        result["actions"]["proxy"] = "skipped (no proxy config)"
-        executor.logger.info(f"[update_env] 无代理配置，跳过")
+        result["actions"]["proxy"] = "skipped (no assigned proxy, using HubStudio default)"
+        executor.logger.info(f"[update_env] 未分配代理，使用 HubStudio 环境默认代理")
 
     # 判断整体结果
     actions_ok = sum(1 for v in result["actions"].values() if v == "ok")

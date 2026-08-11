@@ -30,6 +30,7 @@
           <n-gi><n-form-item label="2FA Key"><n-input v-model:value="modalForm.two_fa_key" /></n-form-item></n-gi>
           <n-gi><n-form-item label="2FA Link"><n-input v-model:value="modalForm.link_to_generate_login_code" /></n-form-item></n-gi>
           <n-gi><n-form-item label="Recovery Email"><n-input v-model:value="modalForm.recovery_email" /></n-form-item></n-gi>
+          <n-gi><n-form-item label="接码地址"><n-input v-model:value="modalForm.api_url" placeholder="接码链接" /></n-form-item></n-gi>
           <n-gi><n-form-item label="健康状态">
             <n-select v-model:value="modalForm.status" :options="[{ label: '正常', value: '正常' }, { label: '不正常', value: '不正常' }]" />
           </n-form-item></n-gi>
@@ -82,7 +83,7 @@ const batchDeleteLoading = ref(false)
 
 const { modalVisible, modalTitle, modalLoading, handleAdd, handleEdit, handleSave, modalForm, modalFormRef } = useCRUD({
   name: 'Outlook账号',
-  initForm: { last_name:'', first_name:'', full_name:'', zip_code:'', shipping_address_1:'', shipping_address_2:'', country:'', province_state:'', city:'', phone:'', username:'', password:'', two_fa_key:'', link_to_generate_login_code:'', recovery_email:'', status:'正常' },
+  initForm: { last_name:'', first_name:'', full_name:'', zip_code:'', shipping_address_1:'', shipping_address_2:'', country:'', province_state:'', city:'', phone:'', username:'', password:'', two_fa_key:'', link_to_generate_login_code:'', recovery_email:'', api_url:'', status:'正常' },
   doCreate: api.create,
   doUpdate: api.update,
   doDelete: async () => {},
@@ -108,7 +109,7 @@ async function copyText(row, field, label) {
 
 const columns = [
   { type: 'selection', width: 40 },
-  { title: '序号', key: 'index', width: 50, align: 'center', render: (_, index) => index + 1 },
+  { title: '序号', key: 'index', width: 60, align: 'center', render: (_, index) => index + 1 },
   {
     title: 'Username', key: 'username', width: 280,
     render: (row) => h(NSpace, { size: 'small' }, {
@@ -129,16 +130,20 @@ const columns = [
     }),
   },
   {
-    title: 'Address', key: 'address', width: 280, ellipsis: { tooltip: true },
+    title: 'Address', key: 'address', width: 220, ellipsis: { tooltip: true },
     render: (row) => formatAddress(row),
   },
-  { title: '2FA Link', key: 'link_to_generate_login_code', width: 140, ellipsis: { tooltip: true } },
-  { title: 'Recovery Email', key: 'recovery_email', width: 160, ellipsis: { tooltip: true } },
+  { title: '接码地址', key: 'api_url', width: 200, ellipsis: { tooltip: true } },
+  { title: '2FA Link', key: 'link_to_generate_login_code', width: 120, ellipsis: { tooltip: true } },
+  { title: 'Recovery Email', key: 'recovery_email', width: 140, ellipsis: { tooltip: true } },
   {
     title: '健康状态', key: 'status', width: 85,
     render: row => h(NTag, { type: row.status === '正常' ? 'success' : row.status === '不正常' ? 'error' : 'default', size: 'small' }, { default: () => row.status || '-' }),
   },
-  { title: '分配站点', key: 'assigned_site_domain', width: 140, ellipsis: { tooltip: true } },
+  {
+    title: '分配站点', key: 'assigned_site_domain', width: 140, ellipsis: { tooltip: true },
+    render: (row) => row.assigned_site_domain || h('span', { style: { color: '#999' } }, '未分配'),
+  },
   {
     title: '操作', key: 'actions', width: 210,
     render: (row) => h(NSpace, { size: 'small' }, {

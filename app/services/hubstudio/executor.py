@@ -10,7 +10,6 @@ from .runtime import HubStudioRuntime
 from .tasks import (
     create_account,
     create_env,
-    create_gmail_env,
     gmc_check,
     open_env,
     update_env,
@@ -22,8 +21,6 @@ from .tasks import (
 # 这些常量/函数同样在 __init__.py 中 re-export
 # ══════════════════════════════════════════════════════════════════════════
 
-# 从 update_env 导出的常量，供外部 create_executor_from_config 使用
-from .tasks.update_env import DEFAULT_FIXED_PROXY_CONFIG
 from .tasks._common import REMARK_FIELD_MAP
 # 从 create_env 导出的工具函数
 from .tasks.create_env import (
@@ -46,10 +43,9 @@ class HubStudioLocalExecutor:
     """本地执行器：按 job_type 分发到任务模块
 
     代理配置优先级（从高到低）：
-    1. payload.proxy_config — 任务级完整代理配置
-    2. payload.proxy_type_name 等散落字段 — 任务级逐字段配置
-    3. self.fixed_proxy_config — 执行器级固定代理
-    4. 空 — 不更新代理
+    1. payload.proxy_config — 站点绑定的代理配置
+    2. payload.proxy_type_name 等散落字段 — 逐字段传入
+    3. 空 — 使用 HubStudio Provider 默认代理
     """
 
     def __init__(self, runtime: HubStudioRuntime):
@@ -61,9 +57,6 @@ class HubStudioLocalExecutor:
         self.admin_site_alias = "WordPress后台"
         self.admin_account_name = "admin"
         self.admin_account_password = ""
-
-        self.use_fixed_proxy = True
-        self.fixed_proxy_config = dict(DEFAULT_FIXED_PROXY_CONFIG)
 
     # ── 执行入口 ──
 
@@ -79,7 +72,7 @@ class HubStudioLocalExecutor:
 
         _map = {
             "create_env": create_env.execute_create_env,
-            "create_gmail_env": create_gmail_env.execute_create_gmail_env,
+            "create_gmail_env": create_env.execute_create_env,  # 复用统一逻辑
             "create_account": create_account.execute_create_account,
             "update_env": update_env.execute_update_env,
             "wp_login": wp_login.execute_wp_login,
@@ -125,10 +118,6 @@ class HubStudioLocalExecutor:
     def _call_add_account_direct(self, create_data: dict, max_retries: int = 5) -> dict:
         return create_account.call_add_account_direct(self, create_data, max_retries)
 
-    @staticmethod
-    def _build_remark(payload, domain="", login_url="", server_ip=""):
-        return update_env.build_remark(payload)
-
     def _build_proxy_config(self, payload: dict) -> dict:
         return update_env.build_proxy_config(self, payload)
 
@@ -141,7 +130,6 @@ class HubStudioLocalExecutor:
     ADD_ACCOUNT_PATH = ADD_ACCOUNT_PATH
     ADD_ACCOUNT_TIMEOUT = ADD_ACCOUNT_TIMEOUT
     REMARK_FIELD_MAP = REMARK_FIELD_MAP
-    DEFAULT_FIXED_PROXY_CONFIG = DEFAULT_FIXED_PROXY_CONFIG
 
 
 def create_executor_from_config(config: dict) -> Tuple[HubStudioRuntime, HubStudioLocalExecutor]:
@@ -159,31 +147,5 @@ def create_executor_from_config(config: dict) -> Tuple[HubStudioRuntime, HubStud
     executor.admin_account_name = config.get("admin_account_name", "admin")
     executor.admin_account_password = config.get("admin_account_password", "")
 
-    proxy_field_map = {
-        "proxyTypeName": "proxy_type_name",
-        "asDynamicType": "as_dynamic_type",
-        "ipGetRuleType": "ip_get_rule_type",
-        "linkCode": "link_code",
-        "proxyHost": "proxy_host",
-        "proxyPort": "proxy_port",
-        "proxyAccount": "proxy_account",
-        "proxyPassword": "proxy_password",
-        "referenceCountryCode": "reference_country_code",
-        "referenceCity": "reference_city",
-        "referenceRegionCode": "reference_region_code",
-        "ipDatabaseChannel": "ip_database_channel",
-        "ipProtocolType": "ip_protocol_type",
-    }
-    for api_key, config_key in proxy_field_map.items():
-        val = config.get(config_key)
-        if val is not None and str(val).strip() != "":
-            executor.fixed_proxy_config[api_key] = str(val).strip() if not isinstance(val, int) else val
-
-    if "use_fixed_proxy" in config:
-        executor.use_fixed_proxy = str(config["use_fixed_proxy"]).lower() in ("true", "1", "yes")
-
-    logger.info(
-        f"执行器初始化: use_fixed_proxy={executor.use_fixed_proxy}, "
-        f"proxy_type={executor.fixed_proxy_config.get('proxyTypeName', 'N/A')}"
-    )
+    logger.info("执行器初始化完成: 代理配置将优先使用站点绑定的代理，未绑定时使用 Provider 默认代理")
     return runtime, executor

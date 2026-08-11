@@ -92,15 +92,21 @@ class HubStudioProxyController(CRUDBase[HubStudioProxyConfig, HubStudioProxyConf
         total = await query.count()
         items = await query.offset((page - 1) * page_size).limit(page_size)
         
-        # 附加分配的站点信息
+        # 附加分配的站点信息（每条代理只能分配一个站点）
         from app.models.site_pipeline import Site
         data = []
         for item in items:
             item_dict = await item.to_dict()
-            # 获取分配的站点
-            assigned_sites = await Site.filter(proxy_config_id=item.id).values('id', 'domain', 'platform')
-            item_dict['assigned_sites'] = assigned_sites
-            item_dict['assigned_sites_count'] = len(assigned_sites)
+            # 获取分配的站点（理论上只会有一个）
+            assigned_site = await Site.filter(proxy_config_id=item.id).first()
+            if assigned_site:
+                item_dict['assigned_site'] = {
+                    'id': assigned_site.id,
+                    'domain': assigned_site.domain,
+                    'platform': assigned_site.platform
+                }
+            else:
+                item_dict['assigned_site'] = None
             data.append(item_dict)
         
         return total, data
@@ -181,23 +187,14 @@ class HubStudioProxyController(CRUDBase[HubStudioProxyConfig, HubStudioProxyConf
     async def batch_assign_sites(self, data: SiteBatchAssignProxy) -> dict:
         """站点批量分配代理
         
-        - use_default=True: 清除站点的 proxy_config_id，使用 HubStudio 默认代理
-        - use_default=False: 从可用代理池中为每个站点分配一个未使用的代理
+        只从代理池分配代理，不再提供使用默认代理的选项
+        未分配代理的站点会自动使用 HubStudio Provider 默认代理（需前端确认）
         """
         from app.models.site_pipeline import Site
 
         sites = await Site.filter(id__in=data.site_ids)
         if not sites:
             raise HTTPException(status_code=404, detail='未找到可分配的站点')
-
-        if data.use_default:
-            # 使用默认代理：清除 proxy_config_id
-            updated = await Site.filter(id__in=data.site_ids).update(proxy_config_id=0)
-            return {
-                'mode': 'use_default',
-                'message': '已设置为使用 HubStudio 默认代理',
-                'updated': updated,
-            }
 
         # 从代理池分配：每个站点分配一条未被其他站点占用的代理
         # 本次待分配站点自身占用的代理视为可回收，避免重复分配同一批站点时误判不足
@@ -228,7 +225,6 @@ class HubStudioProxyController(CRUDBase[HubStudioProxyConfig, HubStudioProxyConf
             })
         
         return {
-            'mode': 'assign_from_pool',
             'message': f'已为 {len(assigned)} 个站点分配代理',
             'updated': len(assigned),
             'detail': assigned
@@ -448,6 +444,59 @@ class HubStudioProxyController(CRUDBase[HubStudioProxyConfig, HubStudioProxyConf
             'success_count': success_count,
             'failed_count': failed_count,
             'results': [r.dict() for r in results]
+        }
+    
+    async def batch_unassign(self, data: ProxyBatchDelete) -> dict:
+        """批量取消代理分配"""
+        proxies = await HubStudioProxyConfig.filter(
+            id__in=data.proxy_ids,
+            is_deleted=False
+        )
+        
+        if not proxies:
+            raise HTTPException(status_code=404, detail='未找到可取消分配的代理')
+        
+        from app.models.site_pipeline import Site
+        
+        success_count = 0
+        failed_count = 0
+        results = []
+        
+        for proxy in proxies:
+            try:
+                # 查找使用该代理的站点
+                affected_sites = await Site.filter(proxy_config_id=proxy.id).count()
+                
+                # 取消分配：将站点的 proxy_config_id 设为 None
+                await Site.filter(proxy_config_id=proxy.id).update(
+                    proxy_config_id=None,
+                    updated_at=datetime.now()
+                )
+                
+                success_count += 1
+                results.append({
+                    'proxy_id': proxy.id,
+                    'proxy': f'{proxy.proxy_host}:{proxy.proxy_port}',
+                    'status': 'success',
+                    'affected_sites': affected_sites,
+                    'message': f'成功取消 {affected_sites} 个站点的代理分配'
+                })
+                
+            except Exception as e:
+                failed_count += 1
+                results.append({
+                    'proxy_id': proxy.id,
+                    'proxy': f'{proxy.proxy_host}:{proxy.proxy_port}',
+                    'status': 'failed',
+                    'error': str(e)
+                })
+                logger.error(f"取消代理 {proxy.id} 分配失败: {e}")
+        
+        return {
+            'total': len(proxies),
+            'success_count': success_count,
+            'failed_count': failed_count,
+            'results': results
         }
     
     async def get_assigned_sites(self, proxy_id: int) -> dict:

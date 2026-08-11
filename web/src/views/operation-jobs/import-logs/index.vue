@@ -49,6 +49,7 @@ const typeOptions = [
   { value: '', label: '全部' },
   { value: 'sites', label: '站点' },
   { value: 'gmail', label: 'Gmail' },
+  { value: 'outlook', label: 'Outlook' },
   { value: 'shopify_sources', label: '采集源' },
   { value: 'shopify_products', label: '商品' },
 ]

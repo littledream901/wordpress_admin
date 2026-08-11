@@ -89,11 +89,9 @@ class HubStudioProxyBatchImport(BaseModel):
 class SiteBatchAssignProxy(BaseModel):
     """站点批量分配代理
     
-    - use_default=True: 使用 HubStudio 默认代理
-    - use_default=False: 从可用代理池中为每个站点分配一个未使用的代理
+    从可用代理池中为每个站点分配一个未使用的代理
     """
     site_ids: list[int] = Field(..., min_length=1, description='站点ID列表')
-    use_default: bool = Field(True, description='True=使用HubStudio默认代理，False=从代理管理中分配')
 
 
 class ProxyBatchDelete(BaseModel):
