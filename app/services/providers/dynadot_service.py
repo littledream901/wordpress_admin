@@ -25,11 +25,22 @@ class DynadotService:
 
     def __init__(self):
         self._config_loaded = False
+        self._last_api_key = None
 
     def _ensure_config(self):
+        """延迟加载配置（每次调用检查关键配置是否变更）"""
+        # 每次都读取 api_key，支持动态更新
+        current_api_key = ProviderResolver.sync_get_config('dynadot', 'api_key', '')
+        
+        # 如果 api_key 变化，标记为未加载以触发重新加载
+        if self._last_api_key != current_api_key:
+            self._config_loaded = False
+            self._last_api_key = current_api_key
+        
         if self._config_loaded:
             return
-        self.api_key = ProviderResolver.sync_get_config('dynadot', 'api_key', '')
+        
+        self.api_key = current_api_key
         self.base_url = ProviderResolver.sync_get_config('dynadot', 'api_url', '') or "https://api.dynadot.com/api3.json"
         self.timeout_val = int(ProviderResolver.sync_get_config('dynadot', 'timeout', '') or "30")
         self.timeout = httpx.Timeout(self.timeout_val)

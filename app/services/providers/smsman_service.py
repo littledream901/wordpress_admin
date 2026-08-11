@@ -27,11 +27,22 @@ class SmsManService:
 
     def __init__(self):
         self._config_loaded = False
+        self._last_api_token = None
 
     def _ensure_config(self):
+        """延迟加载配置（每次调用检查关键配置是否变更）"""
+        # 每次都读取 api_token，支持动态更新
+        current_api_token = ProviderResolver.sync_get_config('smsman', 'api_token', '')
+        
+        # 如果 api_token 变化，标记为未加载以触发重新加载
+        if self._last_api_token != current_api_token:
+            self._config_loaded = False
+            self._last_api_token = current_api_token
+        
         if self._config_loaded:
             return
-        self.api_token = ProviderResolver.sync_get_config('smsman', 'api_token', '')
+        
+        self.api_token = current_api_token
         self.base_url = ProviderResolver.sync_get_config('smsman', 'api_url', '') or "https://api.sms-man.com/control"
         self.timeout_val = int(ProviderResolver.sync_get_config('smsman', 'timeout', '') or "30")
         self.timeout = httpx.Timeout(self.timeout_val)

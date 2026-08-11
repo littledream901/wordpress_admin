@@ -61,24 +61,56 @@ def _parse_concatenated_json(text: str) -> dict | None:
 
 class OnePanelAPI:
     def __init__(self):
+        self._config_loaded = False
+        self._last_url = None
+        self._last_api_key = None
+        self._session = None
+        self._ensure_config()
+
+    def _ensure_config(self):
+        """延迟加载配置（每次调用检查关键配置是否变更）"""
         cfgs = ProviderResolver.sync_get_config_map('onepanel')
         url = str(_provider_value(cfgs, 'OP_URL', 'url', '')).strip()
+        current_api_key = str(_provider_value(cfgs, 'OP_API_KEY', 'api_key', '') or '')
+        
+        # 如果 url 或 api_key 变化，标记为未加载以触发重新加载
+        if self._last_url != url or self._last_api_key != current_api_key:
+            self._config_loaded = False
+            self._last_url = url
+            self._last_api_key = current_api_key
+            # 关闭旧 session
+            if self._session is not None:
+                self._session.close()
+                self._session = None
+        
+        if self._config_loaded:
+            return
+        
         self._configured = bool(url)
         if not self._configured:
             _log.warning("1Panel 未配置 (url/OP_URL 为空)，1Panel 相关功能将不可用")
         elif not url.startswith('http'):
             _log.warning("1Panel url 缺少协议头：%s，请补全 http:// 或 https://", url)
         self.base = url.rstrip('/') + '/api/v2'
-        self.api_key = str(_provider_value(cfgs, 'OP_API_KEY', 'api_key', '') or '')
+        self.api_key = current_api_key
         self.max_retries = int(_provider_value(cfgs, 'OP_MAX_RETRIES', 'max_retries', '5'))
         self.retry_interval = int(_provider_value(cfgs, 'OP_RETRY_INTERVAL', 'retry_interval', '5'))
         self.timeout = int(_provider_value(cfgs, 'OP_TIMEOUT', 'timeout', '45'))
         # SSL 验证：从 onepanel Provider 读取
         verify_ssl = ProviderResolver.sync_get_config('onepanel', 'op_verify_ssl', 'true')
         self.verify_ssl = verify_ssl.lower() != 'false'
-        self.session = httpx.Client(verify=self.verify_ssl, http2=True)
+        self._config_loaded = True
+
+    @property
+    def session(self):
+        """每次调用重新检查配置，防止 URL/API Key 更新后缓存失效"""
+        self._ensure_config()
+        if self._session is None:
+            self._session = httpx.Client(verify=self.verify_ssl, http2=True)
+        return self._session
 
     def headers(self, json_content: bool = True) -> Dict[str, str]:
+        self._ensure_config()
         ts = str(int(time.time()))
         token = hashlib.md5(f'1panel{self.api_key}{ts}'.encode('utf-8')).hexdigest()
         base: Dict[str, str] = {'1Panel-Token': token, '1Panel-Timestamp': ts, 'Accept': 'application/json'}
@@ -87,6 +119,7 @@ class OnePanelAPI:
         return base
 
     def _request(self, method: str, endpoint: str, payload: Dict[str, Any] = None) -> Tuple[bool, Any]:
+        self._ensure_config()
         if not self._configured or not self.base or self.base == '/api/v2':
             raise ProviderConfigError("onepanel", "url", "面板地址未配置，无法发起请求")
         url = self.base + endpoint
@@ -152,6 +185,7 @@ class OnePanelAPI:
 
     def download_file(self, path: str) -> bytes:
         """下载 1Panel 服务器上的文件（支持大文件）"""
+        self._ensure_config()
         cfgs = ProviderResolver.sync_get_config_map('onepanel')
         panel_base = _provider_value(cfgs, 'OP_PANEL_BASE', 'panel_base', '/opt/1panel')
         full = path if path.startswith(f'{panel_base}/backup') else f'{panel_base}/backup/{path.lstrip("/")}'

@@ -26,6 +26,7 @@ class CloudflareRedirectService:
         self._last_token = None
 
     def _ensure_config(self):
+        """延迟加载配置（每次调用检查关键配置是否变更）"""
         if self._config_loaded:
             return
         self.timeout = httpx.Timeout(int(ProviderResolver.sync_get_config('cloudflare', 'timeout', '') or '20'))
