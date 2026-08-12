@@ -59,6 +59,10 @@ class HubStudioClient:
         payload.update(kwargs)
         return self.post("/api/v1/env/proxy/update", payload)
 
+    def update_env_remark(self, containerCode: int, remark: str) -> dict:
+        payload = {"containerCode": containerCode, "remark": remark}
+        return self.post("/api/v1/env/remark/update", payload)
+
     def delete_envs(self, containerCodes: list) -> dict:
         return self.post("/api/v1/env/del", {"containerCodes": [int(c) for c in containerCodes]})
 
