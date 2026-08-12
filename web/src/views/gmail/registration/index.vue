@@ -2,9 +2,6 @@
   <CommonPage title="Gmail 企业邮箱注册">
     <template #action>
       <n-space>
-        <n-tag v-if="agentOnline" type="success" round size="small">Agent 在线</n-tag>
-        <n-tag v-else type="warning" round size="small">Agent 离线</n-tag>
-        <n-button text size="tiny" @click="loadAgentStatus">刷新</n-button>
         <n-button v-permission="'post/api/v1/gmail/registration/create'" type="primary" @click="handleAdd">
           新增注册
         </n-button>
@@ -426,7 +423,6 @@ import sitePipelineApi from '@/api/site-pipeline'
 
 const message = useMessage()
 const dialog = useDialog()
-const agentOnline = ref(false)
 const queryItems = reactive({
   alias: '',
   domain: '',
