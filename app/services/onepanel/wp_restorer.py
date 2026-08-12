@@ -329,8 +329,14 @@ class OnePanelWordPressRestorer:
 
         try:
             self.file_manager.chmod(data_dir, mode=493, user='root', group='root', sub=True)
-            self.file_manager.chmod(f'{data_dir}/wp-content', mode=493, sub=True)
+            # wp-content 需要写权限以便安装主题/插件
+            self.file_manager.chmod(f'{data_dir}/wp-content', mode=511, sub=True)
             self.file_manager.chmod(f'{data_dir}/wp-content/uploads', mode=511, sub=True)
+            # upgrade 目录用于主题/插件安装临时文件
+            self.file_manager.chmod(f'{data_dir}/wp-content/upgrade', mode=511, sub=True)
+            # themes 和 plugins 目录需要写权限
+            self.file_manager.chmod(f'{data_dir}/wp-content/themes', mode=511, sub=True)
+            self.file_manager.chmod(f'{data_dir}/wp-content/plugins', mode=511, sub=True)
         except Exception:
             pass
 

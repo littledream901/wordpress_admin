@@ -966,7 +966,7 @@ const columns = [
     ),
   },
   {
-    title: '操作', key: 'actions', width: 420, fixed: 'right',
+    title: '操作', key: 'actions', width: 320, fixed: 'right',
     render: (row) => {
       const isCompleted = row.registration_status === 'completed'
       const hasPhone = row.sms_status === 'acquired'
