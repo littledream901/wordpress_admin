@@ -770,9 +770,9 @@ class HubStudioOrchestrationService:
         data_source = None
 
         # 优先级 1：从 GmailRegistration 读取（注册流程数据，最新最完整）
+        # 查询条件：不限制 registration_status，允许使用任何状态的注册记录备注
         registration = await GmailRegistration.filter(
             site_id=site.id,
-            registration_status__in=["env_created", "completed"],
             is_deleted=False,
         ).order_by("-id").first()
         
@@ -780,11 +780,11 @@ class HubStudioOrchestrationService:
             # 兼容：按域名查找注册记录
             registration = await GmailRegistration.filter(
                 domain=site.domain,
-                registration_status__in=["env_created", "completed"],
                 is_deleted=False,
             ).order_by("-id").first()
 
         if registration:
+            logger.info(f"[remark] 站点 {site.domain} 找到注册记录: ID={registration.id}, status={registration.registration_status}")
             field_map = {
                 "LastName": getattr(registration, "last_name", "") or "",
                 "FirstName": getattr(registration, "first_name", "") or "",
@@ -803,6 +803,8 @@ class HubStudioOrchestrationService:
             
             if remark_fields:
                 data_source = "GmailRegistration"
+        else:
+            logger.info(f"[remark] 站点 {site.domain} 未找到注册记录")
 
         # 优先级 2：降级到 GmailAccount（已分配账号数据）
         if not remark_fields:
