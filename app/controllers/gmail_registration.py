@@ -33,6 +33,7 @@ _OUTLOOK_IDENTITY_FIELDS = (
     'full_name', 'first_name', 'last_name', 'password',
     'country', 'province_state', 'city', 'zip_code',
     'shipping_address_1', 'shipping_address_2', 'phone',
+    'api_url',
 )
 
 
