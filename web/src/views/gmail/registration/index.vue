@@ -365,6 +365,8 @@
         <n-gi><n-text>{{ detailData.forward_to || '-' }}</n-text></n-gi>
         <n-gi><n-text depth="3">辅助邮箱</n-text></n-gi>
         <n-gi><n-text>{{ detailData.recovery_email || '-' }}</n-text></n-gi>
+        <n-gi><n-text depth="3">API URL</n-text></n-gi>
+        <n-gi><n-text>{{ detailData.api_url || '-' }}</n-text></n-gi>
         <n-gi><n-text depth="3">2FA Key</n-text></n-gi>
         <n-gi><n-text>{{ detailData.two_fa_key || '-' }}</n-text></n-gi>
         <n-gi><n-text depth="3">邮编</n-text></n-gi>
