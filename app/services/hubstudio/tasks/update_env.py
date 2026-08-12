@@ -71,7 +71,9 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
     remark = build_remark(payload)
     if remark:
         try:
-            client.update_env_remark(int(hub_env_id), remark)
+            # 使用 update_env 接口更新备注，需要传入当前环境名
+            container_name = payload.get("container_name") or payload.get("domain", f"env_{hub_env_id}")
+            client.update_env(int(hub_env_id), container_name, remark=remark)
             result["actions"]["remark"] = "ok"
             result["remark"] = remark
             executor.logger.info(f"[update_env] 备注更新成功: {remark[:100]}")
