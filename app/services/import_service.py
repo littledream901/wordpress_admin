@@ -94,7 +94,7 @@ class ImportService:
     @staticmethod
     def parse_csv(content: str) -> list[dict]:
         """解析 CSV 文本"""
-        reader = csv.DictReader(io.StringIO(content))
+        reader = csv.DictReader(io.StringIO(content), restval='')
         return [row for row in reader]
 
     @staticmethod
@@ -137,7 +137,7 @@ class ImportService:
         for key, value in raw.items():
             cleaned = key.strip().lower()
             if cleaned in _ci_keys:
-                result[_ci_map[cleaned]] = value.strip()
+                result[_ci_map[cleaned]] = (value or "").strip()
         return result
 
     # ── 数据校验与类型转换 ──
