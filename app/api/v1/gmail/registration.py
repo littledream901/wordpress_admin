@@ -127,18 +127,7 @@ async def create_forwarding(payload: GmailRegistrationActionSingle):
     return Success(data=result.get('registration'), msg='转发邮箱创建成功')
 
 
-@router.post('/create-env', summary='步骤2：创建 HubStudio 环境')
-async def create_env(payload: GmailRegistrationActionSingle):
-    result = await gmail_registration_controller.create_environment(
-        payload.registration_id, 
-        execute_now=payload.execute_now
-    )
-    if not result.get('success'):
-        return Fail(code=400, msg=result.get('error') or '创建环境失败')
-    
-    mode = "sync" if payload.execute_now else "async"
-    msg = '环境创建成功' if payload.execute_now else '环境创建任务已派发（等待 Agent）'
-    return Success(data=result.get('registration'), msg=msg)
+
 
 
 @router.post('/get-phone', summary='步骤3：获取 SMS 号码')
@@ -186,10 +175,7 @@ async def batch_create_forwarding(ids: list[int] = Body(...)):
     return Success(data=result)
 
 
-@router.post('/batch-create-env', summary='批量创建环境')
-async def batch_create_env(ids: list[int] = Body(...)):
-    result = await gmail_registration_controller.batch_create_env(ids)
-    return Success(data=result)
+
 
 
 @router.post('/batch-get-phone', summary='批量获取 SMS 号码')

@@ -250,94 +250,6 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
             "registration": await reg.to_dict()
         }
 
-    async def create_environment(self, registration_id: int, execute_now: bool = False) -> dict:
-        """步骤2：创建 HubStudio 环境
-        
-        Args:
-            registration_id: 注册记录ID
-            execute_now: True=后端同步执行，False=进入队列由 Agent 异步执行（默认）
-        """
-        reg = await self.get(id=registration_id)
-        if not reg:
-            return {"success": False, "error": "注册记录不存在"}
-        
-        if reg.env_status == "success" and reg.env_id:
-            return {"success": True, "message": "环境已创建", "registration": await reg.to_dict()}
-        
-        # 关联站点（优先使用保存的 site_id，其次按域名查询）
-        site = None
-        if reg.site_id:
-            site = await Site.filter(id=reg.site_id, is_deleted=False).first()
-        if not site:
-            site = await Site.filter(domain=reg.domain, is_deleted=False).first()
-            # 找到站点时保存 site_id，后续操作可直接复用
-            if site:
-                reg.site_id = site.id
-                await reg.save(update_fields=['site_id'])
-
-        # 如果站点已有环境，直接复用（避免重复创建）
-        if site and site.hub_env_id:
-            reg.env_id = site.hub_env_id
-            reg.env_name = site.hub_env_name or ""
-            reg.env_status = "success"
-            reg.registration_status = "env_created"
-            await reg.save()
-            return {
-                "success": True,
-                "message": "已复用站点环境",
-                "action": "reused",
-                "registration": await reg.to_dict()
-            }
-
-        # 调用 HubStudio
-        result = await gmail_registration_service.create_environment(
-            alias=reg.alias,
-            domain=reg.domain,
-            full_name=reg.full_name,
-            site_id=site.id if site else 0,
-            execute_now=execute_now,
-            extra_payload={
-                "last_name": reg.last_name,
-                "first_name": reg.first_name,
-                "recovery_email": reg.recovery_email,
-                "country": reg.country,
-                "province_state": reg.province_state,
-                "city": reg.city,
-                "zip_code": reg.zip_code,
-                "shipping_address_1": reg.shipping_address_1,
-                "shipping_address_2": reg.shipping_address_2,
-                "phone": reg.phone,
-                "api_url": reg.api_url,
-            },
-        )
-        
-        if result.get("success"):
-            env_id = result.get("env_id", "")
-            env_name = result.get("container_name", "")
-            
-            reg.env_id = env_id
-            reg.env_name = env_name
-            reg.env_status = "success"
-            reg.registration_status = "env_created"
-            await reg.save()
-            
-            # 自动同步环境到站点（如果站点存在且未分配环境）
-            if site and not site.hub_env_id:
-                site.hub_env_id = env_id
-                site.hub_env_name = env_name
-                site.hub_status = "success"
-                site.hub_last_action = "create_gmail_env"
-                site.pipeline_status = "hubstudio:success"
-                site.pipeline_log = (site.pipeline_log or "") + f"\n[gmail_reg] 自动分配环境 env_id={env_id}"
-                await site.save()
-                logger.info(f"[gmail_reg] 环境已自动同步到站点: site_id={site.id} env_id={env_id}")
-        else:
-            reg.env_status = "failed"
-            reg.env_error = result.get("error", "Unknown error")
-            await reg.save()
-        
-        return {"success": result.get("success"), "registration": await reg.to_dict()}
-
     async def get_phone_number(
         self,
         registration_id: int,
@@ -458,10 +370,6 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
     async def batch_create_forwarding(self, ids: list[int]) -> dict:
         """批量创建转发（已废弃）"""
         return {"ok": 0, "fail": len(ids), "errors": ["ImprovMX 转发步骤已废弃"]}
-
-    async def batch_create_env(self, ids: list[int]) -> dict:
-        """批量创建环境（HubStudio Connector 为单实例，串行执行）"""
-        return await self._run_batch(ids, self.create_environment)
 
     async def batch_get_phone(self, ids: list[int]) -> dict:
         """批量获取号码"""

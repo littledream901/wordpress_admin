@@ -17,90 +17,9 @@ class GmailRegistrationService:
 
     @staticmethod
     def create_forwarding_email(domain: str, alias: str, forward_to: str) -> Dict[str, Any]:
-        """调用 ImprovMX 创建转发别名，返回结果 dict"""
-        result = improvmx_service.create_alias(
-            domain=domain,
-            alias=alias,
-            forward=forward_to,
-        )
-        if result.get("success"):
-            alias_data = result.get("alias") or {}
-            return {
-                "success": True,
-                "improvmx_alias_id": str(alias_data.get("id", "")),
-            }
-        return {"success": False, "error": f"ImprovMX 失败: {result.get('error', result)}"}
-
-    # ── 步骤 2: HubStudio 环境 ──
-
-    @staticmethod
-    async def create_environment(
-        alias: str,
-        domain: str,
-        full_name: str,
-        site_id: int = 0,
-        execute_now: bool = False,
-        extra_payload: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """派发 HubStudio create_gmail_env 任务
-        
-        Args:
-            execute_now: True=后端同步执行，False=进入队列由 Agent 异步执行（默认）
-            extra_payload: 保留参数（历史兼容），备注字段由 hubstudio_service 统一构建
-        
-        复用 hubstudio_service 的派发链路，统一 provider 配置、Connector 探活、
-        任务记录与结果回报，避免在此处重复实现执行器构建逻辑。
-        
-        备注构建策略（已统一到 hubstudio_service._enrich_remark_from_gmail）：
-        1. 优先从 GmailRegistration 表读取（注册流程数据，最新最完整）
-        2. 降级到 GmailAccount 表（已分配账号数据）
-        3. 两个模块（Gmail 注册、Hub 分发）使用相同的备注构建逻辑
-        """
-        from app.controllers.site_pipeline import hubstudio_service
-
-        # payload 不再手动构建 remark_fields，由 dispatch_for_site 内部统一处理
-        payload: Dict[str, Any] = {
-            "alias": alias,
-            "domain": domain,
-            "full_name": full_name,
-        }
-
-        try:
-            if site_id:
-                job, result = await hubstudio_service.dispatch_for_site(
-                    site_id=site_id,
-                    job_type="create_gmail_env",
-                    payload=payload,
-                    execute_now=execute_now,
-                    agent_worker="gmail-registration",
-                )
-            else:
-                # 无站点情况：创建任务进入队列，由 Agent 异步执行
-                job = await hubstudio_service.create_job(
-                    site_id=0,
-                    domain=domain,
-                    job_type="create_gmail_env",
-                    payload=payload,
-                    provider_id=0,  # 需显式提供，避免 _resolve_provider_id(0) 查不到站点
-                )
-                if execute_now:
-                    result = await hubstudio_service._execute_job_sync(job, "gmail-registration")
-                else:
-                    result = None  # 异步模式无即时返回结果
-        except Exception as e:
-            logger.error(f"[gmail_reg] 创建环境失败: domain={domain} err={e}")
-            return {"success": False, "error": str(e)}
-
-        result = result or {}
-        if result.get("status") == "success":
-            return {
-                "success": True,
-                "env_id": result.get("env_id", ""),
-                "container_name": result.get("containerName", ""),
-                "action": result.get("action", ""),
-                "job_id": job.id,
-            }
-        return {"success": False, "error": result.get("error") or "创建环境失败", "job_id": job.id}
+        """ImprovMX 转发步骤已废弃"""
+        logger.info(f"[gmail_reg] ImprovMX 转发服务已废弃")
+        return {"success": False, "error": "ImprovMX 转发步骤已废弃"}
 
     # ── 步骤 3: SMS 号码 ──
 
