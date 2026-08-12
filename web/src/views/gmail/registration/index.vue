@@ -81,17 +81,6 @@
             </template>
             <n-button-group vertical size="small" style="text-align: left">
               <n-button
-                v-permission="'post/api/v1/gmail/registration/batch-create-env'"
-                @click="showBatchMenu = false; handleBatchOp('createEnv')"
-                :loading="batchLoading === 'createEnv'"
-                style="justify-content: flex-start"
-              >
-                <template #icon>
-                  <TheIcon icon="mdi:cloud-outline" :size="18" />
-                </template>
-                批量创建环境
-              </n-button>
-              <n-button
                 v-permission="'post/api/v1/gmail/registration/batch-get-phone'"
                 @click="showBatchMenu = false; handleBatchOp('getPhone')"
                 :loading="batchLoading === 'getPhone'"
@@ -285,27 +274,19 @@
       @positive-click="confirmAction"
       @negative-click="showActionModal = false"
     >
-      <n-form v-if="actionType === 'getPhone'" ref="actionFormRef" :model="actionForm" label-placement="left" :label-width="100">
-        <n-form-item label="国家 ID">
-          <n-input-number v-model:value="actionForm.country_id" :min="0" placeholder="0=随机" />
-        </n-form-item>
-        <n-form-item label="服务 ID">
-          <n-input-number v-model:value="actionForm.application_id" :min="0" placeholder="Google" />
-        </n-form-item>
-        <n-form-item label="最高价格(分)">
-          <n-input-number v-model:value="actionForm.max_price" :min="0" placeholder="不限" />
-        </n-form-item>
-      </n-form>
-      <n-space v-else-if="actionType === 'createEnv'" vertical :size="12">
-        <p>确定要为该注册记录创建 HubStudio 环境吗？</p>
-        <n-space align="center">
-          <n-switch v-model:value="actionForm.execute_now" />
-          <n-text depth="3">同步执行 (Agent 离线时后端直接调用 Connector)</n-text>
-        </n-space>
-        <n-alert v-if="!agentOnline" type="warning" :bordered="false" size="small">
-          Agent 离线，建议开启同步执行
-        </n-alert>
-      </n-space>
+      <p v-if="actionType === 'getPhone'">
+        <n-form ref="actionFormRef" :model="actionForm" label-placement="left" :label-width="100">
+          <n-form-item label="国家 ID">
+            <n-input-number v-model:value="actionForm.country_id" :min="0" placeholder="0=随机" />
+          </n-form-item>
+          <n-form-item label="服务 ID">
+            <n-input-number v-model:value="actionForm.application_id" :min="0" placeholder="Google" />
+          </n-form-item>
+          <n-form-item label="最高价格(分)">
+            <n-input-number v-model:value="actionForm.max_price" :min="0" placeholder="不限" />
+          </n-form-item>
+        </n-form>
+      </p>
       <p v-else-if="actionType === 'waitSms'">等待接收验证码，超时时间 {{ actionForm.timeout }} 秒</p>
       <p v-else-if="actionType === 'confirmSms'">确认 SMS 使用完成，系统将标记为扣款。</p>
       <p v-else>确定要执行此操作吗？</p>
@@ -700,10 +681,6 @@ async function confirmAction() {
   const row = actionTargetRow.value
   try {
     switch (actionType.value) {
-      case 'createEnv':
-        await api.regCreateEnv({ registration_id: row.id })
-        message.success('环境创建成功')
-        break
       case 'getPhone':
         await api.regGetPhone({
           registration_id: row.id,
@@ -751,7 +728,6 @@ async function handleDeleteSingle(id) {
 // ── 统一批量操作 ──
 
 const batchOpMap = {
-  createEnv: { api: 'regBatchCreateEnv', label: '创建环境' },
   getPhone: { api: 'regBatchGetPhone', label: '获取号码' },
   waitSms: { api: 'regBatchWaitSms', label: '等待短信' },
   confirmSms: { api: 'regBatchConfirmSms', label: '确认完成' },
@@ -997,8 +973,6 @@ const columns = [
     title: '操作', key: 'actions', width: 420, fixed: 'right',
     render: (row) => {
       const isCompleted = row.registration_status === 'completed'
-      const hasEnv = !!row.env_id
-      const envFailed = row.env_status === 'failed'
       const hasPhone = row.sms_status === 'acquired'
       const hasCode = row.sms_status === 'code_received'
 
@@ -1007,14 +981,8 @@ const columns = [
           h(NButton, { size: 'tiny', onClick: () => handleDetail(row) }, { default: () => '详情' }),
           h(NButton, {
             size: 'tiny',
-            type: envFailed ? 'warning' : (hasEnv ? 'default' : 'primary'),
-            disabled: isCompleted || (hasEnv && !envFailed),
-            onClick: () => openActionModal('createEnv', row, envFailed ? '重试创建环境' : '创建环境'),
-          }, { default: () => envFailed ? '环境失败' : (hasEnv ? '已建环境' : '创建环境') }),
-          h(NButton, {
-            size: 'tiny',
             type: hasPhone ? 'default' : 'warning',
-            disabled: isCompleted || hasPhone || !hasEnv,
+            disabled: isCompleted || hasPhone,
             onClick: () => openActionModal('getPhone', row, '获取号码'),
           }, { default: () => hasPhone ? '已取号' : '取号码' }),
           h(NButton, {
