@@ -749,43 +749,89 @@ class HubStudioOrchestrationService:
         return payload
 
     async def _enrich_remark_from_gmail(self, payload: dict, site: Site) -> dict:
-        """从已分配的 Gmail 中提取地址/邮箱信息，写入 remark_fields
+        """构建 HubStudio 环境备注字段（remark_fields）
 
+        数据来源优先级（降级策略）：
+        1. payload 中已有 remark_fields → 直接使用（Gmail 注册流程传入）
+        2. GmailRegistration 表 → 优先使用注册数据（最新、最完整）
+        3. GmailAccount 表 → 降级使用已分配账号数据
+        
         供 create_env / update_env 使用，按 REMARK_FIELD_MAP 顺序拼接备注：
-        ShippingAddress_1 → City → Province/State → Zip_code → Country → Recovery_Email
+        LastName → FirstName → ShippingAddress_1 → City → Province/State → Zip_code → Country → Recovery_Email → API_URL
         """
         if payload.get("remark_fields"):
+            logger.info(f"[remark] payload 中已有备注字段，直接使用")
             return payload  # 已有备注字段，不覆盖
 
         from app.models.gmail_account import GmailAccount
-
-        gmail = await GmailAccount.filter(assigned_site_id=site.id).first()
-        if not gmail:
-            logger.info(f"[remark] 站点无 Gmail，跳过备注构建")
-            return payload
+        from app.models.gmail_registration import GmailRegistration
 
         remark_fields = {}
-        field_map = {
-            "LastName": getattr(gmail, "last_name", "") or "",
-            "FirstName": getattr(gmail, "first_name", "") or "",
-            "ShippingAddress_1": getattr(gmail, "shipping_address_1", "") or "",
-            "City": getattr(gmail, "city", "") or "",
-            "Province/State": getattr(gmail, "province_state", "") or "",
-            "Zip_code": getattr(gmail, "zip_code", "") or "",
-            "Country": getattr(gmail, "country", "") or "",
-            "Recovery_Email": getattr(gmail, "recovery_email", "") or "",
-            "API_URL": getattr(gmail, "api_url", "") or "",
-        }
-        for key, val in field_map.items():
-            v = str(val).strip() if val else ""
-            if v:
-                remark_fields[key] = v
+        data_source = None
+
+        # 优先级 1：从 GmailRegistration 读取（注册流程数据，最新最完整）
+        registration = await GmailRegistration.filter(
+            site_id=site.id,
+            registration_status__in=["env_created", "completed"],
+            is_deleted=False,
+        ).order_by("-id").first()
+        
+        if not registration:
+            # 兼容：按域名查找注册记录
+            registration = await GmailRegistration.filter(
+                domain=site.domain,
+                registration_status__in=["env_created", "completed"],
+                is_deleted=False,
+            ).order_by("-id").first()
+
+        if registration:
+            field_map = {
+                "LastName": getattr(registration, "last_name", "") or "",
+                "FirstName": getattr(registration, "first_name", "") or "",
+                "ShippingAddress_1": getattr(registration, "shipping_address_1", "") or "",
+                "City": getattr(registration, "city", "") or "",
+                "Province/State": getattr(registration, "province_state", "") or "",
+                "Zip_code": getattr(registration, "zip_code", "") or "",
+                "Country": getattr(registration, "country", "") or "",
+                "Recovery_Email": getattr(registration, "recovery_email", "") or "",
+                "API_URL": getattr(registration, "api_url", "") or "",
+            }
+            for key, val in field_map.items():
+                v = str(val).strip() if val else ""
+                if v:
+                    remark_fields[key] = v
+            
+            if remark_fields:
+                data_source = "GmailRegistration"
+
+        # 优先级 2：降级到 GmailAccount（已分配账号数据）
+        if not remark_fields:
+            gmail = await GmailAccount.filter(assigned_site_id=site.id).first()
+            if gmail:
+                field_map = {
+                    "LastName": getattr(gmail, "last_name", "") or "",
+                    "FirstName": getattr(gmail, "first_name", "") or "",
+                    "ShippingAddress_1": getattr(gmail, "shipping_address_1", "") or "",
+                    "City": getattr(gmail, "city", "") or "",
+                    "Province/State": getattr(gmail, "province_state", "") or "",
+                    "Zip_code": getattr(gmail, "zip_code", "") or "",
+                    "Country": getattr(gmail, "country", "") or "",
+                    "Recovery_Email": getattr(gmail, "recovery_email", "") or "",
+                    "API_URL": getattr(gmail, "api_url", "") or "",
+                }
+                for key, val in field_map.items():
+                    v = str(val).strip() if val else ""
+                    if v:
+                        remark_fields[key] = v
+                
+                if remark_fields:
+                    data_source = "GmailAccount"
 
         if remark_fields:
             payload["remark_fields"] = remark_fields
-            logger.info(f"[remark] 已从 Gmail 构建备注字段: {list(remark_fields.keys())}")
+            logger.info(f"[remark] 已从 {data_source} 构建备注字段: {list(remark_fields.keys())}")
         else:
-            logger.info(f"[remark] Gmail 无地址/邮箱字段，备注为空")
+            logger.info(f"[remark] 站点无注册记录和 Gmail 账号，备注为空")
 
         return payload
 

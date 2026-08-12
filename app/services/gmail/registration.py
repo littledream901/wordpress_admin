@@ -39,41 +39,31 @@ class GmailRegistrationService:
         domain: str,
         full_name: str,
         site_id: int = 0,
+        execute_now: bool = False,
         extra_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """派发 HubStudio create_gmail_env 任务并同步执行
-
+        """派发 HubStudio create_gmail_env 任务
+        
+        Args:
+            execute_now: True=后端同步执行，False=进入队列由 Agent 异步执行（默认）
+            extra_payload: 保留参数（历史兼容），备注字段由 hubstudio_service 统一构建
+        
         复用 hubstudio_service 的派发链路，统一 provider 配置、Connector 探活、
         任务记录与结果回报，避免在此处重复实现执行器构建逻辑。
+        
+        备注构建策略（已统一到 hubstudio_service._enrich_remark_from_gmail）：
+        1. 优先从 GmailRegistration 表读取（注册流程数据，最新最完整）
+        2. 降级到 GmailAccount 表（已分配账号数据）
+        3. 两个模块（Gmail 注册、Hub 分发）使用相同的备注构建逻辑
         """
         from app.controllers.site_pipeline import hubstudio_service
 
-        # 构建 remark_fields（与 Hub 分发链路保持一致）
-        remark_fields = {}
-        if extra_payload:
-            field_map = {
-                "LastName": extra_payload.get("last_name", ""),
-                "FirstName": extra_payload.get("first_name", ""),
-                "ShippingAddress_1": extra_payload.get("shipping_address_1", ""),
-                "City": extra_payload.get("city", ""),
-                "Province/State": extra_payload.get("province_state", ""),
-                "Zip_code": extra_payload.get("zip_code", ""),
-                "Country": extra_payload.get("country", ""),
-                "Recovery_Email": extra_payload.get("recovery_email", ""),
-                "API_URL": extra_payload.get("api_url", ""),
-            }
-            for key, val in field_map.items():
-                v = str(val).strip() if val else ""
-                if v:
-                    remark_fields[key] = v
-        
+        # payload 不再手动构建 remark_fields，由 dispatch_for_site 内部统一处理
         payload: Dict[str, Any] = {
             "alias": alias,
             "domain": domain,
             "full_name": full_name,
         }
-        if remark_fields:
-            payload["remark_fields"] = remark_fields
 
         try:
             if site_id:
@@ -81,11 +71,11 @@ class GmailRegistrationService:
                     site_id=site_id,
                     job_type="create_gmail_env",
                     payload=payload,
-                    execute_now=True,
+                    execute_now=execute_now,
                     agent_worker="gmail-registration",
                 )
             else:
-                # 无站点情况：直接创建任务，传 site_id=0（占位），不依赖站点查询
+                # 无站点情况：创建任务进入队列，由 Agent 异步执行
                 job = await hubstudio_service.create_job(
                     site_id=0,
                     domain=domain,
@@ -93,7 +83,10 @@ class GmailRegistrationService:
                     payload=payload,
                     provider_id=0,  # 需显式提供，避免 _resolve_provider_id(0) 查不到站点
                 )
-                result = await hubstudio_service._execute_job_sync(job, "gmail-registration")
+                if execute_now:
+                    result = await hubstudio_service._execute_job_sync(job, "gmail-registration")
+                else:
+                    result = None  # 异步模式无即时返回结果
         except Exception as e:
             logger.error(f"[gmail_reg] 创建环境失败: domain={domain} err={e}")
             return {"success": False, "error": str(e)}

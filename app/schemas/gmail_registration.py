@@ -35,8 +35,9 @@ class GmailRegistrationStatusUpdate(BaseModel):
 
 
 class GmailRegistrationActionSingle(BaseModel):
-    """单条记录操作（创建转发/环境/获取号码等）"""
+    """单条操作（创建环境、获取号码等）"""
     registration_id: int
+    execute_now: bool = False  # 是否同步执行（默认异步，由 Agent 领取）
 
 
 class GmailRegistrationGetPhone(BaseModel):

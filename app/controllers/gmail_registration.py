@@ -74,8 +74,8 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
 
         reg.outlook_account_id = acc.id
         reg.outlook_account_username = acc.username
-        # Outlook 邮箱作为 Gmail 的恢复邮箱与转发目标
-        reg.recovery_email = acc.username
+        # Outlook 的辅助邮箱作为 Gmail 的恢复邮箱，Outlook 账号作为转发目标
+        reg.recovery_email = acc.recovery_email
         if not reg.forward_to:
             reg.forward_to = acc.username
         for field in _OUTLOOK_IDENTITY_FIELDS:
@@ -250,8 +250,13 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
             "registration": await reg.to_dict()
         }
 
-    async def create_environment(self, registration_id: int) -> dict:
-        """步骤2：创建 HubStudio 环境"""
+    async def create_environment(self, registration_id: int, execute_now: bool = False) -> dict:
+        """步骤2：创建 HubStudio 环境
+        
+        Args:
+            registration_id: 注册记录ID
+            execute_now: True=后端同步执行，False=进入队列由 Agent 异步执行（默认）
+        """
         reg = await self.get(id=registration_id)
         if not reg:
             return {"success": False, "error": "注册记录不存在"}
@@ -290,6 +295,7 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
             domain=reg.domain,
             full_name=reg.full_name,
             site_id=site.id if site else 0,
+            execute_now=execute_now,
             extra_payload={
                 "last_name": reg.last_name,
                 "first_name": reg.first_name,
