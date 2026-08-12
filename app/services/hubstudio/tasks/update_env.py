@@ -1,4 +1,4 @@
-"""更新环境：代理配置（已移除备注更新功能）
+"""更新环境：代理配置和备注
 
 代理配置两级优先级：
 1. 任务级代理（payload.proxy_config）
@@ -16,7 +16,7 @@
 - 已移除散落字段代理（payload.proxy_type_name 等）构建逻辑
 """
 
-from ._common import build_container_name
+from ._common import build_container_name, build_remark
 
 
 def build_proxy_config(executor, payload: dict) -> dict:
@@ -37,7 +37,7 @@ def build_proxy_config(executor, payload: dict) -> dict:
 
 
 def execute_update_env(executor, job: dict, payload: dict) -> dict:
-    """更新环境：代理配置（已移除备注更新功能）"""
+    """更新环境：代理配置和备注"""
     domain = payload.get("domain", job.get("domain", ""))
     hub_env_id = payload.get("hub_env_id", "")
     server_ip = payload.get("server_ip", "")
@@ -66,6 +66,21 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
     else:
         result["actions"]["proxy"] = "skipped (no assigned proxy, using HubStudio default)"
         executor.logger.info(f"[update_env] 未分配代理，使用 HubStudio 环境默认代理")
+
+    # ── 更新备注 ──
+    remark = build_remark(payload)
+    if remark:
+        try:
+            client.update_env_remark(int(hub_env_id), remark)
+            result["actions"]["remark"] = "ok"
+            result["remark"] = remark
+            executor.logger.info(f"[update_env] 备注更新成功: {remark[:100]}")
+        except Exception as e:
+            result["actions"]["remark"] = f"failed: {str(e)[:100]}"
+            executor.logger.warning(f"[update_env] 备注更新失败: {e}")
+    else:
+        result["actions"]["remark"] = "skipped (empty remark)"
+        executor.logger.info(f"[update_env] 备注为空，跳过更新")
 
     # 判断整体结果
     actions_ok = sum(1 for v in result["actions"].values() if v == "ok")
