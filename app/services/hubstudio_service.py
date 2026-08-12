@@ -843,11 +843,36 @@ class HubStudioOrchestrationService:
                 payload["domain"] = registration.domain
             if registration.registration_email and not payload.get("registration_email"):
                 payload["registration_email"] = registration.registration_email
+            
+            # 注入 Outlook 账号密码（用于 ImprovMX 注册）
+            if registration.outlook_account_id:
+                from app.models.outlook_account import OutlookAccount
+                outlook = await OutlookAccount.filter(
+                    id=registration.outlook_account_id,
+                    is_deleted=False,
+                ).first()
+                if outlook:
+                    if not payload.get("outlook_username"):
+                        payload["outlook_username"] = outlook.username or ""
+                    if not payload.get("outlook_password"):
+                        payload["outlook_password"] = outlook.password or ""
+            elif registration.outlook_account_username:
+                # 兼容旧数据：直接使用冗余字段
+                if not payload.get("outlook_username"):
+                    payload["outlook_username"] = registration.outlook_account_username or ""
+                if not payload.get("outlook_password"):
+                    payload["outlook_password"] = registration.password or ""
+            
             logger.info(
                 f"[remark] 已注入 alias={payload.get('alias', 'N/A')} "
                 f"domain={payload.get('domain', 'N/A')} "
-                f"registration_email={payload.get('registration_email', 'N/A')}"
+                f"registration_email={payload.get('registration_email', 'N/A')} "
+                f"outlook_username={payload.get('outlook_username', 'N/A')}"
             )
+        
+        # 确保 domain 字段存在（从 site 读取）
+        if not payload.get("domain"):
+            payload["domain"] = site.domain
 
         return payload
 

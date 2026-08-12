@@ -60,8 +60,8 @@ def build_remark(payload: dict) -> str:
         # Gmail 密码：硬编码
         elif field_key == "gmail_password":
             val = "Dzht1008aaa"
-        # Recovery_Email 优先从 remark_fields 读取
-        elif field_key == "Recovery_Email" and remark_fields:
+        # Recovery_Email 和 API_URL 优先从 remark_fields 读取
+        elif field_key in ("Recovery_Email", "API_URL") and remark_fields:
             val = remark_fields.get(field_key, "") or payload.get(field_key, "")
         # 其他字段从 payload 读取
         else:
