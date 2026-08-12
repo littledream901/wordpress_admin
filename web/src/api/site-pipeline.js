@@ -32,6 +32,8 @@ export default {
   getGatewayCredentials: (siteId) => request.get(`/site-pipeline/site/${siteId}/gateway-credentials`),
   getGatewayProviderInfo: (siteId) => request.get(`/site-pipeline/site/${siteId}/gateway-provider-info`),
   updateGatewayDefense: (siteId, data = {}) => request.post(`/site-pipeline/site/${siteId}/gateway-defense/update`, data),
+  getGatewayRules: (params = {}) => request.get('/site-pipeline/site/gateway-rules', { params }),
+  batchBindGatewayRules: (data = {}) => request.post('/site-pipeline/site/batch-bind-gateway-rules', data),
 
   // HubStudio
   getHubJobList: (params = {}) => request.get('/site-pipeline/hub-job/list', { params }),

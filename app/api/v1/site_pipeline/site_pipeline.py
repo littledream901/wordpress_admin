@@ -27,6 +27,7 @@ from app.schemas.gateway_defense import (
     GatewayDefenseCreate,
     GatewayDefenseBatchDeploy,
     GatewayDefenseUpdate,
+    BatchBindGatewayRulesRequest,
 )
 
 _log = logging.getLogger(__name__)
@@ -206,6 +207,32 @@ async def batch_deploy_gateway_defense(payload: GatewayDefenseBatchDeploy):
     )
     data = result['data']
     return Success(data=data, msg=f'已入队 {data["queued"]}/{data["total"]} 个站点，请在任务中心查看进度')
+
+
+@router.get('/site/gateway-rules', summary='查询网关防御规则列表')
+async def list_gateway_rules(status: str = Query('published', description='规则状态过滤')):
+    result = await site_pipeline_controller.list_gateway_rules(status=status)
+    if result['ok']:
+        return Success(data=result['data'])
+    return Fail(code=result.get('code', 502), msg=result.get('error'))
+
+
+@router.post('/site/batch-bind-gateway-rules', summary='批量绑定网关')
+async def batch_bind_gateway_rules(payload: BatchBindGatewayRulesRequest):
+    """
+    批量绑定网关（异步任务队列）。
+
+    规则来源：默认规则来自环境变量 RULE_IDS，或前端传入 rule_ids。
+    后台自动完成「建站 → 绑定规则 → 部署防御层」，进度到任务中心查看。
+    """
+    result = await site_pipeline_controller.batch_bind_gateway_rules(
+        site_ids=payload.site_ids,
+        rule_ids=payload.rule_ids,
+    )
+    if result['ok']:
+        data = result['data']
+        return Success(data=data, msg=f'已入队 {data["queued"]}/{data["total"]} 个站点，请在任务中心查看进度')
+    return Fail(code=result.get('code', 400), msg=result.get('error'))
 
 
 # ══════════════════════════════════════════════════════════════════════════

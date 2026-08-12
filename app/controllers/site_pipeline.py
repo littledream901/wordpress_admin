@@ -29,9 +29,11 @@ from app.services.onepanel_service import (
     OnePanelSiteManager, OnePanelSSLManager, OnePanelWordPressRestorer,
 )
 from app.services.providers.dynadot_service import DynadotService
+from app.services.gateway_defense.admin_client import GatewayAdminClient, GatewayAdminError
 from app.services.tasks.runner import task_runner
 from app.services.woo_import_service import WooImportService
 from app.services.importers import get_importer
+from app.settings.config import settings
 from app.utils.config_reader import get_config_async
 from app.utils.provider_resolver import ProviderResolver
 from app.utils.orm_guard import guard_thread_pool
@@ -1188,6 +1190,64 @@ class SitePipelineController:
                 'rejected': len(results) - queued,
                 'results': results
             }
+        }
+    
+    async def list_gateway_rules(self, status: str = 'published') -> dict:
+        """查询网关防御规则列表（供前端「选择规则」枚举）。"""
+        from app.schemas.gateway_defense import GatewayRuleItem, GatewayRuleListResponse
+
+        try:
+            client = GatewayAdminClient()
+            items, total = await client.list_rules(status=status)
+            rule_items = [GatewayRuleItem.model_validate(it) for it in items]
+            data = GatewayRuleListResponse(items=rule_items, total=total).model_dump()
+            return {'ok': True, 'data': data}
+        except GatewayAdminError as exc:
+            return {'ok': False, 'code': 502, 'error': str(exc)}
+
+    async def batch_bind_gateway_rules(self, site_ids: list, rule_ids: list) -> dict:
+        """批量绑定网关（异步任务队列）。
+
+        每个站点一个 OperationJob，后台自动完成「建站 → 绑定规则 → 部署防御层」，
+        接口立即返回 batch_id / queued / rejected，进度到任务中心查看。
+        """
+        from app.services.tasks.gateway_defense import gateway_defense_task_runner
+
+        rule_ids = list(rule_ids or [])
+        if not rule_ids:
+            rule_ids = list(settings.RULE_IDS or [])
+        if not rule_ids:
+            return {'ok': False, 'code': 400, 'error': '未提供规则且未配置默认规则 RULE_IDS'}
+
+        batch_id = f"gwbind-{int(time.time())}"
+        gateway_url = settings.GATEWAY_URL
+        results = []
+        for site_id in site_ids:
+            result = await gateway_defense_task_runner.execute(
+                site_id=site_id,
+                gateway_url=gateway_url,
+                auto_provision=True,
+                rule_ids=rule_ids,
+                batch_id=batch_id,
+            )
+            results.append({
+                'site_id': site_id,
+                'ok': result['ok'],
+                'job_id': result.get('job_id'),
+                'domain': result.get('domain', ''),
+                'error': result.get('error', ''),
+            })
+
+        queued = sum(1 for r in results if r['ok'])
+        return {
+            'ok': True,
+            'data': {
+                'batch_id': batch_id,
+                'total': len(results),
+                'queued': queued,
+                'rejected': len(results) - queued,
+                'results': results,
+            },
         }
     
     async def get_gateway_credentials(self, site_id: int) -> dict:

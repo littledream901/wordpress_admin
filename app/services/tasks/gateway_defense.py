@@ -88,16 +88,22 @@ class GatewayDefenseTaskRunner(TaskRunner):
         sdk_inject: bool = True,
         gateway_site_id: str | None = None,
         batch_id: str = "",
+        auto_provision: bool = False,
+        rule_ids: list | None = None,
     ) -> dict:
-        """创建部署任务并后台执行，立即返回 job_id。"""
+        """创建部署任务并后台执行，立即返回 job_id。
+
+        auto_provision=True 时，后台先自动「建站 + 绑定规则」拿到 site_key/site_secret，
+        再走部署流程；此时 site_key/site_secret/gateway_site_id 可留空（由自动建站回填）。
+        """
         from app.controllers.site_pipeline import site_controller
 
         site = await site_controller.get(id=site_id)
         if not site:
             return {"ok": False, "code": 404, "error": f"站点不存在: id={site_id}"}
 
-        # 密钥必须成对提供
-        if bool(site_key) != bool(site_secret):
+        # 密钥必须成对提供（自动建站模式下无需外部密钥）
+        if not auto_provision and bool(site_key) != bool(site_secret):
             return {"ok": False, "code": 400, "error": "site_key 和 site_secret 必须同时提供"}
 
         blocked = await _check_blocked(site_id)
@@ -117,6 +123,8 @@ class GatewayDefenseTaskRunner(TaskRunner):
                 "sdk_inject": sdk_inject,
                 "has_external_key": bool(site_key),
                 "has_external_gateway_site_id": bool(gateway_site_id),
+                "auto_provision": auto_provision,
+                "rule_ids": list(rule_ids or []),
                 "defense_type": "worker" if site.platform == "shopify" else "nginx_lua",
             },
             batch_id=batch_id,
@@ -125,7 +133,7 @@ class GatewayDefenseTaskRunner(TaskRunner):
 
         asyncio.create_task(self._run(
             job.id, site_id, gateway_url, site_key, site_secret,
-            fail_mode, sdk_inject, gateway_site_id,
+            fail_mode, sdk_inject, gateway_site_id, auto_provision, rule_ids,
         ))
         return {
             "ok": True,
@@ -158,6 +166,8 @@ class GatewayDefenseTaskRunner(TaskRunner):
         fail_mode: str,
         sdk_inject: bool,
         gateway_site_id: str | None,
+        auto_provision: bool,
+        rule_ids: list | None,
     ):
         """信号量内执行，全程不向外抛异常（后台任务异常无人接管）。"""
         sem = await _get_semaphore()
@@ -168,7 +178,8 @@ class GatewayDefenseTaskRunner(TaskRunner):
                 return
             try:
                 await self._run_impl(job, site_id, gateway_url, site_key, site_secret,
-                                     fail_mode, sdk_inject, gateway_site_id)
+                                     fail_mode, sdk_inject, gateway_site_id,
+                                     auto_provision, rule_ids)
             except Exception as e:
                 _log.exception("[gateway_defense] 任务执行异常: job_id=%s", job_id)
                 await self._safe_fail(job, site_id, e)
@@ -183,6 +194,8 @@ class GatewayDefenseTaskRunner(TaskRunner):
         fail_mode: str,
         sdk_inject: bool,
         gateway_site_id: str | None,
+        auto_provision: bool,
+        rule_ids: list | None,
     ):
         from app.controllers.site_pipeline import site_controller
 
@@ -214,6 +227,10 @@ class GatewayDefenseTaskRunner(TaskRunner):
             job.finished_at = datetime.now()
             await job.save()
             return
+
+        if auto_provision:
+            await self._update_step(job, "provisioning")
+            site_key, site_secret, gateway_site_id = await self._auto_provision(site, rule_ids)
 
         service = (
             CloudflareWorkerDefenseService() if site.platform == "shopify"
@@ -259,6 +276,34 @@ class GatewayDefenseTaskRunner(TaskRunner):
         )
         # _complete_job 只改内存中的 pipeline_log，需显式落库
         await site.save()
+
+    async def _auto_provision(self, site, rule_ids: list | None) -> tuple[str, str, str]:
+        """自动建站 + 绑定规则，回写凭证，返回 (site_key, site_secret, gateway_site_id)。
+
+        幂等：本地已有 gateway_site_id 时跳过建站，直接复用并重新绑定规则。
+        """
+        from app.services.gateway_defense.admin_client import GatewayAdminClient
+        from app.settings.config import settings
+
+        client = GatewayAdminClient()
+        gateway_site_id = site.gateway_site_id
+        if not gateway_site_id:
+            created = await client.create_site(
+                app_id=settings.GATEWAY_APP_ID,
+                name=site.domain or f"site-{site.id}",
+                domain=site.domain or "",
+            )
+            new_id = created.get("id")
+            if not new_id:
+                raise RuntimeError("创建网关站点失败：未返回站点ID")
+            site.gateway_site_id = str(new_id)
+            site.gateway_site_key = created.get("site_key") or ""
+            site.gateway_site_secret = created.get("site_secret") or ""
+            await site.save()
+            gateway_site_id = str(new_id)
+
+        await client.bind_rules(int(gateway_site_id), list(rule_ids or []))
+        return site.gateway_site_key or "", site.gateway_site_secret or "", gateway_site_id
 
     # ── 失败兜底 ──
 

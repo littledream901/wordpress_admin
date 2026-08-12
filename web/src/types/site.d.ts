@@ -68,3 +68,26 @@ export interface BatchDynadotNsParams {
   site_ids: number[]
   ns_list: string
 }
+
+/** 网关防御规则类型（scoring=打分 / decision=决策） */
+export type GatewayRuleKind = 'scoring' | 'decision'
+
+/** 网关防御规则条目（对应后端 GatewayRuleItem） */
+export interface GatewayRuleItem {
+  id: number
+  name: string
+  kind?: GatewayRuleKind
+}
+
+/** 网关防御规则列表响应（对应后端 GatewayRuleListResponse） */
+export interface GatewayRuleListResponse {
+  items: GatewayRuleItem[]
+  total: number
+}
+
+/** 批量绑定网关请求参数 */
+export interface BatchBindGatewayRulesParams {
+  site_ids: number[]
+  /** 留空表示使用环境变量默认规则 RULE_IDS */
+  rule_ids?: number[]
+}

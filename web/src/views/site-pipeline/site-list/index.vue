@@ -110,6 +110,27 @@
             将为每个站点生成独立的密钥对；已配置密钥的站点会复用原有密钥。
           </n-alert>
         </template>
+        <template v-if="currentBatchAction === 'bind-rules'">
+          <n-form-item label="规则来源" label-placement="left">
+            <n-radio-group v-model:value="batchRuleSource">
+              <n-radio-button value="default">默认规则</n-radio-button>
+              <n-radio-button value="select">选择规则</n-radio-button>
+            </n-radio-group>
+          </n-form-item>
+          <n-form-item v-if="batchRuleSource === 'select'" label="选择规则" label-placement="left">
+            <n-select
+              v-model:value="batchRuleIds"
+              multiple
+              filterable
+              :loading="gatewayRulesLoading"
+              :options="gatewayRuleOptions"
+              placeholder="请选择要绑定的规则"
+            />
+          </n-form-item>
+          <n-alert type="info" :bordered="false" style="margin-top: 8px">
+            {{ batchRuleSource === 'default' ? '将使用环境变量 RULE_IDS 配置的默认规则；本地站点尚未创建网关站点时会自动创建。' : '将为所有选中站点统一绑定所选规则；本地站点尚未创建网关站点时会自动创建。' }}
+          </n-alert>
+        </template>
         <template v-if="currentBatchAction === 'assign'">
           <n-form-item label="分配至部门" label-placement="left">
             <n-tree-select v-model:value="batchAssignDeptId" :options="deptOption" key-field="id" label-field="name" placeholder="留空不改变部门" clearable default-expand-all />
@@ -1117,6 +1138,12 @@ const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
 const availableProxyCount = ref(0)
 
+// 批量绑定规则
+const batchRuleSource = ref('default') // default / select
+const batchRuleIds = ref([])
+const gatewayRuleOptions = ref([])
+const gatewayRulesLoading = ref(false)
+
 // 批量分配弹窗：用户选项与所选部门联动，排除 admin
 const batchAssignUserOption = computed(() => {
   const list = batchAssignDeptId.value
@@ -1176,6 +1203,7 @@ const batchActionLabelMap = {
   'woo-import': '批量导入产品',
   redirect: '批量重定向',
   'gateway-defense': '批量网关防御',
+  'bind-rules': '批量绑定网关',
   'assign-gmail': '批量分配Gmail',
   'assign-proxy': '批量分配代理',
   'unassign-proxy': '批量取消代理',
@@ -1189,6 +1217,7 @@ const batchActions = [
   { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
   { label: '批量网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
+  { label: '批量绑定网关', key: 'bind-rules', icon: 'mdi:shield-link-variant', permission: 'post/api/v1/site-pipeline/site/batch-bind-gateway-rules' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
   { label: '批量分配代理', key: 'assign-proxy', icon: 'mdi:ip-network', permission: 'post/api/v1/hubstudio-proxy/batch-assign-sites' },
   { label: '批量取消代理', key: 'unassign-proxy', icon: 'mdi:ip-network-outline', permission: 'post/api/v1/hubstudio-proxy/batch-unassign' },
@@ -1209,8 +1238,28 @@ function handleBatchActionSelect(key) {
   batchExtraTargetUrl.value = ''
   batchAssignDeptId.value = null
   batchAssignTo.value = null
+  batchRuleSource.value = 'default'
+  batchRuleIds.value = []
   if (key === 'assign-proxy') loadAvailableProxyCount()
+  if (key === 'bind-rules') loadGatewayRules()
   showBatchConfirm.value = true
+}
+
+async function loadGatewayRules() {
+  gatewayRulesLoading.value = true
+  try {
+    const res = await api.getGatewayRules({ status: 'published' })
+    const items = res?.data?.items || []
+    gatewayRuleOptions.value = items.map((r) => ({
+      label: `${r.name}${r.kind === 'scoring' ? '（打分）' : '（决策）'}`,
+      value: r.id,
+    }))
+  } catch (e) {
+    gatewayRuleOptions.value = []
+    message.error(e?.response?.data?.msg || '规则列表加载失败')
+  } finally {
+    gatewayRulesLoading.value = false
+  }
 }
 
 function cancelBatchAction() {
@@ -1315,6 +1364,35 @@ async function executeBatchAction() {
       currentBatchAction.value = ''
       reload()
       return  // 异步后台任务，不展示结果表
+    } else if (action === 'bind-rules') {
+      if (batchRuleSource.value === 'select' && !batchRuleIds.value.length) {
+        throw new Error('请选择要绑定的规则')
+      }
+      res = await api.batchBindGatewayRules({
+        site_ids: ids,
+        rule_ids: batchRuleSource.value === 'default' ? [] : batchRuleIds.value,
+      })
+      // 异步任务队列：后台自动「建站 → 绑定规则 → 部署防御层」
+      const bindData = res?.data ?? {}
+      const bindQueued = bindData.queued ?? 0
+      const bindRejected = bindData.rejected ?? 0
+      notification.create({
+        type: bindRejected > 0 ? 'warning' : 'info',
+        title: '批量绑定网关已提交',
+        content: () => h('div', { style: 'line-height: 1.8' }, [
+          `已入队 ${bindQueued} / ${bindData.total ?? ids.length} 个站点`,
+          bindRejected > 0 ? `，${bindRejected} 个被拒绝（重复任务或站点不存在）` : '',
+          h('br'),
+          h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
+        ]),
+        duration: 15000,
+        closable: true,
+      })
+      showBatchConfirm.value = false
+      checkedRowKeys.value = []
+      currentBatchAction.value = ''
+      reload()
+      return  // 异步后台任务，不展示结果表
     } else if (action === 'assign-gmail') {
       res = await gmailApi.batchAutoAssign(ids)
     } else if (action === 'assign') {
@@ -1376,7 +1454,7 @@ async function executeBatchAction() {
     currentBatchAction.value = ''
     reload()
   } catch (e) {
-    message.error(e?.response?.data?.msg || '批量操作失败')
+    message.error(e?.response?.data?.msg || e?.message || '批量操作失败')
     throw e
   } finally {
     batchConfirmLoading.value = false

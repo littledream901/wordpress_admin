@@ -143,6 +143,37 @@ class Settings(BaseSettings):
     GMAIL_REGISTRATION_DEFAULT_ALIAS: str = "info"
     """批量获取待注册站点时使用的默认邮箱别名前缀（Gmail 前缀，如 info@example.com）"""
 
+    # ── 网关防御 Admin-API ──
+    GATEWAY_ADMIN_BASE_URL: str = ""
+    """网关管理后台地址（对应 admin-api 的 BASE_URL，不含末尾斜杠）"""
+    GATEWAY_ADMIN_API_KEY: str = ""
+    """用户 API Key（fy_ 前缀），用于调用网关 admin-api"""
+    GATEWAY_APP_ID: int = 1
+    """网关侧应用 ID（创建网关站点时的 app_id）"""
+    GATEWAY_URL: str = "https://gateway.foxfingerlab.com"
+    """网关接入地址（部署防御层时 worker/lua 指向的网关，区别于 GATEWAY_ADMIN_BASE_URL）"""
+    RULE_IDS: typing.List[int] = []
+    """默认绑定的防御规则 ID 列表，支持 JSON 数组或逗号分隔，如 [1,2,3]"""
+
+    @field_validator("RULE_IDS", mode="before")
+    @classmethod
+    def parse_rule_ids(cls, v):
+        """兼容 RULE_IDS 的 JSON 数组与逗号分隔格式。"""
+        if v is None:
+            return []
+        if isinstance(v, (list, tuple)):
+            return [int(x) for x in v if str(x).strip().isdigit()]
+        s = str(v).strip()
+        if not s or s == "[]":
+            return []
+        if s.startswith("["):
+            s = s.strip("[]")
+        parts = [p.strip() for p in s.replace("，", ",").split(",") if p.strip()]
+        try:
+            return [int(p) for p in parts]
+        except ValueError:
+            return []
+
     def validate_production_settings(self) -> list[str]:
         """校验生产环境关键配置，返回告警列表。
 
