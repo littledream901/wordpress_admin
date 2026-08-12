@@ -2,6 +2,9 @@
   <CommonPage title="Gmail 企业邮箱注册">
     <template #action>
       <n-space>
+        <n-tag v-if="agentOnline" type="success" round size="small">Agent 在线</n-tag>
+        <n-tag v-else type="warning" round size="small">Agent 离线</n-tag>
+        <n-button text size="tiny" @click="loadAgentStatus">刷新</n-button>
         <n-button v-permission="'post/api/v1/gmail/registration/create'" type="primary" @click="handleAdd">
           新增注册
         </n-button>
@@ -293,6 +296,16 @@
           <n-input-number v-model:value="actionForm.max_price" :min="0" placeholder="不限" />
         </n-form-item>
       </n-form>
+      <n-space v-else-if="actionType === 'createEnv'" vertical :size="12">
+        <p>确定要为该注册记录创建 HubStudio 环境吗？</p>
+        <n-space align="center">
+          <n-switch v-model:value="actionForm.execute_now" />
+          <n-text depth="3">同步执行 (Agent 离线时后端直接调用 Connector)</n-text>
+        </n-space>
+        <n-alert v-if="!agentOnline" type="warning" :bordered="false" size="small">
+          Agent 离线，建议开启同步执行
+        </n-alert>
+      </n-space>
       <p v-else-if="actionType === 'waitSms'">等待接收验证码，超时时间 {{ actionForm.timeout }} 秒</p>
       <p v-else-if="actionType === 'confirmSms'">确认 SMS 使用完成，系统将标记为扣款。</p>
       <p v-else>确定要执行此操作吗？</p>
@@ -421,16 +434,18 @@
 </template>
 
 <script setup>
-import { h, reactive, ref } from 'vue'
+import { h, reactive, ref, onMounted } from 'vue'
 import {
   NButton, NButtonGroup, NTag, NSelect, NSpace, NGrid, NGi, NText, NDivider,
-  NPopconfirm, NPopover, NInputNumber, NInput, NTooltip, NModal, useMessage, useDialog,
+  NPopconfirm, NPopover, NInputNumber, NInput, NTooltip, NModal, NSwitch, NAlert, useMessage, useDialog,
 } from 'naive-ui'
 import TheIcon from '@/components/icon/TheIcon.vue'
 import api from '@/api/gmail'
+import sitePipelineApi from '@/api/site-pipeline'
 
 const message = useMessage()
 const dialog = useDialog()
+const agentOnline = ref(false)
 const queryItems = reactive({
   alias: '',
   domain: '',
@@ -584,7 +599,14 @@ const actionModalTitle = ref('')
 const actionModalLoading = ref(false)
 const actionType = ref('')
 const actionTargetRow = ref(null)
-const actionForm = reactive({ country_id: 0, application_id: 2, max_price: null, timeout: 300, interval: 10 })
+const actionForm = reactive({ 
+  country_id: 0, 
+  application_id: 2, 
+  max_price: null, 
+  timeout: 300, 
+  interval: 10,
+  execute_now: false  // 同步执行开关
+})
 const actionFormRef = ref(null)
 
 // ── 新增/编辑弹窗 ──

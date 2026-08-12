@@ -36,7 +36,7 @@ class GmailRegistration(BaseModel, SoftDeleteMixin, TimestampMixin):
 
     # ── 转发配置 ──
     forward_to = fields.CharField(max_length=255, default='', description='ImprovMX 转发目标邮箱')
-    recovery_email = fields.CharField(max_length=255, default='', description='恢复邮箱（自动生成：alias@domain）')
+    recovery_email = fields.CharField(max_length=255, default='', description='恢复邮箱（未分配 Outlook 时为 alias@domain，已分配后为 Outlook 的 recovery_email）')
     api_url = fields.CharField(max_length=500, default='', description='API URL')
     two_fa_key = fields.CharField(max_length=255, default='', description='2FA Key')
 
