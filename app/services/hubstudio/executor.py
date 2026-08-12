@@ -21,7 +21,7 @@ from .tasks import (
 # 这些常量/函数同样在 __init__.py 中 re-export
 # ══════════════════════════════════════════════════════════════════════════
 
-from .tasks._common import REMARK_FIELD_MAP
+from .tasks._common import REMARK_FIELDS_MAP, PAYLOAD_FIELDS_MAP
 # 从 create_env 导出的工具函数
 from .tasks.create_env import (
     build_container_name,
@@ -129,7 +129,8 @@ class HubStudioLocalExecutor:
     ADD_ACCOUNT_PORT = ADD_ACCOUNT_PORT
     ADD_ACCOUNT_PATH = ADD_ACCOUNT_PATH
     ADD_ACCOUNT_TIMEOUT = ADD_ACCOUNT_TIMEOUT
-    REMARK_FIELD_MAP = REMARK_FIELD_MAP
+    REMARK_FIELDS_MAP = REMARK_FIELDS_MAP
+    PAYLOAD_FIELDS_MAP = PAYLOAD_FIELDS_MAP
 
 
 def create_executor_from_config(config: dict) -> Tuple[HubStudioRuntime, HubStudioLocalExecutor]:

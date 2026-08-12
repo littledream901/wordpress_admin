@@ -8,7 +8,7 @@
 from app.core.exceptions import HubStudioError
 from app.utils.config_reader import get_config
 from ..runtime import HubStudioRuntime
-from ._common import build_container_name, build_remark, REMARK_FIELD_MAP
+from ._common import build_container_name, build_remark
 
 
 def get_tag_code_by_name(runtime: HubStudioRuntime, target_tag_name: str) -> tuple:
