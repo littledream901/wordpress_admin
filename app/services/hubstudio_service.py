@@ -785,6 +785,17 @@ class HubStudioOrchestrationService:
 
         if registration:
             logger.info(f"[remark] 站点 {site.domain} 找到注册记录: ID={registration.id}, status={registration.registration_status}")
+            # 查询关联的 Outlook 账号，直接读取 api_url / recovery_email / username / password
+            outlook = None
+            if registration.outlook_account_id:
+                from app.models.outlook_account import OutlookAccount
+                outlook = await OutlookAccount.filter(
+                    id=registration.outlook_account_id,
+                    is_deleted=False,
+                ).first()
+            outlook_api_url = getattr(outlook, "api_url", "") if outlook else ""
+            outlook_recovery_email = getattr(outlook, "recovery_email", "") if outlook else ""
+
             field_map = {
                 "LastName": getattr(registration, "last_name", "") or "",
                 "FirstName": getattr(registration, "first_name", "") or "",
@@ -793,8 +804,8 @@ class HubStudioOrchestrationService:
                 "Province/State": getattr(registration, "province_state", "") or "",
                 "Zip_code": getattr(registration, "zip_code", "") or "",
                 "Country": getattr(registration, "country", "") or "",
-                "Recovery_Email": getattr(registration, "recovery_email", "") or "",
-                "API_URL": getattr(registration, "api_url", "") or "",
+                "Recovery_Email": getattr(registration, "recovery_email", "") or outlook_recovery_email,
+                "API_URL": getattr(registration, "api_url", "") or outlook_api_url,
             }
             for key, val in field_map.items():
                 v = str(val).strip() if val else ""
@@ -845,17 +856,11 @@ class HubStudioOrchestrationService:
                 payload["registration_email"] = registration.registration_email
             
             # 注入 Outlook 账号密码（用于 ImprovMX 注册）
-            if registration.outlook_account_id:
-                from app.models.outlook_account import OutlookAccount
-                outlook = await OutlookAccount.filter(
-                    id=registration.outlook_account_id,
-                    is_deleted=False,
-                ).first()
-                if outlook:
-                    if not payload.get("outlook_username"):
-                        payload["outlook_username"] = outlook.username or ""
-                    if not payload.get("outlook_password"):
-                        payload["outlook_password"] = outlook.password or ""
+            if outlook:
+                if not payload.get("outlook_username"):
+                    payload["outlook_username"] = outlook.username or ""
+                if not payload.get("outlook_password"):
+                    payload["outlook_password"] = outlook.password or ""
             elif registration.outlook_account_username:
                 # 兼容旧数据：直接使用冗余字段
                 if not payload.get("outlook_username"):

@@ -60,6 +60,23 @@ class GmailRegistrationController(CRUDBase[GmailRegistration, GmailRegistrationC
         """按别名和域名查询（唯一约束）"""
         return await self.model.filter(alias=alias, domain=domain).first()
 
+    async def list_with_outlook(self, page: int, page_size: int, search: Q = Q(), order: list = None):
+        """列表查询，动态填充关联 Outlook 的 api_url（直接读关联，不依赖冗余字段）"""
+        total, objs = await self.list(page=page, page_size=page_size, search=search, order=order or ['-id'])
+        data = [await obj.to_dict() for obj in objs]
+
+        outlook_ids = {obj.outlook_account_id for obj in objs if obj.outlook_account_id}
+        if outlook_ids:
+            outlooks = await OutlookAccount.filter(id__in=outlook_ids, is_deleted=False).all()
+            outlook_map = {o.id: o for o in outlooks}
+            for i, obj in enumerate(objs):
+                if obj.outlook_account_id and not data[i].get("api_url"):
+                    outlook = outlook_map.get(obj.outlook_account_id)
+                    if outlook and outlook.api_url:
+                        data[i]["api_url"] = outlook.api_url
+
+        return total, data
+
     # ── Outlook 邮箱分配 ──
 
     @staticmethod

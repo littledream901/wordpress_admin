@@ -50,10 +50,9 @@ async def list_registration(
         q &= Q(outlook_account_id__isnull=False)
     elif outlook_assigned == 'no':
         q &= Q(outlook_account_id__isnull=True)
-    total, objs = await gmail_registration_controller.list(
+    total, data = await gmail_registration_controller.list_with_outlook(
         page=page, page_size=page_size, search=q, order=['-id']
     )
-    data = [await obj.to_dict() for obj in objs]
     return SuccessExtra(data=data, total=total, page=page, page_size=page_size)
 
 
