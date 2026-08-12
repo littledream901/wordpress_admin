@@ -194,7 +194,17 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
                 results[result_key] = {"ok": False, "error": str(e)[:200]}
                 executor.logger.error(f"[create_account] {account_label} 账号创建失败: {e}")
 
-    # ── 1. 创建 ImprovMX 账号 ──
+    # ── 1. 创建 Outlook 账号 ──
+    create_platform_account(
+        "outlook_account",
+        "Outlook",
+        payload.get("outlook_username", ""),
+        payload.get("outlook_password", ""),
+        "自定义平台",
+        "https://login.microsoftonline.com/",
+    )
+
+    # ── 2. 创建 ImprovMX 账号 ──
     create_platform_account(
         "improvmx_account",
         "ImprovMX",
@@ -202,16 +212,6 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         payload.get("improvmx_password", ""),
         "自定义平台",
         "https://app.improvmx.com/signup",
-    )
-
-    # ── 2. 创建 Gmail Workspace 账号 ──
-    create_platform_account(
-        "gmail_workspace_account",
-        "Gmail Workspace",
-        payload.get("workspace_username", ""),
-        payload.get("workspace_password", ""),
-        "自定义平台",
-        "https://workspace.google.com/essentials/signup/verify/emailstart",
     )
 
     # ── 3. 创建 Gmail 个人账号 ──
@@ -318,29 +318,29 @@ def execute_create_account(executor, job: dict, payload: dict) -> dict:
         + (f", errors={errors}" if errors else "")
     )
 
-    # ── 汇总四类账号凭证信息 ──
+    # ── 汇总账号凭证信息 ──
     accounts_info = {}
 
-    # 1. ImprovMX 账号
+    # 1. Outlook 账号
+    outlook_username = payload.get("outlook_username", "")
+    outlook_password = payload.get("outlook_password", "")
+    if outlook_username and outlook_password:
+        accounts_info["outlook"] = {
+            "login_url": "https://login.microsoftonline.com/",
+            "username": outlook_username,
+            "password": outlook_password,
+            "note": "Microsoft Outlook 邮箱",
+        }
+
+    # 2. ImprovMX 账号
     improvmx_username = payload.get("improvmx_username", "")
     improvmx_password = payload.get("improvmx_password", "")
     if improvmx_username and improvmx_password:
         accounts_info["improvmx"] = {
-            "login_url": "https://app.improvmx.com/signup",
+            "login_url": "https://app.improvmx.com/login",
             "username": improvmx_username,
             "password": improvmx_password,
             "note": "邮件转发管理后台",
-        }
-
-    # 2. Gmail Workspace 账号
-    workspace_username = payload.get("workspace_username", "")
-    workspace_password = payload.get("workspace_password", "")
-    if workspace_username and workspace_password:
-        accounts_info["gmail_workspace"] = {
-            "login_url": "https://workspace.google.com/essentials/signup/verify/emailstart",
-            "username": workspace_username,
-            "password": workspace_password,
-            "note": "Google Workspace 管理控制台",
         }
 
     # 3. Gmail 个人账号

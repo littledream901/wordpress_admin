@@ -69,7 +69,7 @@ def _build_remark_for_create(payload: dict, domain: str) -> str:
         if str(payload.get(field, "")).strip()
     ]
     if parts:
-        return " , ".join(parts)
+        return "----".join(parts)
 
     alias = payload.get("alias", "")
     if alias:

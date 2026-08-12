@@ -835,6 +835,20 @@ class HubStudioOrchestrationService:
         else:
             logger.info(f"[remark] 站点无注册记录和 Gmail 账号，备注为空")
 
+        # 注入 alias、domain、registration_email 字段（供 build_remark 构造 Gmail 账号）
+        if registration:
+            if registration.alias and not payload.get("alias"):
+                payload["alias"] = registration.alias
+            if registration.domain and not payload.get("domain"):
+                payload["domain"] = registration.domain
+            if registration.registration_email and not payload.get("registration_email"):
+                payload["registration_email"] = registration.registration_email
+            logger.info(
+                f"[remark] 已注入 alias={payload.get('alias', 'N/A')} "
+                f"domain={payload.get('domain', 'N/A')} "
+                f"registration_email={payload.get('registration_email', 'N/A')}"
+            )
+
         return payload
 
     # 旧方法名保留别名
@@ -892,28 +906,18 @@ class HubStudioOrchestrationService:
             personal_password = gmail.password
             personal_2fa_key = gmail.two_fa_key or ""
         
-        # Gmail Workspace 和个人 Gmail 账号：支持 env_created 和 completed 状态
-        if registration:
-            # completed 状态：使用注册成功的 Gmail 凭证
-            if registration.registration_status == "completed" and registration.registration_email and registration.password:
-                workspace_username = registration.registration_email
-                workspace_password = registration.password
-                # 如果没有分配 GmailAccount，使用注册邮箱作为个人 Gmail
-                if not personal_username:
-                    personal_username = registration.registration_email
-                    personal_password = registration.password
-                    personal_2fa_key = registration.two_fa_key or ""
-            # env_created 状态：使用 alias@domain 构造 Gmail 凭证
-            elif registration.registration_status == "env_created" and registration.alias and registration.domain and registration.password:
-                # Gmail Workspace 和个人账号都使用 alias@domain
-                workspace_username = f"{registration.alias}@{registration.domain}"
-                workspace_password = registration.password
-                if not personal_username:
-                    personal_username = f"{registration.alias}@{registration.domain}"
-                    personal_password = registration.password
-                    personal_2fa_key = registration.two_fa_key or ""
+        # Gmail Workspace 和个人 Gmail 账号：统一使用 alias@domain，密码硬编码
+        if registration and registration.alias and registration.domain:
+            workspace_username = f"{registration.alias}@{registration.domain}"
+            workspace_password = "Dzht1008aaa"
+            if not personal_username:
+                personal_username = f"{registration.alias}@{registration.domain}"
+                personal_password = "Dzht1008aaa"
+                personal_2fa_key = registration.two_fa_key or ""
 
         payload.update({
+            "outlook_username": outlook_username,
+            "outlook_password": outlook_password,
             "improvmx_username": outlook_username,
             "improvmx_password": outlook_password,
             "workspace_username": workspace_username,
