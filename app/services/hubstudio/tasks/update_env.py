@@ -71,8 +71,22 @@ def execute_update_env(executor, job: dict, payload: dict) -> dict:
     remark = build_remark(payload)
     if remark:
         try:
-            # 使用 update_env 接口更新备注，需要传入当前环境名
-            container_name = payload.get("container_name") or payload.get("domain", f"env_{hub_env_id}")
+            # 先查询当前环境名称（避免修改环境名）
+            env_list = client.get_env_list(current=1, size=1000)
+            current_env = None
+            if env_list.get("code") == 0 and env_list.get("data", {}).get("list"):
+                for env in env_list["data"]["list"]:
+                    if str(env.get("containerCode")) == str(hub_env_id):
+                        current_env = env
+                        break
+            
+            # 使用当前环境名称，不修改
+            if current_env:
+                container_name = current_env.get("containerName", f"env_{hub_env_id}")
+            else:
+                # 查询失败时，使用 payload 中的名称或生成默认名称
+                container_name = payload.get("container_name") or build_container_name(domain)
+            
             client.update_env(int(hub_env_id), container_name, remark=remark)
             result["actions"]["remark"] = "ok"
             result["remark"] = remark
