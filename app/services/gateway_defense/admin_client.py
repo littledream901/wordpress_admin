@@ -1,7 +1,6 @@
 """网关防御 Admin-API 客户端
 
-封装对网关管理后台（admin-api）的 HTTP 调用，对应临时脚本
-``create_site_with_rules.py`` 里的接口：
+封装对网关管理后台（admin-api）的 HTTP 调用，包含以下接口：
 
 - ``GET  /v2/sites``                          站点列表（裸分页体）
 - ``POST /v2/sites``                          创建站点（SuccessResponse 包裹）
