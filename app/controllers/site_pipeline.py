@@ -1126,72 +1126,8 @@ class SitePipelineController:
             gateway_site_id=gateway_site_id,
         )
     
-    async def batch_deploy_gateway_defense(
-        self, 
-        site_ids: list, 
-        gateway_url: str,
-        credentials_map: Optional[dict] = None,
-        fail_mode: str = 'open',
-        sdk_inject: bool = True
-    ) -> dict:
-        """
-        批量部署网关防御（逐站入队，接口秒返回）
-        
-        实际部署由 gateway_defense_task_runner 在后台按信号量并发执行，
-        每个站点一个独立 OperationJob，共享同一 batch_id。
-        
-        Args:
-            site_ids: 站点ID列表
-            gateway_url: 网关地址
-            credentials_map: 每个站点独立的凭证映射
-                {site_id: {gateway_site_id, site_key, site_secret}}
-                未提供时该站点复用数据库中已保存的凭证
-            fail_mode: 失败模式
-            sdk_inject: 是否注入 SDK
-        """
-        from app.services.tasks.gateway_defense import gateway_defense_task_runner
-        
-        batch_id = f"gwdef-{int(time.time())}"
-        results = []
-        for site_id in site_ids:
-            # 逐站点取凭证；未提供则由服务层复用已保存值，缺失时报错
-            cred = (credentials_map or {}).get(site_id) or {}
-            key = cred.get('site_key')
-            secret = cred.get('site_secret')
-            gw_site_id = cred.get('gateway_site_id')
-            
-            result = await gateway_defense_task_runner.execute(
-                site_id=site_id,
-                gateway_url=gateway_url,
-                site_key=key,
-                site_secret=secret,
-                fail_mode=fail_mode,
-                sdk_inject=sdk_inject,
-                gateway_site_id=gw_site_id,
-                batch_id=batch_id,
-            )
-            
-            results.append({
-                'site_id': site_id,
-                'ok': result['ok'],
-                'job_id': result.get('job_id'),
-                'domain': result.get('domain', ''),
-                'error': result.get('error', ''),
-                'has_custom_key': bool(key)
-            })
-        
-        queued = sum(1 for r in results if r['ok'])
-        return {
-            'ok': True,
-            'data': {
-                'batch_id': batch_id,
-                'total': len(results),
-                'queued': queued,
-                'rejected': len(results) - queued,
-                'results': results
-            }
-        }
-    
+
+
     async def list_gateway_rules(self, status: str = 'published') -> dict:
         """查询网关防御规则列表（供前端「选择规则」枚举）。"""
         from app.schemas.gateway_defense import GatewayRuleItem, GatewayRuleListResponse
@@ -1205,10 +1141,11 @@ class SitePipelineController:
         except GatewayAdminError as exc:
             return {'ok': False, 'code': 502, 'error': str(exc)}
 
-    async def batch_bind_gateway_rules(self, site_ids: list, rule_ids: list) -> dict:
-        """批量绑定网关（异步任务队列）。
+    async def batch_deploy_gateway_defense(self, site_ids: list, rule_ids: list) -> dict:
+        """批量部署网关防御（异步任务队列）。
 
-        每个站点一个 OperationJob，后台自动完成「建站 → 绑定规则 → 部署防御层」，
+        每个站点一个 OperationJob，后台逐站自动完成
+        「创建网关站点 → 获取凭证 → 绑定规则 → 部署防御层」，
         接口立即返回 batch_id / queued / rejected，进度到任务中心查看。
         """
         from app.services.tasks.gateway_defense import gateway_defense_task_runner
@@ -1219,7 +1156,7 @@ class SitePipelineController:
         if not rule_ids:
             return {'ok': False, 'code': 400, 'error': '未提供规则且未配置默认规则 RULE_IDS'}
 
-        batch_id = f"gwbind-{int(time.time())}"
+        batch_id = f"gwdef-{int(time.time())}"
         gateway_url = settings.GATEWAY_URL
         results = []
         for site_id in site_ids:

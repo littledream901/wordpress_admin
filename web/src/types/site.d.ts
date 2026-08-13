@@ -85,8 +85,8 @@ export interface GatewayRuleListResponse {
   total: number
 }
 
-/** 批量绑定网关请求参数 */
-export interface BatchBindGatewayRulesParams {
+/** 批量部署网关防御请求参数 */
+export interface BatchDeployGatewayDefenseParams {
   site_ids: number[]
   /** 留空表示使用环境变量默认规则 RULE_IDS */
   rule_ids?: number[]

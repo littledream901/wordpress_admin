@@ -1,7 +1,7 @@
 """
 网关防御功能相关的 Schema 定义
 """
-from typing import Optional, Dict, List
+from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -16,19 +16,6 @@ class GatewayDefenseCreate(BaseModel):
     site_secret: Optional[str] = Field(None, description='站点签名密钥（必须外部提供；留空则复用站点已保存的密钥）')
     fail_mode: str = Field('open', description='失败模式: open / closed')
     sdk_inject: bool = Field(True, description='是否注入 SDK')
-
-
-class GatewayDefenseBatchDeploy(BaseModel):
-    """批量部署网关防御请求"""
-    site_ids: list[int] = Field(..., description='站点ID列表')
-    gateway_url: str = Field(..., description='网关地址')
-    fail_mode: str = Field('open', description='失败模式')
-    sdk_inject: bool = Field(True, description='是否注入 SDK')
-    # 批量部署时每个站点的网关标识与密钥必须逐站提供
-    credentials_map: Optional[Dict[int, Dict[str, str]]] = Field(
-        None,
-        description='站点ID到凭证的映射 {site_id: {gateway_site_id, site_key, site_secret}}',
-    )
 
 
 class GatewayDefenseUpdate(BaseModel):
@@ -55,7 +42,7 @@ class GatewayDefenseResponse(BaseModel):
 
 
 class BatchBindGatewayRulesRequest(BaseModel):
-    """批量绑定网关防御规则请求"""
+    """批量部署网关防御请求"""
     site_ids: List[int] = Field(..., description='站点ID列表')
     rule_ids: List[int] = Field(default_factory=list, description='要绑定的规则ID；留空表示使用环境变量默认规则 RULE_IDS')
 

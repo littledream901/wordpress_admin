@@ -25,7 +25,6 @@ from app.schemas.site_pipeline import (
 )
 from app.schemas.gateway_defense import (
     GatewayDefenseCreate,
-    GatewayDefenseBatchDeploy,
     GatewayDefenseUpdate,
     BatchBindGatewayRulesRequest,
 )
@@ -187,45 +186,26 @@ async def batch_import_products(site_ids: list[int] = Body(...)):
     return Success(data=data)
 
 
-@router.post('/site/batch-gateway-defense', summary='批量部署网关防御')
-async def batch_deploy_gateway_defense(payload: GatewayDefenseBatchDeploy):
-    """
-    批量部署网关防御（逐站入队，接口秒返回）
-    
-    凭证均需外部提供，不自动生成：
-    - 通过 credentials_map 为每个站点指定 gateway_site_id / site_key / site_secret
-    - 未在 credentials_map 中提供的站点，复用数据库已保存的凭证；缺失则该站点部署失败
-    
-    返回 batch_id 与每站 job_id，进度请在任务中心查看。
-    """
-    result = await site_pipeline_controller.batch_deploy_gateway_defense(
-        site_ids=payload.site_ids,
-        gateway_url=payload.gateway_url,
-        credentials_map=payload.credentials_map,
-        fail_mode=payload.fail_mode,
-        sdk_inject=payload.sdk_inject
-    )
-    data = result['data']
-    return Success(data=data, msg=f'已入队 {data["queued"]}/{data["total"]} 个站点，请在任务中心查看进度')
-
-
 @router.get('/site/gateway-rules', summary='查询网关防御规则列表')
 async def list_gateway_rules(status: str = Query('published', description='规则状态过滤')):
+    """查询网关防御规则列表，供前端批量部署时「选择规则」枚举。"""
     result = await site_pipeline_controller.list_gateway_rules(status=status)
     if result['ok']:
         return Success(data=result['data'])
     return Fail(code=result.get('code', 502), msg=result.get('error'))
 
 
-@router.post('/site/batch-bind-gateway-rules', summary='批量绑定网关')
-async def batch_bind_gateway_rules(payload: BatchBindGatewayRulesRequest):
+@router.post('/site/batch-gateway-defense', summary='批量部署网关防御')
+async def batch_deploy_gateway_defense(payload: BatchBindGatewayRulesRequest):
     """
-    批量绑定网关（异步任务队列）。
-
+    批量部署网关防御（自动建站模式，逐站入队，接口秒返回）
+    
+    自动完成「创建网关站点 → 获取凭证 → 绑定规则 → 部署防御层」全流程。
     规则来源：默认规则来自环境变量 RULE_IDS，或前端传入 rule_ids。
-    后台自动完成「建站 → 绑定规则 → 部署防御层」，进度到任务中心查看。
+    
+    返回 batch_id 与每站 job_id，进度请在任务中心查看。
     """
-    result = await site_pipeline_controller.batch_bind_gateway_rules(
+    result = await site_pipeline_controller.batch_deploy_gateway_defense(
         site_ids=payload.site_ids,
         rule_ids=payload.rule_ids,
     )
@@ -233,6 +213,8 @@ async def batch_bind_gateway_rules(payload: BatchBindGatewayRulesRequest):
         data = result['data']
         return Success(data=data, msg=f'已入队 {data["queued"]}/{data["total"]} 个站点，请在任务中心查看进度')
     return Fail(code=result.get('code', 400), msg=result.get('error'))
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -103,14 +103,6 @@
           <n-input v-model:value="batchExtraTargetUrl" placeholder="https://target.com/$1" />
         </n-form-item>
         <template v-if="currentBatchAction === 'gateway-defense'">
-          <n-form-item label="网关地址" label-placement="left">
-            <n-input v-model:value="batchGatewayUrl" placeholder="https://gateway.foxfingerlab.com" />
-          </n-form-item>
-          <n-alert type="info" :bordered="false" style="margin-top: 8px">
-            将为每个站点生成独立的密钥对；已配置密钥的站点会复用原有密钥。
-          </n-alert>
-        </template>
-        <template v-if="currentBatchAction === 'bind-rules'">
           <n-form-item label="规则来源" label-placement="left">
             <n-radio-group v-model:value="batchRuleSource">
               <n-radio-button value="default">默认规则</n-radio-button>
@@ -128,7 +120,8 @@
             />
           </n-form-item>
           <n-alert type="info" :bordered="false" style="margin-top: 8px">
-            {{ batchRuleSource === 'default' ? '将使用环境变量 RULE_IDS 配置的默认规则；本地站点尚未创建网关站点时会自动创建。' : '将为所有选中站点统一绑定所选规则；本地站点尚未创建网关站点时会自动创建。' }}
+            {{ batchRuleSource === 'default' ? '将使用环境变量 RULE_IDS 配置的默认规则。' : '将为所有选中站点统一绑定所选规则。' }}
+            后台自动完成「创建网关站点 → 获取凭证 → 绑定规则 → 部署防御层」全流程。
           </n-alert>
         </template>
         <template v-if="currentBatchAction === 'assign'">
@@ -1133,12 +1126,11 @@ const batchResults = ref([])
 const batchSummary = ref('')
 const batchExtraNsList = ref('')
 const batchExtraTargetUrl = ref('')
-const batchGatewayUrl = ref('https://gateway.foxfingerlab.com')
 const batchAssignDeptId = ref(null)
 const batchAssignTo = ref(null)
 const availableProxyCount = ref(0)
 
-// 批量绑定规则
+// 批量部署网关防御：规则选择
 const batchRuleSource = ref('default') // default / select
 const batchRuleIds = ref([])
 const gatewayRuleOptions = ref([])
@@ -1202,8 +1194,7 @@ const batchActionLabelMap = {
   provision: '批量建站',
   'woo-import': '批量导入产品',
   redirect: '批量重定向',
-  'gateway-defense': '批量网关防御',
-  'bind-rules': '批量绑定网关',
+  'gateway-defense': '批量部署网关防御',
   'assign-gmail': '批量分配Gmail',
   'assign-proxy': '批量分配代理',
   'unassign-proxy': '批量取消代理',
@@ -1216,8 +1207,7 @@ const batchActions = [
   { label: '批量建站', key: 'provision', icon: 'mdi:rocket-launch', permission: 'post/api/v1/site-pipeline/site/batch-provision' },
   { label: '批量导入产品', key: 'woo-import', icon: 'mdi:import', permission: 'post/api/v1/site-pipeline/site/batch-woo-import' },
   { label: '批量重定向', key: 'redirect', icon: 'mdi:arrow-decision', permission: 'post/api/v1/site-pipeline/site/batch-redirect' },
-  { label: '批量网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
-  { label: '批量绑定网关', key: 'bind-rules', icon: 'mdi:shield-link-variant', permission: 'post/api/v1/site-pipeline/site/batch-bind-gateway-rules' },
+  { label: '批量部署网关防御', key: 'gateway-defense', icon: 'mdi:shield-check', permission: 'post/api/v1/site-pipeline/site/batch-gateway-defense' },
   { label: '批量分配Gmail', key: 'assign-gmail', icon: 'mdi:email-arrow-right', permission: 'post/api/v1/gmail/batch-auto-assign' },
   { label: '批量分配代理', key: 'assign-proxy', icon: 'mdi:ip-network', permission: 'post/api/v1/hubstudio-proxy/batch-assign-sites' },
   { label: '批量取消代理', key: 'unassign-proxy', icon: 'mdi:ip-network-outline', permission: 'post/api/v1/hubstudio-proxy/batch-unassign' },
@@ -1241,9 +1231,11 @@ function handleBatchActionSelect(key) {
   batchRuleSource.value = 'default'
   batchRuleIds.value = []
   if (key === 'assign-proxy') loadAvailableProxyCount()
-  if (key === 'bind-rules') loadGatewayRules()
+  if (key === 'gateway-defense') loadGatewayRules()
   showBatchConfirm.value = true
 }
+
+
 
 async function loadGatewayRules() {
   gatewayRulesLoading.value = true
@@ -1323,25 +1315,13 @@ async function executeBatchAction() {
     } else if (action === 'redirect') {
       res = await api.batchRedirect(ids, batchExtraTargetUrl.value)
     } else if (action === 'gateway-defense') {
-      // 凭证必须外部提供：仅下发已配置齐全的站点，缺失的由后端标记失败
-      const rows = $table.value?.tableData || []
-      const credentialsMap = {}
-      for (const id of ids) {
-        const row = rows.find(r => r.id === id)
-        if (row?.gateway_site_id && row?.gateway_site_key && row?.gateway_site_secret) {
-          credentialsMap[id] = {
-            gateway_site_id: row.gateway_site_id,
-            site_key: row.gateway_site_key,
-            site_secret: row.gateway_site_secret,
-          }
-        }
+      // 自动建站模式：后台自动「创建网关站点 → 获取凭证 → 绑定规则 → 部署防御层」
+      if (batchRuleSource.value === 'select' && !batchRuleIds.value.length) {
+        throw new Error('请选择要绑定的规则')
       }
       res = await api.batchDeployGatewayDefense({
         site_ids: ids,
-        gateway_url: batchGatewayUrl.value || 'https://gateway.foxfingerlab.com',
-        credentials_map: credentialsMap,
-        fail_mode: 'open',
-        sdk_inject: true,
+        rule_ids: batchRuleSource.value === 'default' ? [] : batchRuleIds.value,
       })
       // 接入任务队列后为异步入队，展示汇总并引导任务中心
       const gwData = res?.data ?? {}
@@ -1353,35 +1333,6 @@ async function executeBatchAction() {
         content: () => h('div', { style: 'line-height: 1.8' }, [
           `已入队 ${queued} / ${gwData.total ?? ids.length} 个站点`,
           rejected > 0 ? `，${rejected} 个被拒绝（重复任务或站点不存在）` : '',
-          h('br'),
-          h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
-        ]),
-        duration: 15000,
-        closable: true,
-      })
-      showBatchConfirm.value = false
-      checkedRowKeys.value = []
-      currentBatchAction.value = ''
-      reload()
-      return  // 异步后台任务，不展示结果表
-    } else if (action === 'bind-rules') {
-      if (batchRuleSource.value === 'select' && !batchRuleIds.value.length) {
-        throw new Error('请选择要绑定的规则')
-      }
-      res = await api.batchBindGatewayRules({
-        site_ids: ids,
-        rule_ids: batchRuleSource.value === 'default' ? [] : batchRuleIds.value,
-      })
-      // 异步任务队列：后台自动「建站 → 绑定规则 → 部署防御层」
-      const bindData = res?.data ?? {}
-      const bindQueued = bindData.queued ?? 0
-      const bindRejected = bindData.rejected ?? 0
-      notification.create({
-        type: bindRejected > 0 ? 'warning' : 'info',
-        title: '批量绑定网关已提交',
-        content: () => h('div', { style: 'line-height: 1.8' }, [
-          `已入队 ${bindQueued} / ${bindData.total ?? ids.length} 个站点`,
-          bindRejected > 0 ? `，${bindRejected} 个被拒绝（重复任务或站点不存在）` : '',
           h('br'),
           h('a', { href: 'javascript:void(0)', onClick: goToJobs, style: 'color: var(--primary-color); text-decoration: underline; cursor: pointer' }, '点击前往任务中心查看'),
         ]),
